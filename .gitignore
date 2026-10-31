@@ -1,0 +1,19 @@
+# Secrets
+.env
+*.env
+*credentials*
+
+# Java / build
+target/
+build/
+out/
+*.class
+*.war
+*.jar
+.gradle/
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
