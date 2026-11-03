@@ -21,3 +21,7 @@ out/
 # Local research working files (findings live in docs/PLAN.md)
 reports/
 research_notes/
+
+# Frontend
+frontend/node/
+frontend/node_modules/

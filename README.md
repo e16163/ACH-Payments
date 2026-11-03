@@ -79,10 +79,42 @@ JDBC URL: `jdbc:mysql://localhost:3306/ach_payments`
 
 > Keep credentials out of this repo. Store them locally, e.g. in `~/dev/mysql-credentials.txt` or a `.env` file. Both are gitignored.
 
+### 5. Build and run
+
+The app reads `JDBC_URL`, `DB_USER` and `DB_PASSWORD` from the environment. Put them in `~/dev/mysql-credentials.txt` as `KEY=value` lines, then create `~/dev/tomcat/bin/setenv.sh` so Tomcat loads them:
+
+```sh
+#!/bin/sh
+set -a
+. "$HOME/dev/mysql-credentials.txt"
+set +a
+```
+
+Build the app and deploy it. `mvn package` also downloads Node and builds the React app, so you don't need Node installed.
+
+```sh
+mvn package                                  # runs tests, builds target/ach.war
+cp target/ach.war ~/dev/tomcat/webapps/
+~/dev/tomcat/bin/shutdown.sh; ~/dev/tomcat/bin/startup.sh
+```
+
+Then check it:
+- http://localhost:8080/ach/ should show **Database: DB OK**.
+- http://localhost:8080/ach/api/health should return `{"db":"OK"}`.
+
+For frontend work with live reload, keep Tomcat running and run:
+
+```sh
+cd frontend && ./node/npm run dev
+```
+
+Then open http://localhost:5173/ach/.
+
 ## Status
 
 - [x] Java 21, Tomcat 11, MySQL installed locally
-- [ ] Requirements document
+- [x] Requirements and implementation plan ([docs/PLAN.md](docs/PLAN.md))
+- [x] Step 0: Spring Boot + React skeleton deployed on Tomcat, with DB health check
 - [ ] Database schema
 - [ ] Same Day ACH payments service
 - [ ] Fraud monitoring service
