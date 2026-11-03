@@ -80,9 +80,10 @@
                         <goals><goal>install-node-and-npm</goal></goals>
                     </execution>
                     <execution>
-                        <id>npm-install</id>
+                        <id>npm-ci</id>
                         <goals><goal>npm</goal></goals>
-                        <configuration><arguments>install</arguments></configuration>
+                        <!-- ci installs exactly what package-lock.json pins -->
+                        <configuration><arguments>ci</arguments></configuration>
                     </execution>
                     <execution>
                         <id>npm-build</id>

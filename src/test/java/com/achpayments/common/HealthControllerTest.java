@@ -41,6 +41,6 @@ class HealthControllerTest {
         mvc.perform(get("/api/health"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.db").value("DOWN"))
-                .andExpect(jsonPath("$.error").value("connection refused"));
+                .andExpect(jsonPath("$.error").doesNotExist());
     }
 }

@@ -139,6 +139,7 @@ All tables get `id`, `created_at`, `updated_at` and `version` (optimistic lockin
 | `ach_setting` | Key, value and **effective date**, e.g. Same Day limit $1M, then $10M from 2027-09-17 |
 | `same_day_window` | Fed submission deadline and settlement time per window (10:30/13:00, 14:45/17:00, 16:45/18:00 ET) |
 | `dda_account` | **Simulated** bank customer accounts: number, name, status, ledger balance, available balance, holds |
+| `dda_account_alias` | Old account number → current `dda_account`, e.g. after a conversion. Used for matching and auto-drafting C01 NOCs |
 
 ### Receiving (`recv_*`)
 
@@ -159,7 +160,7 @@ All tables get `id`, `created_at`, `updated_at` and `version` (optimistic lockin
 
 | Table | Key columns |
 | --- | --- |
-| `orig_originator` | Corporate client: company name, **Company ID**, settlement account, allowed SEC codes, Same Day allowed, status |
+| `orig_originator` | Business member (corporate) or retail member: type, name, **Company ID**, settlement account, allowed SEC codes, Same Day allowed, status |
 | `orig_limit_rule` | **ACHOrigLimitRule**: originator, scope (`PER_ENTRY`, `PER_BATCH`, `DAILY`, `SAME_DAY_DAILY`), direction (credit/debit), SEC code (optional), limit in cents, active dates |
 | `orig_batch` | Originator, SEC code, company entry description, effective date, same-day flag, status, totals, created by, approved by |
 | `orig_entry` | `batch_id`, transaction code, receiver routing + account (encrypted), amount, individual ID/name, trace number (assigned at send), **status**, screening result, `parent_entry_id` (for reversals and resubmissions) |
@@ -170,6 +171,8 @@ All tables get `id`, `created_at`, `updated_at` and `version` (optimistic lockin
 | `orig_resubmission` | Original entry, attempt number (max 2), reason, scheduled date |
 
 **Origination entry status:** `DRAFT → PENDING_APPROVAL → APPROVED → SCREENED → QUEUED → SENT → SETTLED`. An entry can branch to `REJECTED`, `RETURNED`, `REVERSED` or `RESUBMITTED`.
+
+**Workflow logs** (spec: Origination DB): every batch and entry status change writes an `audit_log` row with old status, new status, user and reason. That gives the full workflow history per item.
 
 ---
 
@@ -216,10 +219,14 @@ For each entry in a validated file:
 ### 5.4 Memo posting and eligibility (component C)
 
 1. Look up the account's available balance, holds and status.
-2. **Credits:** usually eligible. A memo credit raises the available balance, unless a fraud hold applies.
-3. **Debits:** eligible if the available balance covers the debit and the account allows debits, i.e. it's not a savings account over its withdrawal limit and has no debit block. Otherwise it's an **NSF**. Depending on bank policy, the entry either returns **R01** or goes to review.
-4. Write the memo post, a pending transaction against the available balance, and send an "Immediate Memo Post" to the Core GL sim. Mark the entry `MEMO_POSTED`.
-5. The **Core GL sim** keeps `dda_account` balances so we can watch it work end to end.
+2. **Check the pre-configured eligibility rules:**
+   - The screening result must be `ALLOW`; `REVIEW` items wait for the review queue.
+   - Per-entry and daily memo-post limits per account type, e.g. credits over $X wait for review instead of becoming available at once.
+   - No memo post on frozen, closed or deceased-flagged accounts.
+3. **Credits:** usually eligible. A memo credit raises the available balance, unless a fraud hold applies.
+4. **Debits:** eligible if the available balance covers the debit and the account allows debits, i.e. it's not a savings account over its withdrawal limit and has no debit block. Otherwise it's an **NSF**. Depending on bank policy, the entry either returns **R01** or goes to review.
+5. Write the memo post, a pending transaction against the available balance, and send an "Immediate Memo Post" to the Core GL sim. Mark the entry `MEMO_POSTED`.
+6. The **Core GL sim** keeps `dda_account` balances so we can watch it work end to end.
 
 ### 5.5 Origination (component B)
 
@@ -235,6 +242,7 @@ For each entry in a validated file:
    - **ACHOrigLimitRule** checks per-entry, per-batch, daily and Same Day daily limits.
    - **OFAC** checks the receiver names.
    - **Fraud rules** run (section 6). WEB debits need a fraud-detection pass and account validation (a prenote, or a previous successful payment).
+   - **Hold funds:** for credits we send (money leaving a member's account), the Memo Posting engine (5.4) places a memo hold on the originator's or member's account for the batch total. If funds are short, the batch is held for review.
    - On a fail, the entry is held for review or rejected.
 5. **Queue.** Approved and screened batches become `QUEUED` for the next window. Same Day batches go to the next Same Day window. If they miss the last window (4:45 PM ET), the effective date rolls to the next banking day, with a warning in the UI.
 6. **Settle.** The originator's settlement account gets the offsetting entry: credits debit the originator, and debits credit them on settlement.
@@ -337,6 +345,9 @@ A NOC is a **zero-dollar correction message**: "this payment reached the right p
 | C06 | Account + transaction code | ✅ |
 | C07 | Routing + account + transaction code | ✅ |
 | C09 | Individual ID number | ❌ |
+| C10 | Company name | ❌ |
+| C11 | Company ID | ❌ |
+| C12 | Company name + company ID | ❌ |
 | C13 | Addenda format error | ❌ |
 | C14 | Incorrect SEC code for outbound IAT | ❌ |
 
@@ -348,6 +359,9 @@ We're the RDFI. A payment came in with outdated details, but we could tell which
    - an old account number from before a conversion (C01);
    - checking vs savings mixed up (C05);
    - a misrouted entry we could still match (C02/C03).
+   The system also **auto-detects** two cases and creates a NOC draft for approval without an operator starting it:
+   - **C05:** the entry's transaction code says checking (22/27) but the matched account is savings, or the other way round.
+   - **C01:** the entry matched through an old account number in `dda_account_alias`, e.g. after a conversion.
 2. **Build the draft:** the operator picks the change code and enters the corrected data. The UI pre-fills it from the account the entry was posted to.
 3. **Approve:** a Supervisor must approve the draft, because the bank **warrants the corrected data is accurate** and is liable if it's wrong.
 4. **Deadline:** a NOC must go out **within 2 banking days of the original entry's settlement date**. The UI shows a countdown, and the system blocks NOCs after the deadline. NOCs caused by a merger are exempt.
@@ -402,6 +416,7 @@ Starter rules, as the 2026 Nacha risk-based monitoring rules require for both or
 | WEB debit account validation | No prior successful prenote or payment means `REVIEW` |
 | Bad-account list | Accounts previously returned R02, R03 or R04 |
 | OFAC | Sample SDN list loaded locally |
+| AML: unusual activity | A member's daily or 30-day ACH total jumps well above their history, or many just-under-limit entries (structuring). Goes to `REVIEW` for the BSA analyst. |
 
 There's also a review queue in the UI where compliance can release or reject items. Receiving-side outcomes:
 - **Release** the item.
