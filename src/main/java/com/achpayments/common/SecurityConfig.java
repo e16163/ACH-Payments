@@ -58,11 +58,12 @@ public class SecurityConfig {
     }
 
     @Bean
-    UserDetailsService users(@Value("${app.admin-password}") String adminPassword,
+    UserDetailsService users(@Value("${app.admin-username}") String adminUsername,
+            @Value("${app.admin-password}") String adminPassword,
             @Value("${app.operator-password}") String operatorPassword) {
         PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
         return new InMemoryUserDetailsManager(
-                User.withUsername("admin").password(encoder.encode(adminPassword)).roles("SYS_ADMIN").build(),
+                User.withUsername(adminUsername).password(encoder.encode(adminPassword)).roles("SYS_ADMIN").build(),
                 User.withUsername("operator").password(encoder.encode(operatorPassword)).roles("OPERATOR").build());
     }
 }

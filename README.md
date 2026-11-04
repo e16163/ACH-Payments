@@ -127,7 +127,7 @@ The browser asks for a login the first time a page needs one. These are demo use
 
 | User | Role | Can use |
 | --- | --- | --- |
-| `admin` | System Administrator | Parameter UI |
+| `admin` (or `APP_ADMIN_USERNAME` in `~/dev/app-credentials.txt`) | System Administrator | Parameter UI |
 | `operator` | Operator | Not the Parameter UI (gets "403 Forbidden") |
 
 ### 7. Running the database tests
