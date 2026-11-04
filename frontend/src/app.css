@@ -1,37 +1,104 @@
+/* Visual style from DESIGN.md (x.ai-inspired, via getdesign): near-black canvas, white text,
+   hairline borders, pill buttons, weight 400, uppercase tracked mono labels. */
+:root {
+  --canvas: #0a0a0a;
+  --canvas-soft: #1a1c20;
+  --canvas-card: #191919;
+  --hairline: #212327;
+  --pill-border: rgb(255 255 255 / 0.25);
+  --ink: #ffffff;
+  --body: #dadbdf;
+  --mute: #7d8187;
+  --on-primary: #0a0a0a;
+  --error: #ff8a80; /* DESIGN.md has no semantic palette; form errors still need to stand out */
+  --sans: Inter, system-ui, -apple-system, sans-serif;
+  --mono: GeistMono, ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 body {
-  font-family: system-ui, sans-serif;
+  font-family: var(--sans);
+  font-weight: 400;
+  font-size: 16px;
+  line-height: 24px;
   margin: 0;
-  color: #1d2433;
-  background: #f6f7f9;
+  color: var(--body);
+  background: var(--canvas);
 }
 
 main {
-  padding: 1.5rem 2rem;
+  padding: 48px 24px;
   max-width: 1200px;
+  margin: 0 auto;
+}
+
+h1 {
+  color: var(--ink);
+  font-weight: 400;
+  font-size: 48px;
+  line-height: 48px;
+  letter-spacing: -1.2px;
+  margin: 0 0 12px;
+}
+
+h2 {
+  color: var(--ink);
+  font-weight: 400;
+  font-size: 32px;
+  line-height: 36px;
+  letter-spacing: -0.6px;
+  margin: 32px 0 0;
+}
+
+strong {
+  font-weight: 400;
+  color: var(--ink);
+}
+
+select {
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--canvas-soft);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 12px;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
-  background: #fff;
+  background: var(--canvas-card);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 th,
 td {
   text-align: left;
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #e3e6eb;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hairline);
   vertical-align: top;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 th {
-  font-size: 0.8rem;
+  font-family: var(--mono);
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 1.2px;
   text-transform: uppercase;
-  color: #5b6475;
+  color: var(--mute);
+  background: var(--canvas-soft);
+}
+
+td {
+  color: var(--ink);
 }
 
 .code {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--mono);
 }
 
 td.value {
@@ -43,101 +110,132 @@ td.value {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin: 24px 0 16px;
 }
 
 button {
-  padding: 0.4rem 0.9rem;
-  border: 1px solid #c4c9d2;
-  border-radius: 4px;
-  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  padding: 8px 16px;
+  border: 1px solid var(--pill-border);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--ink);
   cursor: pointer;
 }
 
+button:hover:not(:disabled) {
+  background: var(--canvas-soft);
+}
+
 button.primary {
-  background: #1f4e9c;
-  border-color: #1f4e9c;
-  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--on-primary);
+}
+
+button.primary:hover:not(:disabled) {
+  background: #fafaf7;
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 0.35);
+  background: rgb(0 0 0 / 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .modal {
-  background: #fff;
-  border-radius: 6px;
-  padding: 1.25rem 1.5rem;
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 24px;
   width: 460px;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 12px;
 }
 
 .modal h2 {
-  margin: 0 0 0.25rem;
-  font-size: 1.15rem;
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-weight: 400;
+  font-size: 20px;
+  line-height: 28px;
 }
 
 .modal label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.85rem;
-  color: #5b6475;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--mute);
 }
 
 .modal input,
 .modal select,
 .modal textarea {
-  font: inherit;
-  font-size: 0.95rem;
-  color: #1d2433;
-  padding: 0.4rem;
-  border: 1px solid #c4c9d2;
-  border-radius: 4px;
+  font-family: var(--sans);
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink);
+  background: var(--canvas-soft);
+  padding: 12px 16px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.modal input:focus,
+.modal select:focus,
+.modal textarea:focus {
+  outline: none;
+  border-color: var(--pill-border);
 }
 
 .modal textarea.code {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--mono);
 }
 
 .modal .invalid {
-  border-color: #c62828;
-  outline-color: #c62828;
-  background: #fff5f5;
+  border-color: var(--error);
 }
 
 .field-error,
 .page-error {
-  color: #c62828;
+  color: var(--error);
   margin: 0;
-  font-size: 0.85rem;
+  font-size: 14px;
+  line-height: 20px;
 }
 
 .actions {
   display: flex;
   justify-content: flex-end;
-  gap: 0.5rem;
-  margin-top: 0.5rem;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 .toast {
   position: fixed;
-  right: 1.5rem;
-  bottom: 1.5rem;
-  background: #2e7d32;
-  color: #fff;
-  padding: 0.75rem 1rem;
-  border-radius: 4px;
+  right: 24px;
+  bottom: 24px;
+  background: var(--canvas);
+  color: var(--ink);
+  border: 1px solid var(--pill-border);
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 20px;
 }
