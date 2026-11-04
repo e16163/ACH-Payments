@@ -3,6 +3,8 @@ package com.achpayments.common;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.userdetails.User;
@@ -12,11 +14,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.csrf.CsrfException;
 
 /**
- * Demo login (docs/USE-CASES.md P1): browser HTTP Basic with two users whose passwords come from
- * environment variables. Real users and roles come in roadmap step 16.
+ * Demo login (docs/USE-CASES.md P1, T7): browser HTTP Basic with an admin, an operator and a member, whose
+ * passwords come from environment variables. Members also pass a simulated MFA step. Real users come in step 16.
  */
 @Configuration
 public class SecurityConfig {
@@ -27,6 +30,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
                         .requestMatchers("/api/params/**").hasRole("SYS_ADMIN")
+                        .requestMatchers("/api/member/mfa/**").hasRole("MEMBER")
+                        // UC-ACH-ORG-01 precondition: the member is logged in AND has passed MFA
+                        .requestMatchers("/api/member/**", "/api/transfers/**", "/api/routing/**").access(MEMBER_WITH_MFA)
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()) // the React app's static files
                 .httpBasic(Customizer.withDefaults())
@@ -60,10 +66,19 @@ public class SecurityConfig {
     @Bean
     UserDetailsService users(@Value("${app.admin-username}") String adminUsername,
             @Value("${app.admin-password}") String adminPassword,
-            @Value("${app.operator-password}") String operatorPassword) {
+            @Value("${app.operator-password}") String operatorPassword,
+            @Value("${app.member-username}") String memberUsername,
+            @Value("${app.member-password}") String memberPassword) {
         PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
         return new InMemoryUserDetailsManager(
                 User.withUsername(adminUsername).password(encoder.encode(adminPassword)).roles("SYS_ADMIN").build(),
-                User.withUsername("operator").password(encoder.encode(operatorPassword)).roles("OPERATOR").build());
+                User.withUsername("operator").password(encoder.encode(operatorPassword)).roles("OPERATOR").build(),
+                User.withUsername(memberUsername).password(encoder.encode(memberPassword)).roles("MEMBER").build());
     }
+
+    private static final AuthorizationManager<RequestAuthorizationContext> MEMBER_WITH_MFA = (authentication, context) -> {
+        boolean member = authentication.get().getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_MEMBER"));
+        return new AuthorizationDecision(member && MfaService.isVerified(context.getRequest()));
+    };
 }

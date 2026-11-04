@@ -19,7 +19,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(HealthController.class)
 @Import(SecurityConfig.class) // proves /api/health stays public under the real security rules
-@TestPropertySource(properties = {"app.admin-password=x", "app.operator-password=y"})
+@TestPropertySource(properties = {"app.admin-password=x", "app.operator-password=y", "app.member-password=z"})
 class HealthControllerTest {
 
     @Autowired

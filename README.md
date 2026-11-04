@@ -89,7 +89,7 @@ JDBC URL: `jdbc:mysql://localhost:3306/ach_payments`
 
 The app reads its secrets from the environment:
 - `JDBC_URL`, `DB_USER` and `DB_PASSWORD` go in `~/dev/mysql-credentials.txt`.
-- `APP_ADMIN_PASSWORD` and `APP_OPERATOR_PASSWORD` go in `~/dev/app-credentials.txt`. These are the demo logins (see below); pick your own passwords.
+- `APP_ADMIN_PASSWORD`, `APP_OPERATOR_PASSWORD` and `APP_MEMBER_PASSWORD` go in `~/dev/app-credentials.txt` (optionally `APP_ADMIN_USERNAME`). These are the demo logins (see below); pick your own passwords.
 
 Write them as `KEY=value` lines, then create `~/dev/tomcat/bin/setenv.sh` so Tomcat loads them:
 
@@ -129,6 +129,7 @@ The browser asks for a login the first time a page needs one. These are demo use
 | --- | --- | --- |
 | `admin` (or `APP_ADMIN_USERNAME` in `~/dev/app-credentials.txt`) | System Administrator | Parameter UI |
 | `operator` | Operator | Not the Parameter UI (gets "403 Forbidden") |
+| `M10982347` (Ba's sample member, John Doe) | Member | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
 
 ### 7. Running the database tests
 

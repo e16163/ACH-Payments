@@ -29,7 +29,8 @@ import com.achpayments.common.SecurityConfig;
 /** UC-SYS-PARAM-01 preconditions and EX-02, with the database mocked out. */
 @WebMvcTest(ParamController.class)
 @Import(SecurityConfig.class)
-@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.operator-password=operator-pw"})
+@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.operator-password=operator-pw",
+        "app.member-password=member-pw"})
 class ParamSecurityTest {
 
     private static final String BODY = """

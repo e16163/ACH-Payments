@@ -1,0 +1,129 @@
+package com.achpayments.common;
+
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.time.Clock;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import com.achpayments.param.ParamController;
+import com.achpayments.param.ParamRepository;
+import com.achpayments.param.ParamService;
+import com.achpayments.transfer.TransferController;
+import com.achpayments.transfer.TransferDates;
+
+import tools.jackson.databind.json.JsonMapper;
+
+/** USE-CASES T7: members must pass MFA before the transfer APIs; admins and members stay in their own areas. */
+@WebMvcTest({MeController.class, TransferController.class, ParamController.class})
+@Import({SecurityConfig.class, MfaService.class, MemberAccessTest.Clocks.class})
+@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.operator-password=operator-pw",
+        "app.member-password=member-pw"})
+class MemberAccessTest {
+
+    @TestConfiguration
+    static class Clocks {
+        @Bean
+        Clock clock() {
+            return Clock.systemUTC();
+        }
+    }
+
+    private static final String MEMBER = "M10982347";
+
+    @Autowired
+    MockMvc mvc;
+
+    @MockitoBean
+    AppLogRepository appLog;
+
+    @MockitoBean
+    TransferDates dates;
+
+    @MockitoBean
+    BankingCalendar calendar;
+
+    @MockitoBean
+    ParamRepository paramRepo;
+
+    @MockitoBean
+    ParamService paramService;
+
+    private String sendCode(MockHttpSession session) throws Exception {
+        String body = mvc.perform(post("/api/member/mfa/send").session(session).with(httpBasic(MEMBER, "member-pw")).with(csrf()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return JsonMapper.builder().build().readTree(body).get("demoCode").asString();
+    }
+
+    private org.springframework.test.web.servlet.ResultActions verify(MockHttpSession session, String code) throws Exception {
+        return mvc.perform(post("/api/member/mfa/verify").session(session).with(httpBasic(MEMBER, "member-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"" + code + "\"}"));
+    }
+
+    @Test
+    void memberIsBlockedFromTransfersUntilMfaIsVerified() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        mvc.perform(get("/api/transfers/dates").session(session).with(httpBasic(MEMBER, "member-pw")))
+                .andExpect(status().isForbidden());
+
+        String code = sendCode(session);
+        verify(session, code.equals("000000") ? "111111" : "000000").andExpect(status().isBadRequest());
+        verify(session, code).andExpect(status().isOk()).andExpect(jsonPath("$.mfaVerified").value(true));
+
+        mvc.perform(get("/api/transfers/dates").session(session).with(httpBasic(MEMBER, "member-pw")))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/me").session(session).with(httpBasic(MEMBER, "member-pw")))
+                .andExpect(jsonPath("$.username").value(MEMBER))
+                .andExpect(jsonPath("$.roles.length()").value(1))
+                .andExpect(jsonPath("$.roles[0]").value("MEMBER"))
+                .andExpect(jsonPath("$.mfaVerified").value(true));
+    }
+
+    @Test
+    void fiveWrongCodesUseUpTheChallenge() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        String code = sendCode(session);
+        String wrong = code.equals("000000") ? "111111" : "000000";
+        for (int i = 0; i < 5; i++) verify(session, wrong).andExpect(status().isBadRequest());
+        verify(session, code).andExpect(status().isBadRequest()); // the right code no longer works
+    }
+
+    @Test
+    void aCodeIsRequiredBeforeVerifying() throws Exception {
+        verify(new MockHttpSession(), "123456").andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void adminCannotUseMemberApis() throws Exception {
+        mvc.perform(post("/api/member/mfa/send").with(httpBasic("admin", "admin-pw")).with(csrf()))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/transfers/dates").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/routing/021000021").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void memberCannotUseTheParameterUi() throws Exception {
+        mvc.perform(get("/api/params/systems").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anonymousMustLogIn() throws Exception {
+        mvc.perform(get("/api/transfers/dates")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
+    }
+}
