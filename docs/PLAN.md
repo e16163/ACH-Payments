@@ -16,7 +16,7 @@ This plan is based on the architecture description and component diagram from Ba
 | A8 | **Users:** internal credit-union staff log in to the operations app. Members and business members originate through the **digital banking channel**, which calls our Origination REST API. A demo "Business Member Portal" stands in for that channel (see 7). | ✅ Decided |
 | A9 | **The Fraud system is a module in the same app** (`screening/`). | ✅ Confirmed |
 | A6 | **"Cryptographic signatures" on inbound files** are simulated as a detached SHA-256 HMAC (or PGP) signature file next to each NACHA file. | Real FedLine security works at the transport layer. A signature check still exercises the validation step. |
-| A7 | **Money is stored as integer cents (`BIGINT`)**, never floating point. | Rounding errors in payments are unacceptable. |
+| A7 | **Money is stored as `DECIMAL(13,2)`** (Ba's DB model), never floating point. | Rounding errors in payments are unacceptable. DECIMAL is exact. |
 
 ---
 
@@ -126,6 +126,8 @@ Every engine depends on this, so it's built first and tested heavily.
 ---
 
 ## 4. Database design (first pass)
+
+> **Superseded by Ba's DB model.** See [DB-MODEL.md](DB-MODEL.md) for Ba's tables, the review, the fixes and the open questions. The first pass below is kept only for reference.
 
 All tables get `id`, `created_at`, `updated_at` and `version` (optimistic locking). Account numbers are **encrypted at rest** and **masked in the UI** (last 4 digits only), as the Nacha data-security rules require.
 

@@ -115,6 +115,8 @@ Then open http://localhost:5173/ach/.
 - [x] Java 21, Tomcat 11, MySQL installed locally
 - [x] Requirements and implementation plan ([docs/PLAN.md](docs/PLAN.md))
 - [x] Step 0: Spring Boot + React skeleton deployed on Tomcat, with DB health check
-- [ ] Database schema
+- [x] Step 1: NACHA file parser
+- [x] Ba's design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
+- [ ] Database schema (waiting on Ba's answers in DB-MODEL.md section 6)
 - [ ] Same Day ACH payments service
 - [ ] Fraud monitoring service
