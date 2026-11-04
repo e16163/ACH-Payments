@@ -1,5 +1,5 @@
 /* x.ai-inspired style (DESIGN.md): near-black canvas, white text, hairline borders,
-   pill buttons, weight 400, uppercase tracked mono labels. */
+   pill buttons, sans-serif labels; monospace only for codes and numbers. */
 :root {
   --canvas: #0a0a0a;
   --canvas-soft: #1a1c20;
@@ -72,9 +72,7 @@ strong {
   height: 36px;
   border: 1px solid var(--ink);
   border-radius: 50%;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 1px;
+  font-size: 13px;
 }
 
 .brand-name {
@@ -84,10 +82,7 @@ strong {
 
 .brand-product,
 .user {
-  font-family: var(--mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
+  font-size: 13px;
   color: var(--mute);
 }
 
@@ -141,10 +136,7 @@ main {
   border-top: 1px solid var(--hairline);
   background: var(--canvas);
   padding: 12px 32px;
-  font-family: var(--mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
+  font-size: 13px;
   color: var(--mute);
   display: flex;
   align-items: center;
@@ -188,21 +180,16 @@ h2 {
 }
 
 .toolbar label {
+  font-weight: 500;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
+  font-size: 13px;
   color: var(--mute);
 }
 
 .toolbar select {
-  font-family: var(--font);
   font-size: 14px;
-  text-transform: none;
-  letter-spacing: normal;
 }
 
 .toolbar input[type='search'] {
@@ -218,6 +205,7 @@ input,
 select,
 textarea {
   font: inherit;
+  font-weight: 400;
   color: var(--ink);
   background: var(--canvas-soft);
   border: 1px solid var(--hairline);
@@ -259,11 +247,8 @@ td {
 }
 
 th {
-  font-family: var(--mono);
-  font-size: 12px;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--mute);
   background: var(--canvas-soft);
 }
@@ -358,23 +343,18 @@ button:disabled {
 }
 
 .modal label {
+  font-weight: 500;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-family: var(--mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
+  font-size: 13px;
   color: var(--mute);
 }
 
 .modal input,
 .modal select,
 .modal textarea {
-  font-family: var(--font);
   font-size: 15px;
-  text-transform: none;
-  letter-spacing: normal;
 }
 
 .modal textarea.code {
@@ -388,12 +368,10 @@ button:disabled {
 
 .field-error,
 .page-error {
+  font-weight: 400;
   color: var(--error);
   margin: 0;
-  font-family: var(--font);
   font-size: 13px;
-  text-transform: none;
-  letter-spacing: normal;
 }
 
 .page-error {
@@ -476,11 +454,8 @@ button:disabled {
 
 .form-card h3 {
   margin: 16px 0 0;
-  font-family: var(--mono);
-  font-size: 12px;
-  font-weight: 400;
-  text-transform: uppercase;
-  letter-spacing: 1.4px;
+  font-size: 17px;
+  font-weight: 500;
   color: var(--ink);
   border-bottom: 1px solid var(--hairline);
   padding-bottom: 8px;
@@ -491,13 +466,11 @@ button:disabled {
 }
 
 .field {
+  font-weight: 500;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-family: var(--mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
+  font-size: 13px;
   color: var(--mute);
   flex: 1;
   border: none;
@@ -507,10 +480,7 @@ button:disabled {
 
 .field input,
 .field select {
-  font-family: var(--font);
   font-size: 15px;
-  text-transform: none;
-  letter-spacing: normal;
 }
 
 .field .label {
@@ -536,13 +506,11 @@ button:disabled {
 
 .radio-row label,
 .checkbox {
+  font-weight: 400;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-family: var(--font);
   font-size: 14px;
-  text-transform: none;
-  letter-spacing: normal;
   color: var(--body);
 }
 
@@ -556,8 +524,8 @@ button:disabled {
 }
 
 .money-input span {
+  font-weight: 400;
   color: var(--mute);
-  font-family: var(--font);
   font-size: 15px;
 }
 
@@ -574,10 +542,8 @@ button:disabled {
 
 .balance,
 .bank-name {
+  font-weight: 400;
   margin: 0;
-  font-family: var(--font);
-  text-transform: none;
-  letter-spacing: normal;
 }
 
 .balance {
@@ -605,10 +571,7 @@ button:disabled {
 
 .breadcrumb {
   margin: 0 0 8px;
-  font-family: var(--mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
+  font-size: 13px;
   color: var(--mute);
 }
 
@@ -633,10 +596,7 @@ button:disabled {
 }
 
 .summary dt {
-  font-family: var(--mono);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: 1.2px;
+  font-size: 13px;
   color: var(--mute);
   padding-top: 2px;
 }
@@ -681,14 +641,12 @@ td.num {
 
 /* ---- date picker ---- */
 .datepicker {
+  font-weight: 400;
   border: 1px solid var(--hairline);
   border-radius: var(--radius);
   padding: 12px;
   width: 320px;
   background: var(--canvas-soft);
-  font-family: var(--font);
-  text-transform: none;
-  letter-spacing: normal;
 }
 
 .dp-head {
@@ -711,9 +669,7 @@ td.num {
 }
 
 .dp-dow {
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 1px;
+  font-size: 13px;
   color: var(--mute);
 }
 
