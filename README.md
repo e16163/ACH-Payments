@@ -162,6 +162,7 @@ mvn test
 - [x] Step 1: NACHA file parser
 - [x] Parameter UI (UC-SYS-PARAM-01): designers add/edit parameters per app
 - [x] Ba's design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
-- [ ] Database schema (waiting on Ba's answers in DB-MODEL.md section 6)
+- [x] Database schema: all 30 of Ba's tables exactly as written, plus approved additions (V1–V10), with Ba's sample data
+- [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
 - [ ] Same Day ACH payments service
 - [ ] Fraud monitoring service

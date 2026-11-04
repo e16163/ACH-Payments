@@ -157,8 +157,4 @@ The Transfer UI is finished when all of these hold:
 ## Build order
 
 1. **UC-SYS-PARAM-01.** ✅ Built (board P1–P3): matches Ba's answers, and every "Done when" check passed in the deployed app.
-2. **UC-ACH-ORG-01**:
-   - **a.** migrations for its tables;
-   - **b.** routing, calendar and limit services with tests;
-   - **c.** the transfer and memo-hold API;
-   - **d.** the member UI.
+2. **UC-ACH-ORG-01.** ✅ Built (board X1–X7, D6, R6, T7 member login): every "Done when" check passed, including a full member run in the deployed app (MFA → Transfer & Pay → EX-01/EX-02 → review → Confirm Transfer → receipt).
