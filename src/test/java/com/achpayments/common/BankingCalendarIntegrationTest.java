@@ -10,14 +10,12 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.ActiveProfiles;
 
 /** The migration's seeded holidays reach the BankingCalendar bean. Needs TEST_JDBC_URL (README section 7). */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "TEST_JDBC_URL", matches = ".+")
-@TestPropertySource(properties = {
-        "spring.datasource.url=${TEST_JDBC_URL}",
-        "app.admin-password=x", "app.operator-password=y"})
+@ActiveProfiles("dbtest")
 class BankingCalendarIntegrationTest {
 
     @Autowired

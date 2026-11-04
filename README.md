@@ -62,10 +62,16 @@ Create the project database and app user. Pick your own password:
 mysql -u root -p
 ```
 
+Following Ba's diagram, there are separate databases: `ach_payments` (shared config and logging), `ach_receiving` and `ach_origination`. Flyway creates the tables in all three.
+
 ```sql
 CREATE DATABASE ach_payments CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+CREATE DATABASE ach_receiving CHARACTER SET utf8mb4;
+CREATE DATABASE ach_origination CHARACTER SET utf8mb4;
 CREATE USER 'ach_app'@'localhost' IDENTIFIED BY 'choose-a-password';
 GRANT ALL PRIVILEGES ON ach_payments.* TO 'ach_app'@'localhost';
+GRANT ALL PRIVILEGES ON ach_receiving.* TO 'ach_app'@'localhost';
+GRANT ALL PRIVILEGES ON ach_origination.* TO 'ach_app'@'localhost';
 FLUSH PRIVILEGES;
 ```
 
@@ -126,11 +132,17 @@ The browser asks for a login the first time a page needs one. These are demo use
 
 ### 7. Running the database tests
 
-Some tests run against real MySQL, in a separate **test** database so they never touch your data. One-time setup, as root:
+Some tests run against real MySQL, in separate **test** databases so they never touch your data. `ba_reference_test` holds Ba's original DDL, which a test compares our schema against. One-time setup, as root:
 
 ```sql
 CREATE DATABASE ach_payments_test CHARACTER SET utf8mb4;
+CREATE DATABASE ach_receiving_test CHARACTER SET utf8mb4;
+CREATE DATABASE ach_origination_test CHARACTER SET utf8mb4;
+CREATE DATABASE ba_reference_test CHARACTER SET utf8mb4;
 GRANT ALL PRIVILEGES ON ach_payments_test.* TO 'ach_app'@'localhost';
+GRANT ALL PRIVILEGES ON ach_receiving_test.* TO 'ach_app'@'localhost';
+GRANT ALL PRIVILEGES ON ach_origination_test.* TO 'ach_app'@'localhost';
+GRANT ALL PRIVILEGES ON ba_reference_test.* TO 'ach_app'@'localhost';
 ```
 
 Then run the tests with `TEST_JDBC_URL` set. Without it, the database tests are skipped and everything else still runs.

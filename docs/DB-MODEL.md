@@ -224,7 +224,7 @@ erDiagram
 
 ## 7. Plan
 
-1. Write Ba's tables, plus the agreed fixes, as Flyway migrations in `src/main/resources/db/migration/`. Split them by component. `V1__app_param_and_log.sql` (config and logging, in `ach_payments`) ships first, with the Parameter UI ([USE-CASES.md](USE-CASES.md)). After that: `V2__receiving.sql` (`ach_receiving`), `V3__origination.sql` and `V4__back_office.sql` (`ach_origination`). Only the fixes kept in section 0 are applied.
+1. Write Ba's tables, plus the agreed fixes, as Flyway migrations in `src/main/resources/db/migration/`. Split them by component. `V1__app_param_and_log.sql` (config and logging, in `ach_payments`) ships first, with the Parameter UI ([USE-CASES.md](USE-CASES.md)). After that: `V2__banking_calendar.sql` (`ach_payments`), `V3__receiving.sql` (`ach_receiving`), `V4__origination.sql` and `V5__back_office.sql` (`ach_origination`). Each migration copies Ba's `CREATE TABLE`s unchanged and lists the additions after them as `ALTER TABLE ... ADD`. `BaDesignConformanceTest` checks Ba's columns, keys, indexes and FKs against his original DDL. Only the fixes kept in section 0 are applied.
    - Verify: the app starts against an empty `ach_payments` and Flyway applies all of them.
 2. Turn the tests in section 2 into automated integration tests.
    - Verify: a file with a free-text descriptive date loads (stored as `NULL`); orphan returns and orphan transactions are rejected by FKs; the trace number generator never repeats.

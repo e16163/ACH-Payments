@@ -12,7 +12,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.ActiveProfiles;
 
 /**
  * Runs against a real MySQL test database (never the app's own), with the schema built by Flyway.
@@ -20,9 +20,7 @@ import org.springframework.test.context.TestPropertySource;
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "TEST_JDBC_URL", matches = ".+")
-@TestPropertySource(properties = {
-        "spring.datasource.url=${TEST_JDBC_URL}",
-        "app.admin-password=x", "app.operator-password=y"})
+@ActiveProfiles("dbtest")
 class ParamServiceIntegrationTest {
 
     @Autowired
