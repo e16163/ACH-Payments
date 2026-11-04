@@ -90,7 +90,7 @@ Spec: [Use-Case-ACH-Origination-Transfer-UI.docx](design/Use-Case-ACH-Originatio
 | `ACHOriginatorTransfer` | ✅ | The transfer request (step 6). It needs the [DB-MODEL.md](DB-MODEL.md) fixes. |
 | `ACHOrigRecvAccount` | ✅ | The beneficiary's external account (step 3). No verification column for now, because the Plaid check runs on each transfer (T3). |
 | `ACHOrigLimitRule` | ✅ | Daily and monthly caps (step 5, EX-02), used as Ba wrote it (T4) |
-| `ACHOriginator`, `Source` | ✅ | `originatorID` (the credit union itself, for retail transfers) and `sourceID = 'ONLINE_BANKING'`. The `Source` row must be seeded (X1), since `sourceID` now has a foreign key. |
+| `ACHOriginator`, `Source` | ✅ | `originatorID` (the credit union itself, for retail transfers) and `sourceID = 'ONLINE_BANKING'`. The `ONLINE_BANKING` `Source` row is seeded by V7 (D6), since `sourceID` now has a foreign key. |
 | `AppParam` | ✅ (from UC-SYS-PARAM-01) | Transfer fee, cutoff times |
 | `SimCoreAccount` | ❌ new (DB-MODEL M4) | The member's funding accounts and **available balance** (steps 1–2). The core is simulated (A2). |
 | `ACHMemoPost` | ❌ new (DB-MODEL M4) | The immediate hold on the source account (step 7) |
@@ -134,7 +134,7 @@ Executing the transfer is **out of scope** for this use case and is picked up by
 - **T6. OFAC hits. ✅ Decided (2026-11-03): follow Ba's `ofacStatus` values** (`CLEARED`, `FLAGGED`, `REVIEW`). A hit saves the transfer with `ofacStatus = 'FLAGGED'`, held until staff clear it, and the member sees "under review".
 - **T7. Member login. ✅ Decided (2026-11-03):** demo member users with simulated MFA, the same approach as P1.
 - **T8. Missing columns in `ACHOriginatorTransfer`. ✅ Decided (2026-11-03): add them, using the names Ba's spec maps the inputs to.** The new columns are `effectiveDt DATE`, `companyEntryDesc VARCHAR(10)` (T1), `feeAmt DECIMAL(13,2)` and `createTm DATETIME`. Ba's existing columns are unchanged.
-- **T9. Ba's sample routing number `051000031` is invalid.** It fails the ABA check digit (weighted sum 58), so EX-01 would reject it. Demo data will use real-format numbers that pass, e.g. `021000021`.
+- **T9. Ba's sample routing number `051000031` is invalid.** It fails the ABA check digit (weighted sum 58), so EX-01 would reject it. The demo data (V7) uses `051000033`: his number with the correct check digit, which also matches the `05100003` prefix of his sample trace number.
 
 ### Done when
 
