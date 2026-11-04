@@ -7,6 +7,8 @@ This repo will hold two systems:
 
 **Try the demo:** https://e16163.github.io/ACH-Payments/ (sign in as `member` / `member123` or `admin` / `admin123`). It's the real screens running on made-up data in your browser. GitHub Pages can't run the Java server or MySQL, so nothing is saved, and the demo resets when you close the tab. It's rebuilt from `main` on every push (`.github/workflows/pages.yml`, `npm run build:demo`).
 
+Step-by-step demo script: [docs/DEMO.md](docs/DEMO.md).
+
 ## Background
 
 - **Rules:** set by Nacha. Payments are processed by the Federal Reserve (FedACH) and EPN, and 31 CFR Part 210 governs.
