@@ -1,5 +1,7 @@
 package com.achpayments.common;
 
+import java.io.IOException;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,9 +19,13 @@ import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.csrf.CsrfException;
 
+import jakarta.servlet.http.HttpServletResponse;
+
 /**
- * Demo login (docs/USE-CASES.md P1, T7): browser HTTP Basic with an admin, an operator and a member, whose
- * passwords come from environment variables. Members also pass a simulated MFA step. Real users come in step 16.
+ * Demo login (docs/USE-CASES.md P1, T7): the app's own sign-in page (POST /api/login, POST /api/logout) for an
+ * admin, an operator and a member, whose passwords come from environment variables. HTTP Basic still works for
+ * scripts and tests, but a 401 never sends the browser's login popup. Members also pass a simulated MFA step.
+ * Real users come in step 16.
  */
 @Configuration
 public class SecurityConfig {
@@ -36,10 +42,17 @@ public class SecurityConfig {
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()) // the React app's static files
                 .httpBasic(Customizer.withDefaults())
+                .formLogin(form -> form.loginProcessingUrl("/api/login")
+                        .successHandler((request, response, auth) -> response.setStatus(204))
+                        .failureHandler((request, response, e) -> json(response, 401, "Incorrect username or password.")))
+                .logout(logout -> logout.logoutUrl("/api/logout")
+                        .logoutSuccessHandler((request, response, auth) -> response.setStatus(204)))
                 // The browser resends Basic credentials automatically, so writes need a CSRF token:
                 // the XSRF-TOKEN cookie, echoed back by the React app in the X-XSRF-TOKEN header.
                 .csrf(csrf -> csrf.spa())
-                .exceptionHandling(ex -> ex.accessDeniedHandler(deniedHandler));
+                // 401 as JSON without WWW-Authenticate, so the React sign-in page shows instead of a browser popup
+                .exceptionHandling(ex -> ex.accessDeniedHandler(deniedHandler)
+                        .authenticationEntryPoint((request, response, e) -> json(response, 401, "Please sign in.")));
         return http.build();
     }
 
@@ -57,22 +70,27 @@ public class SecurityConfig {
                 String user = request.getUserPrincipal() == null ? "anonymous" : request.getUserPrincipal().getName();
                 appLog.log("WARN", "Access denied: user '%s' attempted %s".formatted(user, target), null);
             }
-            response.setStatus(403);
-            response.setContentType("application/json");
-            response.getWriter().write("{\"error\":\"You don't have permission to do this.\"}");
+            json(response, 403, "You don't have permission to do this.");
         };
+    }
+
+    private static void json(HttpServletResponse response, int status, String error) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json");
+        response.getWriter().write("{\"error\":\"" + error + "\"}");
     }
 
     @Bean
     UserDetailsService users(@Value("${app.admin-username}") String adminUsername,
             @Value("${app.admin-password}") String adminPassword,
+            @Value("${app.operator-username}") String operatorUsername,
             @Value("${app.operator-password}") String operatorPassword,
             @Value("${app.member-username}") String memberUsername,
             @Value("${app.member-password}") String memberPassword) {
         PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
         return new InMemoryUserDetailsManager(
                 User.withUsername(adminUsername).password(encoder.encode(adminPassword)).roles("SYS_ADMIN").build(),
-                User.withUsername("operator").password(encoder.encode(operatorPassword)).roles("OPERATOR").build(),
+                User.withUsername(operatorUsername).password(encoder.encode(operatorPassword)).roles("OPERATOR").build(),
                 User.withUsername(memberUsername).password(encoder.encode(memberPassword)).roles("MEMBER").build());
     }
 

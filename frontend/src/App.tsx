@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from './api'
+import { api, ApiError, DEMO, logout } from './api'
+import LoginPage from './LoginPage'
 import AccountsPage from './member/AccountsPage'
 import ExternalTransferPage from './member/ExternalTransferPage'
 import MfaPage from './member/MfaPage'
@@ -28,19 +29,38 @@ function useHash() {
 export default function App() {
   const [health, setHealth] = useState<Health | null>(null)
   const [me, setMe] = useState<Me | null>(null)
+  const [signedOut, setSignedOut] = useState(false)
   const [meError, setMeError] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const hash = useHash()
 
   const loadMe = useCallback(() => {
-    api<Me>('/me').then(setMe).catch((e) => setMeError(String(e.message ?? e)))
+    setMeError(null)
+    api<Me>('/me')
+      .then((m) => {
+        setMe(m)
+        setSignedOut(false)
+      })
+      .catch((e) => {
+        if (e instanceof ApiError && e.status === 401) setSignedOut(true)
+        else setMeError(String(e.message ?? e))
+      })
   }, [])
 
+  async function signOut() {
+    await logout()
+    setMe(null)
+    setSignedOut(true)
+    window.location.hash = ''
+  }
+
   useEffect(() => {
-    fetch(`${import.meta.env.BASE_URL}api/health`)
-      .then((res) => res.json())
-      .then(setHealth)
-      .catch((e) => setHealth({ db: 'UNREACHABLE', error: String(e) }))
+    if (!DEMO) {
+      fetch(`${import.meta.env.BASE_URL}api/health`)
+        .then((res) => res.json())
+        .then(setHealth)
+        .catch((e) => setHealth({ db: 'UNREACHABLE', error: String(e) }))
+    }
     loadMe()
   }, [loadMe])
 
@@ -51,51 +71,70 @@ export default function App() {
   const memberReady = isMember && me?.mfaVerified
 
   let page = null
-  if (isAdmin) page = <ParameterPage />
+  if (signedOut) page = <LoginPage onSignedIn={loadMe} />
+  else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
   else if (memberReady) page = hash === ROUTES.external ? <ExternalTransferPage /> : <AccountsPage />
   else if (me) page = <p className="card narrow">There are no screens for your role yet.</p>
 
   return (
     <div className="shell">
+      {DEMO && (
+        <div className="demo-banner">
+          Demo with made-up data. Nothing here is a real bank, account or payment, and changes reset when you close the tab.
+        </div>
+      )}
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">DCU</span>
           <span className="brand-name">Demo Credit Union</span>
           <span className="brand-product">{isMember ? 'Online Banking' : 'ACH Payments'}</span>
         </div>
-        {me && <span className="user">Signed in as {me.username}</span>}
-      </header>
-      <nav className="mainnav" aria-label="Main">
-        {isAdmin && <a className="active" href={ROUTES.params}>System Configuration</a>}
-        {memberReady && (
-          <>
-            <a className={hash !== ROUTES.external ? 'active' : ''} href={ROUTES.accounts}>Accounts</a>
-            <div className="menu">
-              <button
-                className={`menu-button${hash === ROUTES.external ? ' active' : ''}`}
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((o) => !o)}
-              >
-                Transfer &amp; Pay ▾
-              </button>
-              {menuOpen && (
-                <div className="menu-list" role="menu">
-                  <a role="menuitem" href={ROUTES.external}>External ACH Transfer (Other Bank)</a>
-                </div>
-              )}
-            </div>
-          </>
+        {me && (
+          <div className="user">
+            <span>Signed in as {me.username}</span>
+            <button onClick={signOut}>Sign out</button>
+          </div>
         )}
-      </nav>
+      </header>
+      {me && (
+        <nav className="mainnav" aria-label="Main">
+          {isAdmin && <a className="active" href={ROUTES.params}>System Configuration</a>}
+          {memberReady && (
+            <>
+              <a className={hash !== ROUTES.external ? 'active' : ''} href={ROUTES.accounts}>Accounts</a>
+              <div className="menu">
+                <button
+                  className={`menu-button${hash === ROUTES.external ? ' active' : ''}`}
+                  aria-expanded={menuOpen}
+                  onClick={() => setMenuOpen((o) => !o)}
+                >
+                  Transfer &amp; Pay ▾
+                </button>
+                {menuOpen && (
+                  <div className="menu-list" role="menu">
+                    <a role="menuitem" href={ROUTES.external}>External ACH Transfer (Other Bank)</a>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </nav>
+      )}
       <main>
         {meError && <p className="page-error">{meError}</p>}
         {page}
       </main>
       <footer className="statusbar">
-        <span className={`dot ${health?.db === 'OK' ? 'ok' : 'down'}`} aria-hidden="true" />
-        Database: {health ? health.db : 'checking…'}
-        {health?.error && <span className="status-error"> — {health.error}</span>}
+        {DEMO ? (
+          'Demo mode: no server or database. Everything runs in this browser tab.'
+        ) : (
+          <>
+            <span className={`dot ${health?.db === 'OK' ? 'ok' : 'down'}`} aria-hidden="true" />
+            Database: {health ? health.db : 'checking…'}
+            {health?.error && <span className="status-error"> — {health.error}</span>}
+          </>
+        )}
       </footer>
     </div>
   )

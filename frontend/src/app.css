@@ -86,6 +86,33 @@ strong {
   color: var(--mute);
 }
 
+.user {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.user button {
+  padding: 4px 14px;
+  font-size: 13px;
+}
+
+.login {
+  margin: 24px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.demo-banner {
+  background: var(--canvas-soft);
+  border-bottom: 1px solid var(--hairline);
+  color: var(--body);
+  font-size: 13px;
+  text-align: center;
+  padding: 8px 16px;
+}
+
 .brand-product {
   padding-left: 12px;
   border-left: 1px solid var(--hairline);

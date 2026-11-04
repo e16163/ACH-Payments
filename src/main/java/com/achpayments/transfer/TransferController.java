@@ -5,9 +5,11 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,11 +33,24 @@ public class TransferController {
     private final TransferDates dates;
     private final BankingCalendar calendar;
     private final TransferService transfers;
+    private final String memberUsername;
+    private final String memberNumber;
 
-    public TransferController(TransferDates dates, BankingCalendar calendar, TransferService transfers) {
+    public TransferController(TransferDates dates, BankingCalendar calendar, TransferService transfers,
+            @Value("${app.member-username}") String memberUsername, @Value("${app.member-number}") String memberNumber) {
         this.dates = dates;
         this.calendar = calendar;
         this.transfers = transfers;
+        this.memberUsername = memberUsername;
+        this.memberNumber = memberNumber;
+    }
+
+    /** The demo member's login name maps to Ba's member number; any other login has no member number. */
+    private String memberNo(Principal user) {
+        if (!user.getName().equals(memberUsername)) {
+            throw new AccessDeniedException("No member number for " + user.getName());
+        }
+        return memberNumber;
     }
 
     @GetMapping("/api/transfers/dates")
@@ -45,22 +60,22 @@ public class TransferController {
 
     @GetMapping("/api/member/accounts")
     public List<TransferService.Account> accounts(Principal member) {
-        return transfers.accounts(member.getName());
+        return transfers.accounts(memberNo(member));
     }
 
     @PostMapping("/api/transfers/preview")
     public TransferService.Preview preview(@RequestBody TransferRequest request, Principal member) {
-        return transfers.preview(member.getName(), request);
+        return transfers.preview(memberNo(member), request);
     }
 
     @PostMapping("/api/transfers")
     public ResponseEntity<TransferService.Receipt> submit(@RequestBody TransferRequest request, Principal member) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(transfers.submit(member.getName(), request));
+        return ResponseEntity.status(HttpStatus.CREATED).body(transfers.submit(memberNo(member), request));
     }
 
     @GetMapping("/api/transfers/{transferSerNo}")
     public ResponseEntity<TransferService.Receipt> receipt(@PathVariable String transferSerNo, Principal member) {
-        return ResponseEntity.of(transfers.receipt(member.getName(), transferSerNo));
+        return ResponseEntity.of(transfers.receipt(memberNo(member), transferSerNo));
     }
 
     @ExceptionHandler(TransferRejected.class)

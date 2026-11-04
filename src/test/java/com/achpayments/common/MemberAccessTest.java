@@ -4,6 +4,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -44,7 +45,8 @@ class MemberAccessTest {
         }
     }
 
-    private static final String MEMBER = "M10982347";
+    private static final String MEMBER = "member"; // the login name
+    private static final String MEMBER_NO = "M10982347"; // Ba's sample member, from app.member-number
 
     @Autowired
     MockMvc mvc;
@@ -105,7 +107,7 @@ class MemberAccessTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"origAcctNo\":\"100049281920\",\"amount\":10.00,\"memberNo\":\"SOMEONE-ELSE\",\"lastModBy\":\"hacker\"}"))
                 .andExpect(status().isCreated());
-        org.mockito.Mockito.verify(transfers).submit(org.mockito.ArgumentMatchers.eq(MEMBER), org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(transfers).submit(org.mockito.ArgumentMatchers.eq(MEMBER_NO), org.mockito.ArgumentMatchers.any());
         org.mockito.Mockito.verify(transfers, org.mockito.Mockito.never())
                 .submit(org.mockito.ArgumentMatchers.eq("SOMEONE-ELSE"), org.mockito.ArgumentMatchers.any());
     }
@@ -140,6 +142,33 @@ class MemberAccessTest {
     @Test
     void anonymousMustLogIn() throws Exception {
         mvc.perform(get("/api/transfers/dates")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/me")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/me")).andExpect(status().isUnauthorized())
+                // no WWW-Authenticate, so the browser shows the app's sign-in page, not its own popup
+                .andExpect(header().doesNotExist("WWW-Authenticate"))
+                .andExpect(jsonPath("$.error").value("Please sign in."));
+    }
+
+    @Test
+    void signInPageLogsInAndSignOutLogsOut() throws Exception {
+        MockHttpSession session = (MockHttpSession) mvc.perform(post("/api/login").with(csrf())
+                .param("username", MEMBER).param("password", "member-pw"))
+                .andExpect(status().isNoContent()).andReturn().getRequest().getSession();
+        mvc.perform(get("/api/me").session(session)).andExpect(jsonPath("$.username").value(MEMBER));
+
+        mvc.perform(post("/api/logout").session(session).with(csrf())).andExpect(status().isNoContent());
+        mvc.perform(get("/api/me").session(session)).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void wrongPasswordIsRejected() throws Exception {
+        mvc.perform(post("/api/login").with(csrf()).param("username", MEMBER).param("password", "nope"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("Incorrect username or password."));
+    }
+
+    @Test
+    void signInNeedsTheCsrfToken() throws Exception {
+        mvc.perform(post("/api/login").param("username", MEMBER).param("password", "member-pw"))
+                .andExpect(status().isForbidden());
     }
 }

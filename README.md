@@ -5,6 +5,8 @@ This repo will hold two systems:
 1. **Same Day ACH Payments**: originates and processes Same Day ACH entries.
 2. **ACH Fraud Monitoring & Prevention**: risk-based detection of fraudulent entries, as the 2026 Nacha rules require.
 
+**Try the demo:** https://e16163.github.io/ACH-Payments/ (sign in as `member` / `member123` or `admin` / `admin123`). It's the real screens running on made-up data in your browser. GitHub Pages can't run the Java server or MySQL, so nothing is saved, and the demo resets when you close the tab. It's rebuilt from `main` on every push (`.github/workflows/pages.yml`, `npm run build:demo`).
+
 ## Background
 
 - **Rules:** set by Nacha. Payments are processed by the Federal Reserve (FedACH) and EPN, and 31 CFR Part 210 governs.
@@ -89,7 +91,7 @@ JDBC URL: `jdbc:mysql://localhost:3306/ach_payments`
 
 The app reads its secrets from the environment:
 - `JDBC_URL`, `DB_USER` and `DB_PASSWORD` go in `~/dev/mysql-credentials.txt`.
-- `APP_ADMIN_PASSWORD`, `APP_OPERATOR_PASSWORD` and `APP_MEMBER_PASSWORD` go in `~/dev/app-credentials.txt` (optionally `APP_ADMIN_USERNAME`). These are the demo logins (see below); pick your own passwords.
+- `APP_ADMIN_PASSWORD`, `APP_OPERATOR_PASSWORD` and `APP_MEMBER_PASSWORD` go in `~/dev/app-credentials.txt` (optionally `APP_ADMIN_USERNAME`, `APP_OPERATOR_USERNAME` and `APP_MEMBER_USERNAME`). These are the demo logins (see below).
 
 Write them as `KEY=value` lines, then create `~/dev/tomcat/bin/setenv.sh` so Tomcat loads them:
 
@@ -110,7 +112,7 @@ cp target/ach.war ~/dev/tomcat/webapps/
 ```
 
 Then check it:
-- http://localhost:8080/ach/ should show **Database: DB OK**.
+- http://localhost:8080/ach/ should show the Sign in page, with **Database: OK** at the bottom.
 - http://localhost:8080/ach/api/health should return `{"db":"OK"}`.
 
 For frontend work with live reload, keep Tomcat running and run:
@@ -123,13 +125,15 @@ Then open http://localhost:5173/ach/.
 
 ### 6. Demo logins
 
-The browser asks for a login the first time a page needs one. These are demo users only; real logins come in roadmap step 16.
+The app opens on a **Sign in** page, and **Sign out** is at the top right. These are demo users only; real logins come in roadmap step 16. A local demo can use simple passwords, e.g. `member123` and `operator123`.
 
 | User | Role | Can use |
 | --- | --- | --- |
-| `admin` (or `APP_ADMIN_USERNAME` in `~/dev/app-credentials.txt`) | System Administrator | Parameter UI |
+| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI |
 | `operator` | Operator | Not the Parameter UI (gets "403 Forbidden") |
-| `M10982347` (Ba's sample member, John Doe) | Member | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
+| `member` | Member: Ba's sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
+
+Scripts and tests can still send HTTP Basic credentials, but a browser never gets the Basic login popup.
 
 ### 7. Running the database tests
 
