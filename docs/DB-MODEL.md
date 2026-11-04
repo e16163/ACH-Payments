@@ -63,6 +63,7 @@ Flyway manages all three (`spring.flyway.schemas`), and `ach_app` gets privilege
 | S9 `Process` | ✅ Follows Ba (Q8) | |
 | S10 `TransCodeSubs` key | ❌ Changes Ba's PK | |
 | M1–M8 new tables | ✅ Adds | Placed per the layout above |
+| D5 finding: `fileID` FK skipped when `batchID` is NULL | ✅ Adds (V6) | A MySQL 26.10 bug: an FK column that leads Ba's `(fileID, batchID)` index isn't checked when the other column is NULL. V6 adds `CHECK (fileID IS NULL OR batchID IS NOT NULL)` on both transaction tables (a NACHA rule anyway: every entry in a file is in a batch), so the FKs always run. Ba's definitions are unchanged. |
 
 ---
 
