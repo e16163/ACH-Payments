@@ -98,6 +98,19 @@ class MemberAccessTest {
     }
 
     @Test
+    void theMemberAndLastModByComeFromTheLoginNotTheRequestBody() throws Exception {
+        MockHttpSession session = new MockHttpSession();
+        verify(session, sendCode(session)).andExpect(status().isOk());
+        mvc.perform(post("/api/transfers").session(session).with(httpBasic(MEMBER, "member-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"origAcctNo\":\"100049281920\",\"amount\":10.00,\"memberNo\":\"SOMEONE-ELSE\",\"lastModBy\":\"hacker\"}"))
+                .andExpect(status().isCreated());
+        org.mockito.Mockito.verify(transfers).submit(org.mockito.ArgumentMatchers.eq(MEMBER), org.mockito.ArgumentMatchers.any());
+        org.mockito.Mockito.verify(transfers, org.mockito.Mockito.never())
+                .submit(org.mockito.ArgumentMatchers.eq("SOMEONE-ELSE"), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
     void fiveWrongCodesUseUpTheChallenge() throws Exception {
         MockHttpSession session = new MockHttpSession();
         String code = sendCode(session);
