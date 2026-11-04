@@ -90,7 +90,7 @@ Spec: [Use-Case-ACH-Origination-Transfer-UI.docx](design/Use-Case-ACH-Originatio
 | `ACHOriginatorTransfer` | ✅ | The transfer request (step 6). It needs the [DB-MODEL.md](DB-MODEL.md) fixes. |
 | `ACHOrigRecvAccount` | ✅ | The beneficiary's external account (step 3). No verification column for now, because the Plaid check runs on each transfer (T3). |
 | `ACHOrigLimitRule` | ✅ | Daily and monthly caps (step 5, EX-02), used as Ba wrote it (T4) |
-| `ACHOriginator`, `Source` | ✅ | `originatorID` (the credit union itself, for retail transfers) and `sourceID = 'ONLINE_BANKING'` |
+| `ACHOriginator`, `Source` | ✅ | `originatorID` (the credit union itself, for retail transfers) and `sourceID = 'ONLINE_BANKING'`. The `Source` row must be seeded (X1), since `sourceID` now has a foreign key. |
 | `AppParam` | ✅ (from UC-SYS-PARAM-01) | Transfer fee, cutoff times |
 | `SimCoreAccount` | ❌ new (DB-MODEL M4) | The member's funding accounts and **available balance** (steps 1–2). The core is simulated (A2). |
 | `ACHMemoPost` | ❌ new (DB-MODEL M4) | The immediate hold on the source account (step 7) |
@@ -102,12 +102,12 @@ Spec: [Use-Case-ACH-Origination-Transfer-UI.docx](design/Use-Case-ACH-Originatio
 
 | Step | Backend | UI |
 | --- | --- | --- |
-| 1–2 | `GET /api/member/accounts` returns the logged-in member's active accounts and available balances | Source account picker that shows the balance |
+| 1–2 | `GET /api/member/accounts` returns the logged-in member's active accounts and available balances | **Transfer & Pay** menu → **External ACH Transfer (Other Bank)**; source account picker that shows the balance |
 | 3 | `GET /api/routing/{rtn}` runs the 3-7-1 check digit and the directory lookup, then returns the bank name | Inline bank name once 9 digits are typed. On failure, EX-01 shows "Invalid routing number. Please check the 9-digit ABA number." and Submit stays disabled. |
 | 4 | — | Amount input with commas and a max guardrail. The date picker blocks weekends and holidays. Frequency fields; memo (max 10 characters → `companyEntryDesc`). |
 | 5 | `POST /api/transfers/preview` checks limits (sum of the member's pending and sent transfers within `dayNo` days, plus this one), the OFAC name check, and the **Plaid account check** (T3) | EX-02 modal: "This transfer exceeds your daily external limit of $X…" |
-| 6 | `POST /api/transfers` re-runs every check on the server, generates `transferSerNo` (`TRF-yyyyMMdd-nnnn`, Ba's format) and inserts with `processStatus = 'PENDING'`, `sourceID = 'ONLINE_BANKING'` and `lastModBy` = the logged-in member | Review screen: fee, estimated arrival, terms, Confirm |
-| 7 | In the same DB transaction, the memo hold reduces available balance, writes an `ACHMemoPost` row and sets `memoStatus = 'POSTED'` | Success modal with the reference number and a printable receipt |
+| 6 | `POST /api/transfers` re-runs every check on the server, generates `transferSerNo` (`TRF-yyyyMMdd-nnnn`, Ba's format) and inserts with `processStatus = 'PENDING'`, `sourceID = 'ONLINE_BANKING'` and `lastModBy` = the logged-in member | Review screen: fee disclosure, estimated arrival date, transfer terms, and a **Confirm Transfer** button |
+| 7 | In the same DB transaction, the memo hold reduces available balance, writes an `ACHMemoPost` row and sets `memoStatus = 'POSTED'` | Success modal with the reference number (`transferSerNo`), tracking details (status and estimated arrival) and a **Download receipt** button |
 | EX-03 | If the Plaid check returns `false`, preview and submit both block the transfer | Message: this account couldn't be verified for ACH transfers |
 
 Executing the transfer is **out of scope** for this use case and is picked up by roadmap steps 9–10. That covers:
@@ -150,6 +150,7 @@ The Transfer UI is finished when all of these hold:
   - the weekend/holiday date rules;
   - the server rejects a payload that skips UI validation;
   - `lastModBy` can't be spoofed.
+- The screens use Ba's wording: the "Transfer & Pay" menu, "External ACH Transfer (Other Bank)", "Confirm Transfer", tracking details and a receipt download.
 
 ---
 
