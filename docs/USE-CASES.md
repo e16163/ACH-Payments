@@ -89,7 +89,7 @@ Spec: [Use-Case-ACH-Origination-Transfer-UI.docx](design/Use-Case-ACH-Originatio
 | --- | --- | --- |
 | `ACHOriginatorTransfer` | ✅ | The transfer request (step 6). It needs the [DB-MODEL.md](DB-MODEL.md) fixes. |
 | `ACHOrigRecvAccount` | ✅ | The beneficiary's external account (step 3). No verification column for now, because the Plaid check runs on each transfer (T3). |
-| `ACHOrigLimitRule` | ✅ | Daily and monthly caps (step 5, EX-02). It needs per-tier or per-member scope (DB-MODEL S1). |
+| `ACHOrigLimitRule` | ✅ | Daily and monthly caps (step 5, EX-02), used as Ba wrote it (T4) |
 | `ACHOriginator`, `Source` | ✅ | `originatorID` (the credit union itself, for retail transfers) and `sourceID = 'ONLINE_BANKING'` |
 | `AppParam` | ✅ (from UC-SYS-PARAM-01) | Transfer fee, cutoff times |
 | `SimCoreAccount` | ❌ new (DB-MODEL M4) | The member's funding accounts and **available balance** (steps 1–2). The core is simulated (A2). |
@@ -104,7 +104,7 @@ Spec: [Use-Case-ACH-Origination-Transfer-UI.docx](design/Use-Case-ACH-Originatio
 | --- | --- | --- |
 | 1–2 | `GET /api/member/accounts` returns the logged-in member's active accounts and available balances | Source account picker that shows the balance |
 | 3 | `GET /api/routing/{rtn}` runs the 3-7-1 check digit and the directory lookup, then returns the bank name | Inline bank name once 9 digits are typed. On failure, EX-01 shows "Invalid routing number. Please check the 9-digit ABA number." and Submit stays disabled. |
-| 4 | — | Amount input with commas and a max guardrail. The date picker blocks weekends and holidays. Frequency fields; memo. |
+| 4 | — | Amount input with commas and a max guardrail. The date picker blocks weekends and holidays. Frequency fields; memo (max 10 characters → `companyEntryDesc`). |
 | 5 | `POST /api/transfers/preview` checks limits (sum of the member's pending and sent transfers within `dayNo` days, plus this one), the OFAC name check, and the **Plaid account check** (T3) | EX-02 modal: "This transfer exceeds your daily external limit of $X…" |
 | 6 | `POST /api/transfers` re-runs every check on the server, generates `transferSerNo` (`TRF-yyyyMMdd-nnnn`, Ba's format) and inserts with `processStatus = 'PENDING'`, `sourceID = 'ONLINE_BANKING'` and `lastModBy` = the logged-in member | Review screen: fee, estimated arrival, terms, Confirm |
 | 7 | In the same DB transaction, the memo hold reduces available balance, writes an `ACHMemoPost` row and sets `memoStatus = 'POSTED'` | Success modal with the reference number and a printable receipt |
@@ -115,20 +115,25 @@ Executing the transfer is **out of scope** for this use case and is picked up by
 - building the Fed file;
 - scheduling recurring runs from `nextPmtDt`.
 
-### Questions for Ba (the spec doesn't settle these)
+### Questions (✅ all answered 2026-11-03; Ba's spec is followed wherever it says something)
 
-- **T1. Which SEC code and description?** A consumer sending money to someone else's account at another bank is normally a **WEB credit** under Nacha rules. The spec maps the user's memo to `companyEntryDesc`, but that is a 10-character **batch-level** field the receiving bank shows on statements, e.g. `TRANSFER`. **Proposal:** set `companyEntryDesc = 'TRANSFER'` and carry the member's memo in an 05 addenda record, which holds up to 80 characters.
-- **T2. Who is the originator?** For a retail member's transfer, the proposal is that the credit union is the `originatorID`/Company ID, and the member is identified by `memberNo`.
+- **T1. SEC code and memo. ✅ Decided (2026-11-03): follow Ba's spec.**
+  - The member's memo goes in `companyEntryDesc`, as Ba's spec step 4 maps it. That field holds 10 characters, so the memo input is limited to 10.
+  - The SEC code is **WEB** (credit), the Nacha code for a consumer-initiated transfer to someone else's account. Ba's spec doesn't name one.
+- **T2. Who is the originator? ✅ Decided (2026-11-03):** the credit union. There's one `ACHOriginator` row for it, and the member is identified by `memberNo`, which Ba's table already has.
 - **T3. How are accounts verified (EX-03)? ✅ Decided (Ba, 2026-11-03):** one boolean function, `AccountVerifier.isEligibleForAch(routingNo, acctNo, acctType)`, which will call the **Plaid API** to check that the account exists and can take ACH transfers.
   - We don't have Plaid access yet, so the only implementation is an empty placeholder (`PlaidAccountVerifier`) that **always returns `true`**, with a TODO.
   - The real Plaid call comes later.
   - Tests swap in a version that returns `false`, to prove EX-03 blocks the transfer.
   - Micro-deposits are dropped for now.
-- **T4. What are the limit tiers?** Is a "tier" a retail/business grouping, or are limits set per member? This decides how `ACHOrigLimitRule` is scoped (DB-MODEL S1).
-- **T5. Fee and timing.** What fee should be shown, and should retail transfers be offered Same Day? **Proposal:** a fee from `AppParam` (default $0), and the earliest effective date is the next banking day, with no Same Day for retail at first.
-- **T6. OFAC hits.** When a screening hit happens, should the transfer be rejected, or saved as `ofacStatus = 'REVIEW'` for staff to clear? **Proposal:** saved for review, and the member sees "under review".
+- **T4. Limit tiers. ✅ Decided (2026-11-03): Ba's `ACHOrigLimitRule` as he wrote it.** A rule applies to an account type (`CHECKING`, `SAVINGS` or `ALL`) over `dayNo` days. The check adds up the member's transfers from that account type within `dayNo` days, plus the new one, and compares the total to `limitAmt`.
+- **T5. Fee and timing. ✅ Decided (2026-11-03):** free and next banking day.
+  - The fee is a parameter (`ACH_ORIG` / `EXTERNAL_XFER_FEE` = `0.00`, editable in the Parameter UI).
+  - The earliest effective date is the next banking day.
+  - No Same Day for retail.
+- **T6. OFAC hits. ✅ Decided (2026-11-03): follow Ba's `ofacStatus` values** (`CLEARED`, `FLAGGED`, `REVIEW`). A hit saves the transfer with `ofacStatus = 'FLAGGED'`, held until staff clear it, and the member sees "under review".
 - **T7. Member login. ✅ Decided (2026-11-03):** demo member users with simulated MFA, the same approach as P1.
-- **T8. Missing columns in `ACHOriginatorTransfer`.** Found while checking the plan against Ba's DDL. Step 4 collects an **effective date** and a **memo**, and step 6 shows a **fee**, but the table has none of these. It also has no **creation time**, which the daily-limit check needs to add up "today's" transfers. **Proposal:** add `effectiveDt DATE`, `memo VARCHAR(80)` (see T1), `feeAmt DECIMAL(13,2)` and `createTm DATETIME`.
+- **T8. Missing columns in `ACHOriginatorTransfer`. ✅ Decided (2026-11-03): add them, using the names Ba's spec maps the inputs to.** The new columns are `effectiveDt DATE`, `companyEntryDesc VARCHAR(10)` (T1), `feeAmt DECIMAL(13,2)` and `createTm DATETIME`. Ba's existing columns are unchanged.
 - **T9. Ba's sample routing number `051000031` is invalid.** It fails the ABA check digit (weighted sum 58), so EX-01 would reject it. Demo data will use real-format numbers that pass, e.g. `021000021`.
 
 ### Done when
@@ -151,8 +156,7 @@ The Transfer UI is finished when all of these hold:
 ## Build order
 
 1. **UC-SYS-PARAM-01.** A trial build exists, uncommitted. Once you approve this plan, update it to match Ba's answers (the list above), apply the trial fixes, and commit.
-2. Ba answers DB-MODEL.md section 6 and T1, T2, T4, T5, T6 and T8 above.
-3. **UC-ACH-ORG-01**:
+2. **UC-ACH-ORG-01**:
    - **a.** migrations for its tables;
    - **b.** routing, calendar and limit services with tests;
    - **c.** the transfer and memo-hold API;

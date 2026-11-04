@@ -10,6 +10,62 @@ Ba's design replaces the first-pass model in [PLAN.md section 4](PLAN.md#4-datab
 
 ---
 
+## 0. Decisions (2026-11-03): follow Ba's design
+
+**Rule: Ba's design wins.** His table names, column names, types and keys stay exactly as he wrote them. We only **add** what's missing: columns, foreign keys, indexes and tables needed by a spec'd screen or a Nacha rule. Any fix in section 3 that would *change* something Ba defined is **dropped**, and its problem is handled in code instead.
+
+### Answers to section 6
+
+| # | Decision |
+| --- | --- |
+| Q1 | ✅ Yes. `ACHOrigReturn`/`ACHOrigNOC` = ones we **receive** on payments we sent. `ACHRecvReturn`/`ACHRecvNOC` = ones we **send back** on payments we received. |
+| Q2 | ✅ Yes. `ACHRecvAccount` = our members' accounts. `ACHOrigRecvAccount` = outside accounts members pay. |
+| Q3 | ✅ Yes. Each run of an `ACHOriginatorTransfer` creates one `ACHOrigTransaction` (same `transferSerNo`/`transferVersion`). Business payroll batches go straight to `ACHOrigBatch` + `ACHOrigTransaction`. |
+| Q4 | ✅ A reversal or retry is a **new `ACHOrigTransaction` row**, with an added `parentTranID` column pointing to the original. Ba's action tables stay keyed as he wrote them. |
+| Q5 | ✅ All fixes and tables that **add** something are approved. Fixes that **change** Ba's definitions are dropped (table below). |
+| Q6 | ✅ Account numbers are plain text in the DB, with only the last 4 digits shown on screens. Encryption is revisited in roadmap step 16. |
+| Q7 | ✅ **Separate databases, as in Ba's diagram.** They live on one MySQL server, so cross-database foreign keys and transactions still work. See the layout below. |
+| Q8 | ✅ Keep `Process` as Ba wrote it. It holds a type label such as `ORIGINATION`, `RETURN` or `REVERSAL`; `processID`/`processName` identify the job run. |
+
+### Database layout (Ba's diagram + his doc's sections)
+
+| MySQL database | Tables |
+| --- | --- |
+| `ach_payments` (exists) | Ba's "Application Configuration and Logging": `AppParam`, `AppLog`. Shared and simulated pieces added later: `BankingCalendar`, `SimCoreAccount`, `ACHMemoPost`, `ACHEodPostingFile`, `OfacSdnName`, `ABADirectory`, `AppUser`/`AppRole`. |
+| `ach_receiving` | Ba's "ACH Receiving" tables (`ACHRecv*`) + `ACHRecvAction`, `ACHRecvReturnRequest`, `ACHRecvAddenda` |
+| `ach_origination` | Ba's "ACH Origination" and "Back Office" tables: `ACHOrig*`, `ACHOriginator`, `ACHOriginatorTransfer`, `Company`, `Contact`, `Source`, `ACHOperator`, `Action`, the action tables, + `ACHOrigAddenda` |
+
+Flyway manages all three (`spring.flyway.schemas`), and `ach_app` gets privileges on each.
+
+### Which section 3 fixes are kept
+
+| Fix | Kept? | Note |
+| --- | --- | --- |
+| F1 `descriptiveDt` → text | ❌ Changes Ba's type | Keep `DATE`. Inbound values that aren't a date (e.g. `NOV 26`) are stored as `NULL`, which Ba's column allows, so the file still loads. |
+| F2 `recvRtn` | ✅ Adds | |
+| F3 `individualID`, `addendaInd` | ✅ Adds | Ba's `transactionDiscData` stays as he defined it |
+| F4 `serviceClassCode` | ✅ Adds | |
+| F5 foreign keys | ✅ Adds | |
+| F6 cascade → restrict | ❌ Changes Ba's FK | Keep `ON DELETE CASCADE`. The app never deletes files. |
+| F7 unique `traceNo` | ❌ Changes Ba's index | Keep Ba's index. The trace number generator guarantees uniqueness in code, with a test. |
+| F8 rebuild `ACHRecvFile` | ❌ Changes Ba's columns | Keep Ba's columns. `fedStatus` holds `RECEIVED`/`VALIDATED`/`PROCESSED`/`REJECTED`, and parse errors go to `AppLog`. |
+| F9 `immedDest`, `immedOrigin` | ✅ Adds | |
+| F10 drop `originatorID`/`transferSerNo` on received entries | ❌ Changes Ba's columns | Keep them. `originatorID` is filled from the batch's Company ID, and `transferSerNo` is `NULL`. *Adding* `recvAcctSerNo`/`recvAcctVersion` is kept ✅. Status uses Ba's `fedStatus`. |
+| F11 action-table key + reason | ❌ Changes Ba's PK | Keep Ba's key. `processID` tells repeated runs apart. |
+| F12 `parentTranID` | ✅ Adds (Q4) | Ba's action tables are unchanged |
+| F13 `ACHOrigReturnAction` | ✅ Follows Ba | DDL written from his field list, in the same shape as his other action tables |
+| S1 extra limit-rule columns | ❌ Not needed | Ba's `ACHOrigLimitRule` is used as he wrote it (account type + days) |
+| S2 `AppParam.effectiveDt` | ❌ Changes Ba's key | |
+| S3, S4, S5 NOC/return deadline and status columns | ✅ Adds | Needed for Nacha deadlines (PLAN 5.7, 5.10) |
+| S6 `contactID` on `ACHOriginator` | ✅ Adds | |
+| S7 account number widths | ❌ Changes Ba's types | |
+| S8 rename `thridPartyFlag` | ❌ Changes Ba's name | The spelling stays as Ba wrote it |
+| S9 `Process` | ✅ Follows Ba (Q8) | |
+| S10 `TransCodeSubs` key | ❌ Changes Ba's PK | |
+| M1–M8 new tables | ✅ Adds | Placed per the layout above |
+
+---
+
 ## 1. Ba's tables by component
 
 Ba defines 31 tables. 30 come with `CREATE TABLE` SQL. `ACHOrigReturnAction` has a field list but no SQL.
@@ -153,7 +209,7 @@ erDiagram
 
 ---
 
-## 6. Questions for Ba
+## 6. Questions for Ba (✅ all answered: see section 0)
 
 1. **Q1:** Is `ACHOrigNOC` for NOCs we receive and `ACHRecvNOC` for NOCs we send (and the same for returns)?
 2. **Q2:** Is `ACHRecvAccount` our members' own accounts, and `ACHOrigRecvAccount` the external accounts they pay?
@@ -166,12 +222,12 @@ erDiagram
 
 ---
 
-## 7. Plan once Ba answers
+## 7. Plan
 
-1. Write Ba's tables, plus the agreed fixes, as Flyway migrations in `src/main/resources/db/migration/`. Split them by component. `V1__app_param_and_log.sql` (config and logging) ships first, with the Parameter UI ([USE-CASES.md](USE-CASES.md)). After that: `V2__receiving.sql`, `V3__origination.sql`, `V4__back_office.sql`.
+1. Write Ba's tables, plus the agreed fixes, as Flyway migrations in `src/main/resources/db/migration/`. Split them by component. `V1__app_param_and_log.sql` (config and logging, in `ach_payments`) ships first, with the Parameter UI ([USE-CASES.md](USE-CASES.md)). After that: `V2__receiving.sql` (`ach_receiving`), `V3__origination.sql` and `V4__back_office.sql` (`ach_origination`). Only the fixes kept in section 0 are applied.
    - Verify: the app starts against an empty `ach_payments` and Flyway applies all of them.
 2. Turn the tests in section 2 into automated integration tests.
-   - Verify: the free-text descriptive date loads; duplicate trace numbers, orphan returns and orphan transactions are rejected; repeated actions are logged.
+   - Verify: a file with a free-text descriptive date loads (stored as `NULL`); orphan returns and orphan transactions are rejected by FKs; the trace number generator never repeats.
 3. Load Ba's 13 sample rows as demo seed data. Fix them where the new constraints require it; for example:
    - the sample transfer points to receiving account `REC-883721`, which doesn't exist;
    - the sample routing number `051000031` fails the ABA check digit (weighted sum 58, not a multiple of 10).
