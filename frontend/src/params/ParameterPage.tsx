@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from '../api'
 import ParamModal from './ParamModal'
+import { searchParams } from './search'
 
 export type AppParam = {
   systemName: string
@@ -21,6 +22,7 @@ export default function ParameterPage() {
   const [apps, setApps] = useState<App[]>([])
   const [systemName, setSystemName] = useState('')
   const [params, setParams] = useState<AppParam[]>([])
+  const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<AppParam | 'new' | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -52,6 +54,8 @@ export default function ParameterPage() {
 
   if (error) return <p className="page-error">{error}</p>
 
+  const shown = searchParams(params, query)
+
   return (
     <section>
       <h2>System Configuration</h2>
@@ -66,6 +70,13 @@ export default function ParameterPage() {
             ))}
           </select>
         </label>
+        <input
+          type="search"
+          placeholder="Search parameters"
+          aria-label="Search parameters"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <button className="primary" disabled={!systemName} onClick={() => setEditing('new')}>
           Add New Parameter
         </button>
@@ -84,7 +95,14 @@ export default function ParameterPage() {
           </tr>
         </thead>
         <tbody>
-          {params.map((p) => (
+          {shown.length === 0 && (
+            <tr>
+              <td className="empty" colSpan={7}>
+                {query ? 'No parameters match your search.' : 'No parameters for this app yet.'}
+              </td>
+            </tr>
+          )}
+          {shown.map((p) => (
             <tr key={p.paramName}>
               <td className="code">{p.paramName}</td>
               <td>{p.paramDesc}</td>

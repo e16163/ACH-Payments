@@ -15,13 +15,25 @@ export default function App() {
   }, [])
 
   return (
-    <main>
-      <h1>ACH Payments</h1>
-      <p>
-        Database: <strong>{health ? `DB ${health.db}` : 'checking…'}</strong>
-      </p>
-      {health?.error && <pre>{health.error}</pre>}
-      <ParameterPage />
-    </main>
+    <div className="shell">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">DCU</span>
+          <span className="brand-name">Demo Credit Union</span>
+          <span className="brand-product">ACH Payments</span>
+        </div>
+      </header>
+      <nav className="mainnav" aria-label="Main">
+        <a className="active" href="#">System Configuration</a>
+      </nav>
+      <main>
+        <ParameterPage />
+      </main>
+      <footer className="statusbar">
+        <span className={`dot ${health?.db === 'OK' ? 'ok' : 'down'}`} aria-hidden="true" />
+        Database: {health ? health.db : 'checking…'}
+        {health?.error && <span className="status-error"> — {health.error}</span>}
+      </footer>
+    </div>
   )
 }
