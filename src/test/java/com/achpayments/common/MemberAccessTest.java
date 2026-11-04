@@ -56,6 +56,9 @@ class MemberAccessTest {
     TransferDates dates;
 
     @MockitoBean
+    com.achpayments.transfer.TransferService transfers;
+
+    @MockitoBean
     BankingCalendar calendar;
 
     @MockitoBean

@@ -1,17 +1,27 @@
 package com.achpayments.transfer;
 
+import java.security.Principal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.achpayments.common.BankingCalendar;
 
-/** UC-ACH-ORG-01 (External ACH Transfer) API for the member screens. */
+/**
+ * UC-ACH-ORG-01 (External ACH Transfer) API for the member screens. Only members who passed MFA get here
+ * (SecurityConfig). The member number always comes from the login, never from the request body.
+ */
 @RestController
-@RequestMapping("/api/transfers")
 public class TransferController {
 
     /** Feeds the date picker: the earliest allowed date and the holidays to disable (weekends are disabled too). */
@@ -20,14 +30,47 @@ public class TransferController {
 
     private final TransferDates dates;
     private final BankingCalendar calendar;
+    private final TransferService transfers;
 
-    public TransferController(TransferDates dates, BankingCalendar calendar) {
+    public TransferController(TransferDates dates, BankingCalendar calendar, TransferService transfers) {
         this.dates = dates;
         this.calendar = calendar;
+        this.transfers = transfers;
     }
 
-    @GetMapping("/dates")
+    @GetMapping("/api/transfers/dates")
     public DateRules dateRules() {
         return new DateRules(dates.earliest(), calendar.holidays().stream().sorted().toList());
+    }
+
+    @GetMapping("/api/member/accounts")
+    public List<TransferService.Account> accounts(Principal member) {
+        return transfers.accounts(member.getName());
+    }
+
+    @PostMapping("/api/transfers/preview")
+    public TransferService.Preview preview(@RequestBody TransferRequest request, Principal member) {
+        return transfers.preview(member.getName(), request);
+    }
+
+    @PostMapping("/api/transfers")
+    public ResponseEntity<TransferService.Receipt> submit(@RequestBody TransferRequest request, Principal member) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(transfers.submit(member.getName(), request));
+    }
+
+    @GetMapping("/api/transfers/{transferSerNo}")
+    public ResponseEntity<TransferService.Receipt> receipt(@PathVariable String transferSerNo, Principal member) {
+        return ResponseEntity.of(transfers.receipt(member.getName(), transferSerNo));
+    }
+
+    @ExceptionHandler(TransferRejected.class)
+    public ResponseEntity<Map<String, String>> rejected(TransferRejected e) {
+        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage(), "kind", e.kind().name()));
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<Map<String, String>> unreadable(HttpMessageNotReadableException e) {
+        return ResponseEntity.badRequest().body(Map.of("error", "Some details aren't valid. Check the form and try again.",
+                "kind", TransferRejected.Kind.INVALID.name()));
     }
 }

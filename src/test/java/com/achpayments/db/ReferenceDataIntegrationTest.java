@@ -49,6 +49,6 @@ class ReferenceDataIntegrationTest {
 
     @Test
     void theOfacListIsLoaded() {
-        assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM OfacSdnName", Integer.class));
+        assertEquals(4, jdbc.queryForObject("SELECT COUNT(*) FROM OfacSdnName", Integer.class));
     }
 }
