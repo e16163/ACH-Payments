@@ -39,4 +39,9 @@ public class BankingCalendar {
     public LocalDate nextBankingDay(LocalDate date) {
         return addBankingDays(date, 1);
     }
+
+    /** The Federal Reserve holidays, e.g. for the Transfer UI date picker. */
+    public Set<LocalDate> holidays() {
+        return holidays;
+    }
 }
