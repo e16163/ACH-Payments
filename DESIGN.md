@@ -1,34 +1,37 @@
 # DESIGN.md: UI style for the ACH Payments demo
 
-The screens should look like a credit union's internal banking application: plain, readable and trustworthy. The bank is a fictional **Demo Credit Union**. Don't use any real institution's name, logo or trademarks.
+The screens use an x.ai-inspired look (from `getdesign add x.ai`): a near-black canvas, white text, hairline borders, white pill buttons, regular-weight type and uppercase tracked monospace labels. The bank is a fictional **Demo Credit Union**. Don't use any real institution's name, logo or trademarks.
 
 All tokens live in `frontend/src/app.css` (`:root`). Use them; don't hard-code new colours.
 
 ## Colours
 | Token | Value | Use |
 | --- | --- | --- |
-| `--navy` | `#0b2a55` | Header bar, page titles, active menu item |
-| `--blue` | `#1f5fbf` | Primary buttons, focus ring |
-| `--page` / `--surface` | `#f3f5f8` / `#ffffff` | Page background / cards, tables, modals |
-| `--border`, `--border-strong` | `#d9dee6`, `#b8c0cc` | Dividers / input borders |
-| `--text`, `--text-muted` | `#1b2433`, `#5a6577` | Body text / labels, headers, captions |
-| `--error` (+ `-bg`) | `#b42318` | Inline field errors, invalid fields, page errors |
-| `--success` (+ `-bg`) | `#067647` | Success toasts, healthy status |
+| `--canvas` | `#0a0a0a` | Page, header, menu bar, modals |
+| `--canvas-card` / `--canvas-soft` | `#191919` / `#1a1c20` | Cards and tables / inputs, table headers, row hover |
+| `--hairline` | `#212327` | All borders and dividers |
+| `--pill-border` | white at 25% | Buttons, active menu item, input focus |
+| `--ink` / `--body` / `--mute` | `#ffffff` / `#dadbdf` / `#7d8187` | Headings and values / body text / labels and captions |
+| `--error` (+ `-bg`) | `#ff8a80` | Inline field errors, invalid fields, page errors |
+| `--success` (+ `-bg`) | `#7ee2a8` | Bank-name confirmation, toasts, healthy status |
+
+x.ai's palette has no error or success colours. These two are additions, because banking forms need them.
 
 ## Layout
-- Navy top bar (64 px) with the DCU mark, "Demo Credit Union" and the product name.
-- A white menu bar below it. The current page is underlined in navy.
-- Content is centred, max 1280 px wide, with 32 px side padding.
-- A status bar at the bottom shows the database health.
+- A 64 px header with the round DCU mark, "Demo Credit Union", and the product name in mono caps.
+- A menu bar below it. Items are pills, and the current page has a white outline.
+- Content is centred, max 1200 px wide, with 32 px side padding.
+- A mono-caps status bar at the bottom shows the database health.
 
 ## Components
-- **Buttons:** 6 px radius, semibold. There is one primary (blue, filled) per view; the rest are white with a border.
-- **Tables:** white card with a border. Headers are small uppercase muted text on `#f8f9fb`. Rows highlight on hover. When a table is empty, it shows a centred `.empty` message.
-- **Inputs:** 6 px radius, with a blue focus ring. When invalid, the field gets a red border and a pale red fill, and the message appears below it in `.field-error`.
-- **Modals:** white, 8 px radius, with a soft shadow over a navy overlay.
-- **Toasts:** green-tinted, bottom right.
+- **Buttons:** pills (9999 px radius), weight 400. There is one primary per view (white fill, black text); the rest are black with a 25% white outline.
+- **Labels:** field labels, table headers, section titles, summary terms and the breadcrumb are 12 px uppercase mono with 1.2 px tracking.
+- **Tables:** `--canvas-card` with hairline borders, 8 px radius. Rows highlight on hover. An empty table shows a centred `.empty` message.
+- **Inputs:** `--canvas-soft` fill, hairline border, 8 px radius. The border brightens on focus. `.invalid` gives a red border and a faint red fill, with the message below it in `.field-error`.
+- **Modals:** black, hairline border, 8 px radius, over a 70% black overlay.
+- **Date picker:** the selected day is a white pill. Disabled days are struck through, and holidays are red.
 
 ## Type
-- System UI font (Segoe UI / -apple-system / Roboto), 15 px body.
-- Monospace for codes and values (parameter names, routing numbers, trace numbers).
+- Inter / system UI at 15 px, weight 400. Headings are 32 px with negative tracking.
+- Monospace for labels and for codes and values: parameter names, routing numbers, reference and trace numbers.
 - Account numbers are always masked to the last 4 digits (DB-MODEL Q6).
