@@ -1,6 +1,6 @@
 # Use Case Plans
 
-Ba's use case specs live in [design/](design/). Each section below gives:
+Ba's use case specs live in [design/](design/). The work is tracked as tasks on the GitHub Projects board (kanban). Each section below gives:
 - what the use case needs (tables, API, UI, rules);
 - the assumptions made where the spec is silent;
 - how it will be verified.
@@ -128,6 +128,8 @@ Executing the transfer is **out of scope** for this use case and is picked up by
 - **T5. Fee and timing.** What fee should be shown, and should retail transfers be offered Same Day? **Proposal:** a fee from `AppParam` (default $0), and the earliest effective date is the next banking day, with no Same Day for retail at first.
 - **T6. OFAC hits.** When a screening hit happens, should the transfer be rejected, or saved as `ofacStatus = 'REVIEW'` for staff to clear? **Proposal:** saved for review, and the member sees "under review".
 - **T7. Member login. ✅ Decided (2026-11-03):** demo member users with simulated MFA, the same approach as P1.
+- **T8. Missing columns in `ACHOriginatorTransfer`.** Found while checking the plan against Ba's DDL. Step 4 collects an **effective date** and a **memo**, and step 6 shows a **fee**, but the table has none of these. It also has no **creation time**, which the daily-limit check needs to add up "today's" transfers. **Proposal:** add `effectiveDt DATE`, `memo VARCHAR(80)` (see T1), `feeAmt DECIMAL(13,2)` and `createTm DATETIME`.
+- **T9. Ba's sample routing number `051000031` is invalid.** It fails the ABA check digit (weighted sum 58), so EX-01 would reject it. Demo data will use real-format numbers that pass, e.g. `021000021`.
 
 ### Done when
 
@@ -149,7 +151,7 @@ The Transfer UI is finished when all of these hold:
 ## Build order
 
 1. **UC-SYS-PARAM-01.** A trial build exists, uncommitted. Once you approve this plan, update it to match Ba's answers (the list above), apply the trial fixes, and commit.
-2. Ba answers DB-MODEL.md section 6 and T1, T2, T4, T5 and T6 above.
+2. Ba answers DB-MODEL.md section 6 and T1, T2, T4, T5, T6 and T8 above.
 3. **UC-ACH-ORG-01**:
    - **a.** migrations for its tables;
    - **b.** routing, calendar and limit services with tests;

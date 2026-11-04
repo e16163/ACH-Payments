@@ -490,6 +490,8 @@ Each step is small enough for one assignment and has a clear "done" check.
 
 Steps 0–3 don't depend on any open questions, so we can start immediately.
 
+Ba's use cases are planned in [USE-CASES.md](USE-CASES.md): the Parameter UI comes before step 4, and the External Transfer UI comes with steps 6 and 9. All work is tracked as tasks on the GitHub Projects kanban board.
+
 ---
 
 ## 10. Questions for Ba

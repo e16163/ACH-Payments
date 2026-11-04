@@ -86,7 +86,7 @@ The doc contains hidden icon characters pasted from a chat window. They sit in f
 | # | Table(s) | Problem | Proposed fix |
 | --- | --- | --- | --- |
 | S1 | `ACHOrigLimitRule` | No credit/debit column, even though rule names like `DAILY_CHECKING_DEBIT_CAP` imply one. No per-originator limits, so every business member gets the same cap. No Same Day per-entry limit. | Add `creditFlag`, `originatorID` (NULL means all) and `sameDayFlag` |
-| S2 | `AppParam` | No effective date, but the Same Day limit is already scheduled to change from $1M to $10M on 2027-09-17 | Add `effectiveDt` to the primary key |
+| S2 | `AppParam` | **Deferred** (USE-CASES.md P5: the Parameter UI keys on `systemName`+`paramName` only). No effective date, but the Same Day limit is already scheduled to change from $1M to $10M on 2027-09-17 | Add `effectiveDt` to the primary key |
 | S3 | `ACHRecvNOC` (sent) | No workflow fields | Add `nocStatus` (`DRAFT → APPROVED → SENT`), `approvedBy`, and `dueDt` (2 banking days after settlement) |
 | S4 | `ACHOrigNOC` (received) | Can't track the Nacha deadlines | Add `notifyByDt` (2 banking days), `applyByDt` (6 banking days), `appliedTm`, and `refusedCode` (C61–C69) |
 | S5 | `ACHRecvReturn` (sent) | No deadline and no WSUD tracking | Add `dueDt` (2 banking days, or 60 days for R05/R07/R10/R11) and `wsudFlag` |
@@ -168,10 +168,12 @@ erDiagram
 
 ## 7. Plan once Ba answers
 
-1. Write Ba's tables, plus the agreed fixes, as Flyway migrations in `src/main/resources/db/migration/`. Split them by component: `V1__config_and_logging.sql`, `V2__receiving.sql`, `V3__origination.sql`, `V4__back_office.sql`.
+1. Write Ba's tables, plus the agreed fixes, as Flyway migrations in `src/main/resources/db/migration/`. Split them by component. `V1__app_param_and_log.sql` (config and logging) ships first, with the Parameter UI ([USE-CASES.md](USE-CASES.md)). After that: `V2__receiving.sql`, `V3__origination.sql`, `V4__back_office.sql`.
    - Verify: the app starts against an empty `ach_payments` and Flyway applies all of them.
 2. Turn the tests in section 2 into automated integration tests.
    - Verify: the free-text descriptive date loads; duplicate trace numbers, orphan returns and orphan transactions are rejected; repeated actions are logged.
-3. Load Ba's 13 sample rows as demo seed data. Fix them where the new constraints require it; for example, the sample transfer points to receiving account `REC-883721`, which doesn't exist.
+3. Load Ba's 13 sample rows as demo seed data. Fix them where the new constraints require it; for example:
+   - the sample transfer points to receiving account `REC-883721`, which doesn't exist;
+   - the sample routing number `051000031` fails the ABA check digit (weighted sum 58, not a multiple of 10).
    - Verify: they insert cleanly.
 4. Continue the roadmap at step 4 (inbound ingestion), which writes parsed files into `ACHRecvFile`, `ACHRecvBatch` and `ACHRecvTransaction`.
