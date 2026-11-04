@@ -155,7 +155,7 @@ The Transfer UI is finished when all of these hold:
 
 ## Build order
 
-1. **UC-SYS-PARAM-01.** A trial build exists, uncommitted. Once you approve this plan, update it to match Ba's answers (the list above), apply the trial fixes, and commit.
+1. **UC-SYS-PARAM-01.** ✅ Built (board P1–P3): matches Ba's answers, and every "Done when" check passed in the deployed app.
 2. **UC-ACH-ORG-01**:
    - **a.** migrations for its tables;
    - **b.** routing, calendar and limit services with tests;

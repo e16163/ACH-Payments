@@ -1,0 +1,143 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  color: #1d2433;
+  background: #f6f7f9;
+}
+
+main {
+  padding: 1.5rem 2rem;
+  max-width: 1200px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e3e6eb;
+  vertical-align: top;
+}
+
+th {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: #5b6475;
+}
+
+.code {
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+td.value {
+  max-width: 280px;
+  overflow-wrap: anywhere;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+button {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #c4c9d2;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+button.primary {
+  background: #1f4e9c;
+  border-color: #1f4e9c;
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: #fff;
+  border-radius: 6px;
+  padding: 1.25rem 1.5rem;
+  width: 460px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.modal h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.15rem;
+}
+
+.modal label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  color: #5b6475;
+}
+
+.modal input,
+.modal select,
+.modal textarea {
+  font: inherit;
+  font-size: 0.95rem;
+  color: #1d2433;
+  padding: 0.4rem;
+  border: 1px solid #c4c9d2;
+  border-radius: 4px;
+}
+
+.modal textarea.code {
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.modal .invalid {
+  border-color: #c62828;
+  outline-color: #c62828;
+  background: #fff5f5;
+}
+
+.field-error,
+.page-error {
+  color: #c62828;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.toast {
+  position: fixed;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  background: #2e7d32;
+  color: #fff;
+  padding: 0.75rem 1rem;
+  border-radius: 4px;
+}

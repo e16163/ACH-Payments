@@ -10,12 +10,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(HealthController.class)
+@Import(SecurityConfig.class) // proves /api/health stays public under the real security rules
+@TestPropertySource(properties = {"app.admin-password=x", "app.operator-password=y"})
 class HealthControllerTest {
 
     @Autowired
@@ -23,6 +27,9 @@ class HealthControllerTest {
 
     @MockitoBean
     JdbcTemplate jdbc;
+
+    @MockitoBean
+    AppLogRepository appLog;
 
     @Test
     void reportsOkWhenDatabaseAnswers() throws Exception {

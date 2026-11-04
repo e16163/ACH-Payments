@@ -81,12 +81,17 @@ JDBC URL: `jdbc:mysql://localhost:3306/ach_payments`
 
 ### 5. Build and run
 
-The app reads `JDBC_URL`, `DB_USER` and `DB_PASSWORD` from the environment. Put them in `~/dev/mysql-credentials.txt` as `KEY=value` lines, then create `~/dev/tomcat/bin/setenv.sh` so Tomcat loads them:
+The app reads its secrets from the environment:
+- `JDBC_URL`, `DB_USER` and `DB_PASSWORD` go in `~/dev/mysql-credentials.txt`.
+- `APP_ADMIN_PASSWORD` and `APP_OPERATOR_PASSWORD` go in `~/dev/app-credentials.txt`. These are the demo logins (see below); pick your own passwords.
+
+Write them as `KEY=value` lines, then create `~/dev/tomcat/bin/setenv.sh` so Tomcat loads them:
 
 ```sh
 #!/bin/sh
 set -a
 . "$HOME/dev/mysql-credentials.txt"
+. "$HOME/dev/app-credentials.txt"
 set +a
 ```
 
@@ -110,12 +115,39 @@ cd frontend && ./node/npm run dev
 
 Then open http://localhost:5173/ach/.
 
+### 6. Demo logins
+
+The browser asks for a login the first time a page needs one. These are demo users only; real logins come in roadmap step 16.
+
+| User | Role | Can use |
+| --- | --- | --- |
+| `admin` | System Administrator | Parameter UI |
+| `operator` | Operator | Not the Parameter UI (gets "403 Forbidden") |
+
+### 7. Running the database tests
+
+Some tests run against real MySQL, in a separate **test** database so they never touch your data. One-time setup, as root:
+
+```sql
+CREATE DATABASE ach_payments_test CHARACTER SET utf8mb4;
+GRANT ALL PRIVILEGES ON ach_payments_test.* TO 'ach_app'@'localhost';
+```
+
+Then run the tests with `TEST_JDBC_URL` set. Without it, the database tests are skipped and everything else still runs.
+
+```sh
+set -a; . ~/dev/mysql-credentials.txt; set +a
+export TEST_JDBC_URL=jdbc:mysql://localhost:3306/ach_payments_test
+mvn test
+```
+
 ## Status
 
 - [x] Java 21, Tomcat 11, MySQL installed locally
 - [x] Requirements and implementation plan ([docs/PLAN.md](docs/PLAN.md))
 - [x] Step 0: Spring Boot + React skeleton deployed on Tomcat, with DB health check
 - [x] Step 1: NACHA file parser
+- [x] Parameter UI (UC-SYS-PARAM-01): designers add/edit parameters per app
 - [x] Ba's design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
 - [ ] Database schema (waiting on Ba's answers in DB-MODEL.md section 6)
 - [ ] Same Day ACH payments service

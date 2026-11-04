@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import ParameterPage from './params/ParameterPage'
+import './app.css'
 
 type Health = { db: string; error?: string }
 
@@ -13,12 +15,13 @@ export default function App() {
   }, [])
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', padding: '2rem' }}>
+    <main>
       <h1>ACH Payments</h1>
       <p>
         Database: <strong>{health ? `DB ${health.db}` : 'checking…'}</strong>
       </p>
       {health?.error && <pre>{health.error}</pre>}
+      <ParameterPage />
     </main>
   )
 }
