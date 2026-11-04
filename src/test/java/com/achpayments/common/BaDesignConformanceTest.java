@@ -36,13 +36,15 @@ class BaDesignConformanceTest {
 
     private static final String REFERENCE_DB = "ba_reference_test";
 
-    /** Ba's tables that must exist by now. Grows as each schema task (D1-D3) lands. */
+    /** All 30 of Ba's tables with SQL (D1-D3). */
     private static final Set<String> REQUIRED = Set.of(
             "AppParam", "AppLog",
             "ACHRecvTransaction", "ACHRecvAccount", "ACHRecvFile", "ACHRecvBatch", "ACHRecvReturn", "ACHRecvNOC",
             "ACHRecvAcctSubs", "ACHRecvTransCodeSubs",
             "ACHOrigTransaction", "ACHOriginator", "ACHOrigRecvAccount", "ACHOrigLimitRule", "ACHOriginatorTransfer",
-            "ACHOperator", "Contact", "ACHOrigFile", "ACHOrigBatch", "Company", "Source");
+            "ACHOperator", "Contact", "ACHOrigFile", "ACHOrigBatch", "Company", "Source",
+            "Action", "ACHOrigReturn", "ACHOrigNOC", "ACHOrigAcctSubs", "ACHOrigTransCodeSubs",
+            "ACHOrigResubAction", "ACHOrigNOCAction", "ACHOrigFedAction", "ACHOrigReversalAction");
 
     @Autowired
     JdbcTemplate jdbc;
