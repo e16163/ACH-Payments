@@ -40,7 +40,9 @@ class BaDesignConformanceTest {
     private static final Set<String> REQUIRED = Set.of(
             "AppParam", "AppLog",
             "ACHRecvTransaction", "ACHRecvAccount", "ACHRecvFile", "ACHRecvBatch", "ACHRecvReturn", "ACHRecvNOC",
-            "ACHRecvAcctSubs", "ACHRecvTransCodeSubs");
+            "ACHRecvAcctSubs", "ACHRecvTransCodeSubs",
+            "ACHOrigTransaction", "ACHOriginator", "ACHOrigRecvAccount", "ACHOrigLimitRule", "ACHOriginatorTransfer",
+            "ACHOperator", "Contact", "ACHOrigFile", "ACHOrigBatch", "Company", "Source");
 
     @Autowired
     JdbcTemplate jdbc;
