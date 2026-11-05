@@ -44,7 +44,7 @@ function ItemTable({ items, caption }: { items: Item[]; caption: string }) {
 }
 
 /** UC-ACH-EOD-01 E3: the 5 PM file, and what an operator does when it needs a person. */
-export default function AchFilesPage() {
+export default function AchOriginationFilePage() {
   const [status, setStatus] = useState<Status | null>(null)
   const [businessDate, setBusinessDate] = useState('')
   const [viewing, setViewing] = useState<FileContent | null>(null)
@@ -103,7 +103,7 @@ export default function AchFilesPage() {
 
   return (
     <>
-      <h2>ACH Files</h2>
+      <h2>ACH Origination File</h2>
       <p className="hint">The file builds by itself after the {status.cutoff} cutoff (Eastern) on each banking day.</p>
 
       {failed.map((f) => (

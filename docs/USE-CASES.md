@@ -170,15 +170,15 @@ The Transfer UI is finished when all of these hold:
 | 6. Persistence | One DB transaction writes `ACHOrigFile` (`fedStatus = 'QUEUED'`), `ACHOrigBatch`, the entries and the status changes. |
 | 7. Transmission | The Fed simulator (PLAN A2) writes `<fileName>` to the `fed/outbound` folder. Success sets `fedStatus = 'SENT'` and `sendTm`, and adds an `ACHOrigFedAction` row. |
 | EX-01 | Names are screened again during compilation. A hit sets `ofacStatus = 'FLAGGED'`, leaves the item out of the file and writes a WARN alert. The rest of the file proceeds. |
-| EX-02 | 3 attempts in total, waiting 1 s then 2 s. If all fail: `fedStatus = 'ERROR'`, a FATAL `AppLog` row, and a notice on the ACH Files page. |
-| Idempotency | A rerun first resends any `QUEUED` file, rebuilt from its saved rows, so the bytes match and no transactions are duplicated. Only rows still `PENDING_BATCH` go into a new file. A file in `ERROR` is only resent from the ACH Files page. |
+| EX-02 | 3 attempts in total, waiting 1 s then 2 s. If all fail: `fedStatus = 'ERROR'`, a FATAL `AppLog` row, and a notice on the ACH Origination File page. |
+| Idempotency | A rerun first resends any `QUEUED` file, rebuilt from its saved rows, so the bytes match and no transactions are duplicated. Only rows still `PENDING_BATCH` go into a new file. A file in `ERROR` is only resent from the ACH Origination File page. |
 | Audit trail | Each state change adds an `ACHOrigFedAction` row. MySQL triggers (V12) refuse `UPDATE` and `DELETE` on that table, to meet Ba's "unalterable". With binary logging on, `ach_app` can only create them after one root setting: README section 4. `TRUNCATE` and `DROP` skip triggers, so a DB admin could still remove the table; closing that needs a separate, less privileged app user. |
 
 ### Decisions (✅ answered 2026-11-05)
 
 - **E1. Which transfers go in tonight's file? ✅ Dated today, as Ba wrote.** 5 PM is after the last Same Day deadline, so the entry settles the next banking day. **Estimated arrival becomes `effectiveDt` + 1 banking day**, on the review page, the receipt and the online demo; today it equals `effectiveDt`. Transfers missed on an earlier day (for example, server down) are still picked up, because the query uses `<=` today.
 - **E2. Status names. ✅ Ba's new names.** New transfers are saved as `OFAC_PASSED` / `PENDING_BATCH`. His sample row is updated from `CLEARED` by a new migration, because V7 can't change. `FLAGGED` and `REVIEW` stay. This replaces T6's `CLEARED`.
-- **E3. Screen. ✅ Admin "ACH Files" page in the real app and the online demo.** Run now, the list of files with status and totals, items left out, view and download the `.ach`, and Resend on an `ERROR` file. The online demo needs the NACHA format in TypeScript too, so a shared expected file (a golden file) is checked by both the Java and the TypeScript tests to stop them drifting.
+- **E3. Screen. ✅ Admin "ACH Origination File" page in the real app and the online demo.** Run now, the list of files with status and totals, items left out, view and download the `.ach`, and Resend on an `ERROR` file. The online demo needs the NACHA format in TypeScript too, so a shared expected file (a golden file) is checked by both the Java and the TypeScript tests to stop them drifting.
 - **E4. Recurring transfers. ✅ Follow Ba's table design.** `pTransferSerNo` is "Parent Transfer Serial Number (for recurring transfer series)", so each payment is its own row linked to the first.
   - When a payment goes in a file, or is rejected, the next row is created with the next date, `pTransferSerNo` set to the first row, `transferReqNo` + 1 and `transferReqRemaining` - 1.
   - Dates are counted from the first payment's date (+7, +14 or +n months, so Jan 31 → Feb 28 → Mar 31). A non-banking day moves to the next banking day.
@@ -206,7 +206,7 @@ The Transfer UI is finished when all of these hold:
 - **E8a. Action rows.** Next to Ba's `401 FED_SEND`: `402 FILE_QUEUED`, `403 FED_SEND_FAILED`, `404 FILE_ERROR`.
 - **E8b. Run now takes a business date.** A transfer made today is dated the next banking day or later, so running for today finds nothing. Ba's step 2 allows a "scheduled business date", so the page offers one, prefilled with the next date that has transfers waiting. The automatic 5 PM run always uses today.
 - **E10. Nothing to send, or not a banking day:** no file, and an INFO row in `AppLog`.
-- **E11. Simulated parts.** Ba's "compliance dashboard" and "notification to operations" don't exist yet, so both are an `AppLog` row plus a notice on the ACH Files page, until card R15. `ACH_ORIG/FED_SIM_FAIL_ATTEMPTS` (default 0) makes the simulator fail, so EX-02 can be shown.
+- **E11. Simulated parts.** Ba's "compliance dashboard" and "notification to operations" don't exist yet, so both are an `AppLog` row plus a notice on the ACH Origination File page, until card R15. `ACH_ORIG/FED_SIM_FAIL_ATTEMPTS` (default 0) makes the simulator fail, so EX-02 can be shown.
 - **Ba's sample transfer** `TRF-20261101-9921` has no `effectiveDt` and `memoStatus = 'PENDING'`, so it never enters a file.
 
 ### Build order
@@ -217,7 +217,7 @@ The Transfer UI is finished when all of these hold:
 4. Persistence and idempotency (step 6). → verify: running twice gives one file and no duplicate entries; EX-01 leaves a flagged item out while the rest go.
 5. Fed simulator, retries and scheduler (step 7, EX-02). → verify: tests for fail-twice-then-send, fail-three-times → `ERROR`, and the cutoff on non-banking days.
 6. Recurring (E4). → verify: series dates, month-end, insufficient funds skips one payment and the series continues.
-7. ACH Files page, real app. → verify: browser run from member transfer to `.ach` file.
+7. ACH Origination File page, real app. → verify: browser run from member transfer to `.ach` file.
 8. Online demo, TypeScript builder. → verify: same golden file, same browser run.
 9. Update `docs/DEMO.md`. → verify: every step followed once in both versions.
 

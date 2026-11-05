@@ -85,13 +85,13 @@ Keep the $2.50 fee; Part 2 uses it.
 
 The file normally builds by itself after `FED_FILE_CUTOFF_TIME` (5 PM Eastern) on each banking day. **Run now** does the same thing on demand.
 
-1. Sign out, sign in as **admin**, and click **ACH Files**.
+1. Sign out, sign in as **admin**, and click **ACH Origination File**.
 2. You see:
    - **Waiting for a file (1):** Jane Smith's transfer
    - **Left out (1):** Blocked Test Person, reason **OFAC review**
    - a **Compliance alert** (your EX-01)
 3. **Business date** is already set to the date of Jane's transfer. Run now takes a date because a transfer made today is dated the next banking day or later.
-4. **EX-02 (the Fed is down):** in **System Configuration**, edit `FED_SIM_FAIL_ATTEMPTS` and set it to `3`. Back in **ACH Files**, click **Run now**. The file ends in **ERROR** with an **Operations alert**. The full app waits 1 second, then 2, between its 3 tries.
+4. **EX-02 (the Fed is down):** in **System Configuration**, edit `FED_SIM_FAIL_ATTEMPTS` and set it to `3`. Back in **ACH Origination File**, click **Run now**. The file ends in **ERROR** with an **Operations alert**. The full app waits 1 second, then 2, between its 3 tries.
 5. Set `FED_SIM_FAIL_ATTEMPTS` back to `0`, and click **Resend** on the file. It's now **SENT**.
 6. Click **View** to read the NACHA file: the file header, batch header, Jane's entry line, the batch and file controls, and the rows of 9s that pad it to a multiple of 10 records. **Download** saves the `.ach` file.
 7. Click **Run now** again: "Nothing is due". A rerun can't duplicate anything.
@@ -99,6 +99,10 @@ The file normally builds by itself after `FED_FILE_CUTOFF_TIME` (5 PM Eastern) o
 In the full app, the transfer's `processStatus` is now `PROCESSED` (the query in Part 4). There's no member screen yet that lists past transfers.
 
 To see a recurring series, make a Weekly transfer with 3 payments in Part 2. Each time you run the file, the next payment appears under **Waiting**, with its own date and its own hold. If the money isn't there on that date, that payment is rejected, shows under **Left out**, and the series continues.
+
+## ACH Receiving File
+
+Sign in as **admin** and click **ACH Receiving File**. This is the file the Fed sends the bank at 6 AM each morning. The page is read-only for now: it lists what's in `ACHRecvFile`, which today is your sample file `ACHFILE-88392.ach` with its one entry ($3,450.50 credit). Nothing fetches or processes a file yet; that comes with your ACH Receiving Engine use case.
 
 ## Part 4: System Design (in the full app)
 
@@ -120,6 +124,10 @@ SELECT acctNo, ledgerBal, availBal FROM ach_payments.SimCoreAccount;
 SELECT fileID, fedStatus, totalCreditCount, totalCreditAmt, sendTm FROM ach_origination.ACHOrigFile ORDER BY fileID DESC LIMIT 5;
 SELECT transferSerNo, tranCode, recvRoutingNo, recvName, amount, traceNo, fedStatus FROM ach_origination.ACHOrigTransaction ORDER BY traceNo DESC LIMIT 5;
 SELECT * FROM ach_origination.ACHOrigFedAction ORDER BY actionTm DESC LIMIT 10;
+
+-- the files received from the Fed, with their entries
+SELECT fileID, fileName, fileHeaderDt, fedStatus FROM ach_receiving.ACHRecvFile;
+SELECT transferSerNo, fileID, recvName, amount, creditFlag FROM ach_receiving.ACHRecvTransaction;
 
 -- Parameter UI changes and security events
 SELECT * FROM ach_payments.AppParam;

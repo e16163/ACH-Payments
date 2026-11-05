@@ -35,7 +35,7 @@ public class SecurityConfig {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
-                        .requestMatchers("/api/params/**", "/api/eod/**").hasRole("SYS_ADMIN")
+                        .requestMatchers("/api/params/**", "/api/eod/**", "/api/receiving/**").hasRole("SYS_ADMIN")
                         .requestMatchers("/api/member/mfa/**").hasRole("MEMBER")
                         // UC-ACH-ORG-01 precondition: the member is logged in AND has passed MFA
                         .requestMatchers("/api/member/**", "/api/transfers/**", "/api/routing/**").access(MEMBER_WITH_MFA)

@@ -212,6 +212,10 @@ function route(s: State, method: string, path: string, body: Body): unknown {
     if (role !== 'SYS_ADMIN') denied()
     return eod(s, method, path, body)
   }
+  if (path === '/receiving/files') {
+    if (role !== 'SYS_ADMIN') denied()
+    return RECEIVING_FILES
+  }
   if (role !== 'MEMBER') denied()
   if (path === '/member/mfa/send' && method === 'POST') {
     const code = pad(Math.floor(Math.random() * 1_000_000), 6)
@@ -390,7 +394,12 @@ function receipt(t: Transfer) {
   }
 }
 
-// ---- ACH Files (EodController, EodFileJob, EodFileStore, FedSimulator) ----
+// ---- ACH Origination File (EodController, EodFileJob, EodFileStore, FedSimulator) ----
+
+/** Ba's sample ACHRecvFile row (V7), with the counts ReceivingFileController takes from its entry. */
+const RECEIVING_FILES = [
+  { fileID: 'ACHFILE-88392', fileName: 'ACHFILE-88392.ach', fileHeaderDt: '2026-11-01', fileHeaderTm: '16:00:00', fedStatus: 'PROCESSED', entryCount: 1, totalCreditAmt: 3450.5, totalDebitAmt: 0 },
+]
 
 const param = (s: State, name: string) => s.params.find((p) => p.systemName === 'ACH_ORIG' && p.paramName === name)?.paramRawValue ?? ''
 

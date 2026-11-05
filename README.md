@@ -134,8 +134,8 @@ The app opens on a **Sign in** page, and **Sign out** is at the top right. These
 
 | User | Role | Can use |
 | --- | --- | --- |
-| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, ACH Files |
-| `operator` | Operator | Not the Parameter UI or ACH Files (gets "403 Forbidden") |
+| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, ACH Origination File, ACH Receiving File |
+| `operator` | Operator | Not the Parameter UI or the ACH file pages (gets "403 Forbidden") |
 | `member` | Member: Ba's sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
 
 Scripts and tests can still send HTTP Basic credentials, but a browser never gets the Basic login popup.
@@ -173,6 +173,7 @@ mvn test
 - [x] Ba's design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
 - [x] Database schema: all 30 of Ba's tables exactly as written, plus approved additions (V1–V12), with Ba's sample data
 - [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
-- [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, admin ACH Files page
+- [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, admin ACH Origination File page
+- [x] ACH Receiving File page: read-only list of `ACHRecvFile`; the ACH Receiving Engine comes next
 - [ ] Same Day ACH payments service
 - [ ] Fraud monitoring service

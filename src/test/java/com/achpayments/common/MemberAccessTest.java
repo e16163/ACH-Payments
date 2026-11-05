@@ -140,6 +140,13 @@ class MemberAccessTest {
     }
 
     @Test
+    void onlyAdminsCanSeeReceivingFiles() throws Exception {
+        mvc.perform(get("/api/receiving/files").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/receiving/files").with(httpBasic("operator", "operator-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/receiving/files")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void onlyAdminsCanRunTheEodFile() throws Exception {
         mvc.perform(get("/api/eod/status").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/eod/status").with(httpBasic("operator", "operator-pw"))).andExpect(status().isForbidden());

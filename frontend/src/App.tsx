@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError, DEMO, logout } from './api'
-import AchFilesPage from './files/AchFilesPage'
+import AchOriginationFilePage from './files/AchOriginationFilePage'
+import AchReceivingFilePage from './files/AchReceivingFilePage'
 import LoginPage from './LoginPage'
 import AccountsPage from './member/AccountsPage'
 import ExternalTransferPage from './member/ExternalTransferPage'
@@ -13,7 +14,8 @@ type Me = { username: string; roles: string[]; mfaVerified: boolean }
 
 const ROUTES = {
   params: '#/system-configuration',
-  files: '#/ach-files',
+  originationFile: '#/ach-origination-file',
+  receivingFile: '#/ach-receiving-file',
   accounts: '#/accounts',
   external: '#/transfer-pay/external-ach',
 }
@@ -74,7 +76,9 @@ export default function App() {
 
   let page = null
   if (signedOut) page = <LoginPage onSignedIn={loadMe} />
-  else if (isAdmin) page = hash === ROUTES.files ? <AchFilesPage /> : <ParameterPage />
+  else if (isAdmin && hash === ROUTES.originationFile) page = <AchOriginationFilePage />
+  else if (isAdmin && hash === ROUTES.receivingFile) page = <AchReceivingFilePage />
+  else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
   else if (memberReady) page = hash === ROUTES.external ? <ExternalTransferPage /> : <AccountsPage />
   else if (me) page = <p className="card narrow">There are no screens for your role yet.</p>
@@ -103,8 +107,9 @@ export default function App() {
         <nav className="mainnav" aria-label="Main">
           {isAdmin && (
             <>
-              <a className={hash !== ROUTES.files ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
-              <a className={hash === ROUTES.files ? 'active' : ''} href={ROUTES.files}>ACH Files</a>
+              <a className={hash !== ROUTES.originationFile && hash !== ROUTES.receivingFile ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
+              <a className={hash === ROUTES.originationFile ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
+              <a className={hash === ROUTES.receivingFile ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>
             </>
           )}
           {memberReady && (

@@ -134,7 +134,19 @@ describe('demo Parameter UI (UC-SYS-PARAM-01)', () => {
   })
 })
 
-describe('demo ACH Files (UC-ACH-EOD-01)', () => {
+describe('demo ACH Receiving File', () => {
+  it("lists Ba's sample file for admins", async () => {
+    await demoLogin('admin', 'admin123')
+    expect(await demoApi('/receiving/files')).toEqual([expect.objectContaining({ fileID: 'ACHFILE-88392', fedStatus: 'PROCESSED', entryCount: 1, totalCreditAmt: 3450.5 })])
+  })
+
+  it('keeps members out', async () => {
+    await memberWithMfa()
+    expect((await error(demoApi('/receiving/files'))).status).toBe(403)
+  })
+})
+
+describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   type Status = {
     nextBusinessDate: string
     pending: { transferSerNo: string; effectiveDt: string }[]

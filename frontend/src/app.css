@@ -724,7 +724,7 @@ td.num {
   color: var(--on-primary);
 }
 
-/* ---- ACH Files ---- */
+/* ---- ACH Origination File and ACH Receiving File ---- */
 .hint {
   color: var(--mute);
   font-size: 14px;
