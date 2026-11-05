@@ -1,0 +1,35 @@
+{
+  "immediateDestination": "011000015",
+  "immediateOrigin": "123456780",
+  "originName": "DEMO CREDIT UNION",
+  "fileCreationDate": "261105",
+  "fileCreationTime": "1700",
+  "fileIdModifier": "A",
+  "batches": [
+    {
+      "companyName": "DEMO CU",
+      "companyId": "9000000001",
+      "secCode": "WEB",
+      "entryDesc": "RENT",
+      "effectiveDate": "261105",
+      "odfi": "12345678",
+      "batchNumber": 1,
+      "entries": [
+        { "tranCode": "22", "routing": "021000021", "account": "123456789", "cents": 150000, "individualId": "TRF202611050001", "name": "JANE SMITH", "discData": "S", "trace": "123456780000001" },
+        { "tranCode": "32", "routing": "121000248", "account": "000111222333", "cents": 2550, "individualId": "TRF202611050002", "name": "O'BRIEN & SONS", "discData": "R", "trace": "123456780000002" }
+      ]
+    },
+    {
+      "companyName": "DEMO CU",
+      "companyId": "9000000001",
+      "secCode": "WEB",
+      "entryDesc": "TRANSFER",
+      "effectiveDate": "261106",
+      "odfi": "12345678",
+      "batchNumber": 2,
+      "entries": [
+        { "tranCode": "22", "routing": "026009593", "account": "4567", "cents": 1, "individualId": "TRF202611050003", "name": "A B", "discData": "S", "trace": "123456780000003" }
+      ]
+    }
+  ]
+}

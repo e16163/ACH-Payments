@@ -131,7 +131,7 @@ Executing the transfer is **out of scope** for this use case and is picked up by
   - The fee is a parameter (`ACH_ORIG` / `EXTERNAL_XFER_FEE` = `0.00`, editable in the Parameter UI).
   - The earliest effective date is the next banking day.
   - No Same Day for retail.
-- **T6. OFAC hits. ✅ Decided (2026-11-03): follow Ba's `ofacStatus` values** (`CLEARED`, `FLAGGED`, `REVIEW`). A hit saves the transfer with `ofacStatus = 'FLAGGED'`, held until staff clear it, and the member sees "under review".
+- **T6. OFAC hits. ✅ Decided (2026-11-03; UC-ACH-EOD-01 E2 renamed `CLEARED` to `OFAC_PASSED`): follow Ba's `ofacStatus` values** (`CLEARED`, `FLAGGED`, `REVIEW`). A hit saves the transfer with `ofacStatus = 'FLAGGED'`, held until staff clear it, and the member sees "under review".
 - **T7. Member login. ✅ Decided (2026-11-03):** demo member users with simulated MFA, the same approach as P1.
 - **T8. Missing columns in `ACHOriginatorTransfer`. ✅ Decided (2026-11-03): add them, using the names Ba's spec maps the inputs to.** The new columns are `effectiveDt DATE`, `companyEntryDesc VARCHAR(10)` (T1), `feeAmt DECIMAL(13,2)` and `createTm DATETIME`. Ba's existing columns are unchanged.
 - **T9. Ba's sample routing number `051000031` is invalid.** It fails the ABA check digit (weighted sum 58), so EX-01 would reject it. The demo data (V7) uses `051000033`: his number with the correct check digit, which also matches the `05100003` prefix of his sample trace number.
@@ -154,7 +154,83 @@ The Transfer UI is finished when all of these hold:
 
 ---
 
+## UC-ACH-EOD-01: EOD ACH File Generation & Fed Transmission
+
+**Status: plan only, nothing built.** Source: Ba's `Use Case ACH Origination File Creation.docx`. This is the step after UC-ACH-ORG-01: at the cutoff, pending transfers become one NACHA file and go to the simulated Fed. Same Day windows (PLAN 5.6) stay out of scope, because Ba's spec is one EOD file and T5 says no Same Day for retail. Board card R10 shrinks to those windows.
+
+### Flow → build pieces
+
+| Ba's step | What gets built |
+|---|---|
+| 1. Trigger & cutoff | A scheduler checks once a minute (America/New_York). It runs on banking days once `ACH_ORIG/FED_FILE_CUTOFF_TIME` has passed, so an admin's change takes effect without a restart. |
+| 2. Extraction | Picks up `ACHOriginatorTransfer` rows with `processStatus = 'PENDING_BATCH'`, `ofacStatus = 'OFAC_PASSED'`, `memoStatus = 'POSTED'` and `effectiveDt <= today`. Each becomes one `ACHOrigTransaction` row with a trace number. |
+| 3. Batches | Groups by SEC code, `companyID` and `odfiID`, plus `effectiveDt` and `companyEntryDesc` (E1). |
+| 4. Records | `AchFile` + the existing `AchFileWriter`: Types 1, 5, 6, 8, 9, and the all-9s block padding Ba asks for. |
+| 5. Totals | Entry counts, debit and credit totals, entry hash. The file is re-read with `AchFileParser` and `AchFileValidator` before it can be queued. A file that fails is never sent: nothing is saved, and `AppLog` gets a FATAL row. |
+| 6. Persistence | One DB transaction writes `ACHOrigFile` (`fedStatus = 'QUEUED'`), `ACHOrigBatch`, the entries and the status changes. |
+| 7. Transmission | The Fed simulator (PLAN A2) writes `<fileName>` to the `fed/outbound` folder. Success sets `fedStatus = 'SENT'` and `sendTm`, and adds an `ACHOrigFedAction` row. |
+| EX-01 | Names are screened again during compilation. A hit sets `ofacStatus = 'FLAGGED'`, leaves the item out of the file and writes a WARN alert. The rest of the file proceeds. |
+| EX-02 | 3 attempts in total, waiting 1 s then 2 s. If all fail: `fedStatus = 'ERROR'`, a FATAL `AppLog` row, and a notice on the ACH Files page. |
+| Idempotency | A rerun first resends any `QUEUED` file, rebuilt from its saved rows, so the bytes match and no transactions are duplicated. Only rows still `PENDING_BATCH` go into a new file. A file in `ERROR` is only resent from the ACH Files page. |
+| Audit trail | Each state change adds an `ACHOrigFedAction` row. MySQL triggers (V12) refuse `UPDATE` and `DELETE` on that table, to meet Ba's "unalterable". With binary logging on, `ach_app` can only create them after one root setting: README section 4. `TRUNCATE` and `DROP` skip triggers, so a DB admin could still remove the table; closing that needs a separate, less privileged app user. |
+
+### Decisions (✅ answered 2026-11-05)
+
+- **E1. Which transfers go in tonight's file? ✅ Dated today, as Ba wrote.** 5 PM is after the last Same Day deadline, so the entry settles the next banking day. **Estimated arrival becomes `effectiveDt` + 1 banking day**, on the review page, the receipt and the online demo; today it equals `effectiveDt`. Transfers missed on an earlier day (for example, server down) are still picked up, because the query uses `<=` today.
+- **E2. Status names. ✅ Ba's new names.** New transfers are saved as `OFAC_PASSED` / `PENDING_BATCH`. His sample row is updated from `CLEARED` by a new migration, because V7 can't change. `FLAGGED` and `REVIEW` stay. This replaces T6's `CLEARED`.
+- **E3. Screen. ✅ Admin "ACH Files" page in the real app and the online demo.** Run now, the list of files with status and totals, items left out, view and download the `.ach`, and Resend on an `ERROR` file. The online demo needs the NACHA format in TypeScript too, so a shared expected file (a golden file) is checked by both the Java and the TypeScript tests to stop them drifting.
+- **E4. Recurring transfers. ✅ Follow Ba's table design.** `pTransferSerNo` is "Parent Transfer Serial Number (for recurring transfer series)", so each payment is its own row linked to the first.
+  - When a payment goes in a file, or is rejected, the next row is created with the next date, `pTransferSerNo` set to the first row, `transferReqNo` + 1 and `transferReqRemaining` - 1.
+  - Dates are counted from the first payment's date (+7, +14 or +n months, so Jan 31 → Feb 28 → Mar 31). A non-banking day moves to the next banking day.
+  - The first payment uses the hold from submit. Later ones place their hold, including the fee, when due.
+  - **Insufficient funds:** that payment is marked `REJECTED` with no retry and logged, and the series continues. Ba's docs are silent and credit union agreements differ (some reject with no retry, some retry, some cancel), so this is the simplest choice to change later.
+
+### Fixes to what's already built
+
+- **`transferReqNo` bug:** Ba defines it as the current position in a series, and his one-time sample has 1 with 0 remaining. `TransferService` stores the total count in both columns. Fix: 1 and count - 1, with the receipt showing `transferReqNo + transferReqRemaining` as the total.
+- **Blank memo:** `companyEntryDesc` is required in a NACHA batch header, but the memo is optional. A blank memo sends `TRANSFER`.
+
+### Assumptions (the spec is silent)
+
+- **E5. Batch grouping adds two fields.** A NACHA batch header has only one effective date and one entry description, and T1 puts the member's memo in that description. So each different memo gets its own batch. This is required for a valid file, and it's the one place this plan adds to Ba's step.
+- **E6. New column `ACHOrigTransaction.recvRoutingNo CHAR(9) NULL`.** A Type 6 record needs the receiving bank's routing number, and Ba's table has none. It's added, and `NULL` on his sample row.
+- **E7. Values in the file.**
+  - Service class `220` (credits only); the member's debit stays on the core side.
+  - WEB credit (T1), tran code `22` for checking, `32` for savings.
+  - Company ID `9000000001`, `odfiID` `12345678`, immediate origin `123456780`.
+  - Immediate destination is a new parameter, `ACH_ORIG/FED_IMMEDIATE_DEST` = `011000015`.
+  - Company name is a new parameter, `ACH_ORIG/ORIG_COMPANY_NAME` = `DEMO CU`, because "DEMO CREDIT UNION" is 17 characters and the field holds 16.
+  - The fee isn't in the file. `settlementDt` stays `NULL`, because the Fed sets it.
+- **E8. IDs.** `fileID` follows Ba's sample, `FILE_yyyyMMdd_nn`, with `fileIDModifier` A, B, C… per day. `processID` is `EOD-yyyyMMddHHmmss-A<attempt>`, which keeps the `ACHOrigFedAction` key unique across retries (DB-MODEL F11). New `Action` rows sit next to 401 `FED_SEND`: `FILE_QUEUED`, `FED_SEND_FAILED`.
+- **E9. Status after sending.** Ba (2026-11-05): the batch updates the transfer to **Processed**. So `ACHOriginatorTransfer.processStatus` goes `PENDING_BATCH` → `PROCESSED` when the transfer goes in a file, and delivery is tracked by `fedStatus` on the file and its entries: `QUEUED` → `SENT` or `ERROR`.
+- **E8a. Action rows.** Next to Ba's `401 FED_SEND`: `402 FILE_QUEUED`, `403 FED_SEND_FAILED`, `404 FILE_ERROR`.
+- **E8b. Run now takes a business date.** A transfer made today is dated the next banking day or later, so running for today finds nothing. Ba's step 2 allows a "scheduled business date", so the page offers one, prefilled with the next date that has transfers waiting. The automatic 5 PM run always uses today.
+- **E10. Nothing to send, or not a banking day:** no file, and an INFO row in `AppLog`.
+- **E11. Simulated parts.** Ba's "compliance dashboard" and "notification to operations" don't exist yet, so both are an `AppLog` row plus a notice on the ACH Files page, until card R15. `ACH_ORIG/FED_SIM_FAIL_ATTEMPTS` (default 0) makes the simulator fail, so EX-02 can be shown.
+- **Ba's sample transfer** `TRF-20261101-9921` has no `effectiveDt` and `memoStatus = 'PENDING'`, so it never enters a file.
+
+### Build order
+
+1. Migrations: V11 for the E2 status update, E6 column, E7 and E11 parameters and E8 actions; V12 for the audit triggers. → verify: full suite from empty DBs; a test proves `UPDATE` and `DELETE` on `ACHOrigFedAction` fail.
+2. Fix `transferReqNo`, status names and estimated arrival. → verify: updated transfer tests, a Friday date shows Monday.
+3. File builder (steps 2–5, E5). → verify: golden file, and the file passes `AchFileValidator`.
+4. Persistence and idempotency (step 6). → verify: running twice gives one file and no duplicate entries; EX-01 leaves a flagged item out while the rest go.
+5. Fed simulator, retries and scheduler (step 7, EX-02). → verify: tests for fail-twice-then-send, fail-three-times → `ERROR`, and the cutoff on non-banking days.
+6. Recurring (E4). → verify: series dates, month-end, insufficient funds skips one payment and the series continues.
+7. ACH Files page, real app. → verify: browser run from member transfer to `.ach` file.
+8. Online demo, TypeScript builder. → verify: same golden file, same browser run.
+9. Update `docs/DEMO.md`. → verify: every step followed once in both versions.
+
+### Done when
+
+- A member transfer dated today ends as `PROCESSED` with `fedStatus = 'SENT'`, in an `.ach` file that `AchFileValidator` passes, with rows in `ACHOrigFile`, `ACHOrigBatch`, `ACHOrigTransaction` and `ACHOrigFedAction`.
+- Tests prove: EX-01, EX-02, a rerun duplicates nothing, block padding to a multiple of 10 records, and the audit table can't be changed.
+- Ba can run it and open the file from his link, and on the real app.
+
+---
+
 ## Build order
 
 1. **UC-SYS-PARAM-01.** ✅ Built (board P1–P3): matches Ba's answers, and every "Done when" check passed in the deployed app.
 2. **UC-ACH-ORG-01.** ✅ Built (board X1–X7, D6, R6, T7 member login): every "Done when" check passed, including a full member run in the deployed app (MFA → Transfer & Pay → EX-01/EX-02 → review → Confirm Transfer → receipt).
+3. **UC-ACH-EOD-01.** Plan written 2026-11-05; not built yet.

@@ -66,17 +66,19 @@ public class TransferService {
     private final AccountVerifier verifier;
     private final MemoPostingEngine memo;
     private final ParamCache params;
+    private final OfacScreening ofac;
     private final Clock clock;
     private final String orig;
 
     public TransferService(JdbcTemplate jdbc, RoutingService routing, TransferDates dates, AccountVerifier verifier,
-            MemoPostingEngine memo, ParamCache params, Clock clock, @Value("${app.db.origination}") String orig) {
+            MemoPostingEngine memo, ParamCache params, OfacScreening ofac, Clock clock, @Value("${app.db.origination}") String orig) {
         this.jdbc = jdbc;
         this.routing = routing;
         this.dates = dates;
         this.verifier = verifier;
         this.memo = memo;
         this.params = params;
+        this.ofac = ofac;
         this.clock = clock;
         this.orig = orig;
     }
@@ -91,7 +93,8 @@ public class TransferService {
     /** Step 5 pre-flight: every check, without saving anything. */
     public Preview preview(String memberNo, TransferRequest r) {
         Checked c = check(memberNo, r);
-        return new Preview(c.bankName(), c.amount(), c.fee(), c.total(), c.effectiveDt(), c.effectiveDt(), c.ofacHit());
+        return new Preview(c.bankName(), c.amount(), c.fee(), c.total(), c.effectiveDt(),
+                dates.estimatedArrival(c.effectiveDt()), c.ofacHit());
     }
 
     /** Steps 6-7: save the transfer as PENDING and place the memo hold, in one DB transaction. */
@@ -117,7 +120,7 @@ public class TransferService {
     public Optional<Receipt> receipt(String memberNo, String transferSerNo) {
         return jdbc.query("SELECT t.transferSerNo, t.processStatus, t.ofacStatus, t.memoStatus, a.acctOwner, d.bankName, "
                 + "a.routingNo, a.acctNo, a.acctType, s.acctName, t.origAcctNo, t.transferAmt, t.feeAmt, t.effectiveDt, "
-                + "t.pmtFrequency, t.transferReqNo, t.companyEntryDesc, t.createTm "
+                + "t.pmtFrequency, t.transferReqNo, t.transferReqRemaining, t.companyEntryDesc, t.createTm "
                 + "FROM " + orig + ".ACHOriginatorTransfer t "
                 + "JOIN " + orig + ".ACHOrigRecvAccount a ON a.recvAcctSerNo = t.recvAcctSerNo AND a.recvAcctVersion = t.recvAcctVersion "
                 + "LEFT JOIN ABADirectory d ON d.routingNo = a.routingNo "
@@ -131,8 +134,9 @@ public class TransferService {
                             rs.getString("ofacStatus"), rs.getString("memoStatus"), rs.getString("acctOwner"),
                             rs.getString("bankName"), rs.getString("routingNo"), last4(rs.getString("acctNo")),
                             rs.getString("acctType"), rs.getString("acctName"), last4(rs.getString("origAcctNo")),
-                            amount, fee, amount.add(fee), effective, effective, rs.getString("pmtFrequency"),
-                            rs.getInt("transferReqNo"), rs.getString("companyEntryDesc"),
+                            amount, fee, amount.add(fee), effective, dates.estimatedArrival(effective),
+                            rs.getString("pmtFrequency"), rs.getInt("transferReqNo") + rs.getInt("transferReqRemaining"),
+                            rs.getString("companyEntryDesc"),
                             rs.getObject("createTm", LocalDateTime.class));
                 }, memberNo, transferSerNo).stream().findFirst();
     }
@@ -197,7 +201,7 @@ public class TransferService {
                     + " isn't enough for this transfer.");
         }
         return new Checked(from, recvName.toUpperCase(Locale.ROOT), r.routingNo(), r.acctNo(), r.acctType(), amount, fee,
-                r.effectiveDt(), r.frequency(), count, memoText.isEmpty() ? null : memoText, bankName, ofacHit(recvName));
+                r.effectiveDt(), r.frequency(), count, memoText.isEmpty() ? null : memoText, bankName, ofac.isHit(recvName));
     }
 
     /**
@@ -220,12 +224,6 @@ public class TransferService {
                         + " external limit of " + money(limit) + ". Please reduce the amount or contact support.");
             }
         }
-    }
-
-    /** USE-CASES T6: the recipient's name against the (simulated) OFAC SDN list, ignoring case and punctuation. */
-    private boolean ofacHit(String name) {
-        String n = normalize(name);
-        return jdbc.queryForList("SELECT sdnName FROM OfacSdnName", String.class).stream().anyMatch(s -> normalize(s).equals(n));
     }
 
     // ---- saving ----
@@ -251,11 +249,39 @@ public class TransferService {
                 + "recvAcctVersion, origAcctNo, origAcctType, origAcctGrp, recurringFlag, intAcctSpecFlag, nextPmtDt, "
                 + "pmtFrequency, transferReqNo, transferReqRemaining, transferAmt, processStatus, ofacStatus, ofacTm, "
                 + "memoStatus, postingStatus, postingSystem, sourceID, originatorID, lastModBy, effectiveDt, "
-                + "companyEntryDesc, feeAmt) VALUES (?, 1, ?, ?, 1, ?, ?, 'RETAIL', ?, 0, ?, ?, ?, ?, ?, 'PENDING', ?, "
+                + "companyEntryDesc, feeAmt) VALUES (?, 1, ?, ?, 1, ?, ?, 'RETAIL', ?, 0, ?, ?, ?, ?, ?, ?, ?, "
                 + "NOW(), 'PENDING', 'PENDING', 'MAIN_CORE', 'ONLINE_BANKING', ?, ?, ?, ?, ?)",
                 serNo, memberNo, recvAcct, c.from().acctNo(), c.from().acctType(), recurring ? 1 : 0, c.effectiveDt(),
-                c.frequency(), c.count(), c.count(), c.amount(), c.ofacHit() ? "FLAGGED" : "CLEARED",
-                CREDIT_UNION_ORIGINATOR, memberNo, c.effectiveDt(), c.memo(), c.fee()));
+                c.frequency(), 1, c.count() - 1, c.amount(), c.ofacHit() ? "PENDING" : "PENDING_BATCH",
+                c.ofacHit() ? "FLAGGED" : "OFAC_PASSED", CREDIT_UNION_ORIGINATOR, memberNo, c.effectiveDt(), c.memo(), c.fee()));
+    }
+
+    /**
+     * UC-ACH-EOD-01 E4: the next payment of a recurring series, as its own row linked to the first by Ba's
+     * pTransferSerNo. Its hold is placed when it comes due. Does nothing when the series has no payments left.
+     */
+    public void scheduleNextPayment(String transferSerNo) {
+        Map<String, Object> row = jdbc.queryForMap("SELECT COALESCE(pTransferSerNo, transferSerNo) AS firstSerNo, pmtFrequency, "
+                + "transferReqNo, transferReqRemaining FROM " + orig + ".ACHOriginatorTransfer "
+                + "WHERE transferSerNo = ? AND transferVersion = 1", transferSerNo);
+        if (((Number) row.get("transferReqRemaining")).intValue() <= 0) {
+            return;
+        }
+        String firstSerNo = (String) row.get("firstSerNo");
+        LocalDate first = jdbc.queryForObject("SELECT effectiveDt FROM " + orig + ".ACHOriginatorTransfer "
+                + "WHERE transferSerNo = ? AND transferVersion = 1", LocalDate.class, firstSerNo);
+        LocalDate next = dates.occurrence(first, (String) row.get("pmtFrequency"), ((Number) row.get("transferReqNo")).intValue());
+        insertWithNextSerial("TRF", orig + ".ACHOriginatorTransfer", "transferSerNo", serNo -> jdbc.update(
+                "INSERT INTO " + orig + ".ACHOriginatorTransfer (transferSerNo, transferVersion, memberNo, pTransferSerNo, "
+                + "recvAcctSerNo, recvAcctVersion, origAcctNo, origAcctType, origAcctGrp, recurringFlag, intAcctSpecFlag, "
+                + "nextPmtDt, pmtFrequency, transferReqNo, transferReqRemaining, transferAmt, processStatus, ofacStatus, "
+                + "ofacTm, memoStatus, postingStatus, postingSystem, sourceID, originatorID, lastModBy, effectiveDt, "
+                + "companyEntryDesc, feeAmt) SELECT ?, 1, memberNo, ?, recvAcctSerNo, recvAcctVersion, origAcctNo, "
+                + "origAcctType, origAcctGrp, recurringFlag, intAcctSpecFlag, ?, pmtFrequency, transferReqNo + 1, "
+                + "transferReqRemaining - 1, transferAmt, 'PENDING_BATCH', 'OFAC_PASSED', NOW(), 'PENDING', 'PENDING', "
+                + "postingSystem, sourceID, originatorID, 'EOD_BATCH', ?, companyEntryDesc, feeAmt FROM " + orig
+                + ".ACHOriginatorTransfer WHERE transferSerNo = ? AND transferVersion = 1",
+                serNo, firstSerNo, next, next, transferSerNo));
     }
 
     /** Ba's serial format PREFIX-yyyyMMdd-nnnn; retries if another request took the same number first. */
@@ -283,10 +309,6 @@ public class TransferService {
 
     private static TransferRejected invalid(String message) {
         return new TransferRejected(Kind.INVALID, message);
-    }
-
-    private static String normalize(String name) {
-        return name.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]+", " ").trim();
     }
 
     private static String period(int dayNo) {

@@ -77,6 +77,9 @@ GRANT ALL PRIVILEGES ON ach_payments.* TO 'ach_app'@'localhost';
 GRANT ALL PRIVILEGES ON ach_receiving.* TO 'ach_app'@'localhost';
 GRANT ALL PRIVILEGES ON ach_origination.* TO 'ach_app'@'localhost';
 FLUSH PRIVILEGES;
+
+-- Lets ach_app create the audit-trail triggers (V12) while binary logging is on.
+SET PERSIST log_bin_trust_function_creators = ON;
 ```
 
 Connect as the app user:
@@ -131,8 +134,8 @@ The app opens on a **Sign in** page, and **Sign out** is at the top right. These
 
 | User | Role | Can use |
 | --- | --- | --- |
-| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI |
-| `operator` | Operator | Not the Parameter UI (gets "403 Forbidden") |
+| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, ACH Files |
+| `operator` | Operator | Not the Parameter UI or ACH Files (gets "403 Forbidden") |
 | `member` | Member: Ba's sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
 
 Scripts and tests can still send HTTP Basic credentials, but a browser never gets the Basic login popup.
@@ -168,7 +171,8 @@ mvn test
 - [x] Step 1: NACHA file parser
 - [x] Parameter UI (UC-SYS-PARAM-01): designers add/edit parameters per app
 - [x] Ba's design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
-- [x] Database schema: all 30 of Ba's tables exactly as written, plus approved additions (V1–V10), with Ba's sample data
+- [x] Database schema: all 30 of Ba's tables exactly as written, plus approved additions (V1–V12), with Ba's sample data
 - [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
+- [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, admin ACH Files page
 - [ ] Same Day ACH payments service
 - [ ] Fraud monitoring service

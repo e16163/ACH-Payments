@@ -1,7 +1,8 @@
 // In-browser stand-in for the Java API, used only by the GitHub Pages demo build (VITE_DEMO=1).
-// It follows the server's rules and messages (TransferService, ParamValidator, MfaService, SecurityConfig)
+// It follows the server's rules and messages (TransferService, ParamValidator, MfaService, SecurityConfig, EodFileStore, EodFileJob)
 // on made-up data, and keeps its state in sessionStorage, so closing the tab resets it.
 import { ApiError } from '../api'
+import { buildNachaFile, type NachaBatch, type NachaEntry } from './nacha'
 import { validateDesc, validateName, validateValue, PARAM_TYPES } from '../params/validation'
 import { isValidRouting } from '../member/rules'
 
@@ -50,7 +51,12 @@ type Param = { systemName: string; paramName: string; paramDesc: string; paramRa
 type Transfer = {
   transferSerNo: string; ofacStatus: string; memoStatus: string; recvName: string; bankName: string; routingNo: string
   acctNo: string; acctType: string; fromAcctNo: string; fromAcctName: string; fromAcctType: string; amount: number
-  fee: number; effectiveDt: string; frequency: string; transferCount: number; memo: string | null; submitted: string
+  fee: number; effectiveDt: string; frequency: string; memo: string | null; submitted: string
+  processStatus: string; firstSerNo: string | null; reqNo: number; remaining: number
+}
+type AchFileRow = {
+  fileID: string; fileName: string; fedStatus: string; fileHeaderDt: string; totalCreditCount: number
+  totalCreditAmt: number; sendTm: string | null; content: string
 }
 type State = {
   user: string | null
@@ -59,9 +65,11 @@ type State = {
   accounts: Account[]
   params: Param[]
   transfers: Transfer[]
+  files: AchFileRow[]
+  nextTrace: number
 }
 
-const KEY = 'ach-demo-state'
+const KEY = 'ach-demo-state-2' // new name: state saved by an older demo has no files
 
 function freshState(): State {
   return {
@@ -76,8 +84,13 @@ function freshState(): State {
       { systemName: 'ACH_RCV', paramName: 'MEMO_POST_IMMEDIATE', paramDesc: 'Enable immediate memo posting upon transaction ingestion', paramRawType: 'BOOLEAN', paramRawValue: 'TRUE', lastModTm: '2026-11-03T19:14:48', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'FED_FILE_CUTOFF_TIME', paramDesc: 'Cutoff time for building daily Fed file (EST)', paramRawType: 'STRING', paramRawValue: '17:00:00', lastModTm: '2026-11-03T19:15:14', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'EXTERNAL_XFER_FEE', paramDesc: 'Fee for a member external ACH transfer (UC-ACH-ORG-01)', paramRawType: 'DECIMAL', paramRawValue: '0.00', lastModTm: '2026-11-03T21:21:05', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_ORIG', paramName: 'FED_IMMEDIATE_DEST', paramDesc: 'Routing number of the Federal Reserve office that receives our files', paramRawType: 'STRING', paramRawValue: '011000015', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_ORIG', paramName: 'ORIG_COMPANY_NAME', paramDesc: 'Company name in NACHA batch headers (16 characters at most)', paramRawType: 'STRING', paramRawValue: 'DEMO CU', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_ORIG', paramName: 'FED_SIM_FAIL_ATTEMPTS', paramDesc: 'Fed simulator: how many send attempts fail, to demo EX-02 (0 = none)', paramRawType: 'INTEGER', paramRawValue: '0', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
     ],
     transfers: [],
+    files: [],
+    nextTrace: 1,
   }
 }
 
@@ -101,11 +114,28 @@ function isBankingDay(iso: string): boolean {
   return day !== 0 && day !== 6 && !HOLIDAYS.includes(iso)
 }
 
-function earliest(): string {
-  const d = new Date()
+function nextBankingDay(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`)
   do d.setDate(d.getDate() + 1)
   while (!isBankingDay(isoDate(d)))
   return isoDate(d)
+}
+
+const earliest = () => nextBankingDay(isoDate(new Date()))
+
+/** TransferDates.occurrence: payment `index` of a series, counted from the first date, so Jan 31 → Feb 28 → Mar 31. */
+function occurrence(first: string, frequency: string, index: number): string {
+  const d = new Date(`${first}T12:00:00`)
+  if (frequency === 'MONTHLY') {
+    const day = d.getDate()
+    d.setDate(1)
+    d.setMonth(d.getMonth() + index)
+    d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()))
+  } else {
+    d.setDate(d.getDate() + index * (frequency === 'WEEKLY' ? 7 : 14))
+  }
+  const date = isoDate(d)
+  return isBankingDay(date) ? date : nextBankingDay(date)
 }
 
 /** "$25,000" for whole dollars, "$1,250.50" otherwise (TransferService.money). */
@@ -176,6 +206,10 @@ function route(s: State, method: string, path: string, body: Body): unknown {
     if (role !== 'SYS_ADMIN') denied()
     return params(s, method, path, body)
   }
+  if (path.startsWith('/eod')) {
+    if (role !== 'SYS_ADMIN') denied()
+    return eod(s, method, path, body)
+  }
   if (role !== 'MEMBER') denied()
   if (path === '/member/mfa/send' && method === 'POST') {
     const code = pad(Math.floor(Math.random() * 1_000_000), 6)
@@ -195,7 +229,7 @@ function route(s: State, method: string, path: string, body: Body): unknown {
   }
   if (path === '/transfers/preview' && method === 'POST') {
     const c = check(s, body)
-    return { bankName: c.bankName, amount: c.amount / 100, fee: c.fee / 100, total: (c.amount + c.fee) / 100, effectiveDt: c.effectiveDt, estimatedArrival: c.effectiveDt, underReview: c.ofacHit }
+    return { bankName: c.bankName, amount: c.amount / 100, fee: c.fee / 100, total: (c.amount + c.fee) / 100, effectiveDt: c.effectiveDt, estimatedArrival: nextBankingDay(c.effectiveDt), underReview: c.ofacHit }
   }
   if (path === '/transfers' && method === 'POST') return submit(s, body)
   const receiptPath = /^\/transfers\/(.+)$/.exec(path)
@@ -314,7 +348,7 @@ function checkLimits(s: State, acctType: string, amount: number) {
     since.setDate(since.getDate() - (rule.dayNo - 1))
     const from = isoDate(since)
     const used = s.transfers
-      .filter((t) => t.submitted.slice(0, 10) >= from && (rule.acctType === 'ALL' || t.fromAcctType === acctType))
+      .filter((t) => t.processStatus !== 'REJECTED' && t.submitted.slice(0, 10) >= from && (rule.acctType === 'ALL' || t.fromAcctType === acctType))
       .reduce((sum, t) => sum + t.amount, 0)
     if (used + amount > rule.limit) {
       const period = rule.dayNo === 1 ? 'daily' : rule.dayNo === 7 ? 'weekly' : rule.dayNo === 30 ? 'monthly' : `${rule.dayNo}-day`
@@ -323,19 +357,22 @@ function checkLimits(s: State, acctType: string, amount: number) {
   }
 }
 
+function nextSerNo(s: State): string {
+  const prefix = `TRF-${isoDate(new Date()).replace(/-/g, '')}-`
+  return prefix + pad(s.transfers.filter((t) => t.transferSerNo.startsWith(prefix)).length + 1, 4)
+}
+
 function submit(s: State, body: Body) {
   const c = check(s, body)
-  const now = new Date()
-  const prefix = `TRF-${isoDate(now).replace(/-/g, '')}-`
-  const today = s.transfers.filter((t) => t.transferSerNo.startsWith(prefix)).length
   // Memo hold (MemoPostingEngine): an OFAC hit waits for review; otherwise the total comes off the available balance.
   const memoStatus = c.ofacHit ? 'REVIEW' : 'POSTED'
   if (!c.ofacHit) c.from.cents -= c.amount + c.fee
   const t: Transfer = {
-    transferSerNo: prefix + pad(today + 1, 4), ofacStatus: c.ofacHit ? 'FLAGGED' : 'CLEARED', memoStatus,
+    transferSerNo: nextSerNo(s), ofacStatus: c.ofacHit ? 'FLAGGED' : 'OFAC_PASSED', memoStatus,
+    processStatus: c.ofacHit ? 'PENDING' : 'PENDING_BATCH', firstSerNo: null, reqNo: 1, remaining: c.count - 1,
     recvName: c.recvName, bankName: c.bankName, routingNo: c.routingNo, acctNo: c.acctNo, acctType: c.acctType,
     fromAcctNo: c.from.acctNo, fromAcctName: c.from.acctName, fromAcctType: c.from.acctType, amount: c.amount, fee: c.fee,
-    effectiveDt: c.effectiveDt, frequency: c.frequency, transferCount: c.count, memo: c.memo, submitted: isoDateTime(now),
+    effectiveDt: c.effectiveDt, frequency: c.frequency, memo: c.memo, submitted: isoDateTime(new Date()),
   }
   s.transfers.push(t)
   return receipt(t)
@@ -343,10 +380,130 @@ function submit(s: State, body: Body) {
 
 function receipt(t: Transfer) {
   return {
-    transferSerNo: t.transferSerNo, processStatus: 'PENDING', ofacStatus: t.ofacStatus, memoStatus: t.memoStatus,
+    transferSerNo: t.transferSerNo, processStatus: t.processStatus, ofacStatus: t.ofacStatus, memoStatus: t.memoStatus,
     recvName: t.recvName, bankName: t.bankName, routingNo: t.routingNo, acctLast4: last4(t.acctNo), acctType: t.acctType,
     fromAcctName: t.fromAcctName, fromAcctLast4: last4(t.fromAcctNo), amount: t.amount / 100, fee: t.fee / 100,
-    total: (t.amount + t.fee) / 100, effectiveDt: t.effectiveDt, estimatedArrival: t.effectiveDt, frequency: t.frequency,
-    transferCount: t.transferCount, memo: t.memo, submitted: t.submitted,
+    total: (t.amount + t.fee) / 100, effectiveDt: t.effectiveDt, estimatedArrival: nextBankingDay(t.effectiveDt), frequency: t.frequency,
+    transferCount: t.reqNo + t.remaining, memo: t.memo, submitted: t.submitted,
   }
+}
+
+// ---- ACH Files (EodController, EodFileJob, EodFileStore, FedSimulator) ----
+
+const param = (s: State, name: string) => s.params.find((p) => p.systemName === 'ACH_ORIG' && p.paramName === name)?.paramRawValue ?? ''
+
+function eod(s: State, method: string, path: string, body: Body) {
+  if (path === '/eod/status' && method === 'GET') return eodStatus(s)
+  if (path === '/eod/run' && method === 'POST') {
+    const date = typeof body.businessDate === 'string' ? body.businessDate : ''
+    return date ? runEod(s, date) : fail(400, 'Choose a business date.')
+  }
+  const m = /^\/eod\/files\/([^/]+)\/(resend|content)$/.exec(path)
+  const file = m && s.files.find((f) => f.fileID === decodeURIComponent(m[1]))
+  if (!file) fail(404, 'No such file.')
+  if (m![2] === 'content' && method === 'GET') return { fileName: file.fileName, content: file.content }
+  if (m![2] === 'resend' && method === 'POST') {
+    if (file.fedStatus !== 'ERROR') fail(400, 'Only a file in ERROR can be resent.')
+    return { fedStatus: transmit(s, file) }
+  }
+  fail(404, 'Not found')
+}
+
+function eodStatus(s: State) {
+  const item = (t: Transfer, reason: string | null) => ({ transferSerNo: t.transferSerNo, recvName: t.recvName, amount: t.amount / 100, effectiveDt: t.effectiveDt, reason })
+  const byDate = [...s.transfers].sort((a, b) => a.effectiveDt.localeCompare(b.effectiveDt) || a.transferSerNo.localeCompare(b.transferSerNo))
+  const pending = byDate.filter((t) => t.processStatus === 'PENDING_BATCH').map((t) => item(t, null))
+  const today = isoDate(new Date())
+  const next = pending[0]?.effectiveDt ?? today
+  return {
+    cutoff: param(s, 'FED_FILE_CUTOFF_TIME'),
+    nextBusinessDate: next < today ? today : next,
+    pending,
+    leftOut: [
+      ...byDate.filter((t) => t.ofacStatus === 'FLAGGED').map((t) => item(t, 'OFAC review')),
+      ...byDate.filter((t) => t.processStatus === 'REJECTED').map((t) => item(t, 'Insufficient funds')),
+    ],
+    files: [...s.files].reverse().map(({ content: _content, ...row }) => row),
+  }
+}
+
+/** Each payment of a series is its own row, linked to the first (TransferService.scheduleNextPayment). */
+function scheduleNext(s: State, t: Transfer) {
+  if (t.remaining <= 0) return
+  const firstSerNo = t.firstSerNo ?? t.transferSerNo
+  const first = s.transfers.find((x) => x.transferSerNo === firstSerNo)!
+  s.transfers.push({
+    ...t, transferSerNo: nextSerNo(s), firstSerNo, reqNo: t.reqNo + 1, remaining: t.remaining - 1, memoStatus: 'PENDING',
+    processStatus: 'PENDING_BATCH', effectiveDt: occurrence(first.effectiveDt, t.frequency, t.reqNo), submitted: isoDateTime(new Date()),
+  })
+}
+
+/** The first payment was held at submit. A later one is held when due; without the funds it's rejected and the series goes on. */
+function readyForFile(s: State, t: Transfer): boolean {
+  if (t.memoStatus === 'POSTED') return true
+  const from = s.accounts.find((a) => a.acctNo === t.fromAcctNo)!
+  if (from.cents >= t.amount + t.fee) {
+    from.cents -= t.amount + t.fee
+    t.memoStatus = 'POSTED'
+    return true
+  }
+  t.processStatus = 'REJECTED'
+  t.memoStatus = 'NSF'
+  scheduleNext(s, t)
+  return false
+}
+
+function runEod(s: State, businessDate: string) {
+  if (!isBankingDay(businessDate)) return { fileID: null, fedStatus: null, message: `${businessDate} isn't a banking day, so no file was built.` }
+  const due = s.transfers
+    .filter((t) => t.processStatus === 'PENDING_BATCH' && t.effectiveDt <= businessDate)
+    .sort((a, b) => a.transferSerNo.localeCompare(b.transferSerNo))
+    .filter((t) => readyForFile(s, t))
+  if (due.length === 0) return { fileID: null, fedStatus: null, message: `Nothing is due for ${businessDate}.` }
+
+  const groups = new Map<string, Transfer[]>() // E5: one effective date and one entry description per batch
+  for (const t of due) {
+    const key = `${t.effectiveDt}|${t.memo ?? 'TRANSFER'}]`
+    groups.set(key, [...(groups.get(key) ?? []), t])
+  }
+  const batches: NachaBatch[] = [...groups.keys()].sort().map((key, i) => {
+    const items = groups.get(key)!
+    const entries: NachaEntry[] = items.map((t) => ({
+      tranCode: t.acctType === 'SAVINGS' ? '32' : '22', routing: t.routingNo, account: t.acctNo, cents: t.amount,
+      individualId: t.transferSerNo.replace(/-/g, ''), name: t.recvName, discData: t.frequency === 'ONETIME' ? 'S' : 'R',
+      trace: `12345678${pad(s.nextTrace++, 7)}`,
+    }))
+    return {
+      companyName: param(s, 'ORIG_COMPANY_NAME'), companyId: '9000000001', secCode: 'WEB', entryDesc: items[0].memo ?? 'TRANSFER',
+      effectiveDate: items[0].effectiveDt.replace(/-/g, '').slice(2), odfi: '12345678', batchNumber: i + 1, entries,
+    }
+  })
+
+  const now = new Date()
+  const today = isoDate(now)
+  const seq = s.files.filter((f) => f.fileHeaderDt === today).length + 1
+  const fileID = `FILE_${today.replace(/-/g, '')}_${pad(seq, 2)}`
+  const content = buildNachaFile({
+    immediateDestination: param(s, 'FED_IMMEDIATE_DEST'), immediateOrigin: '123456780', originName: 'DEMO CREDIT UNION',
+    fileCreationDate: today.replace(/-/g, '').slice(2), fileCreationTime: pad(now.getHours()) + pad(now.getMinutes()),
+    fileIdModifier: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[seq - 1], batches,
+  })
+  const file: AchFileRow = {
+    fileID, fileName: `${fileID}.ach`, fedStatus: 'QUEUED', fileHeaderDt: today, totalCreditCount: due.length,
+    totalCreditAmt: due.reduce((sum, t) => sum + t.amount, 0) / 100, sendTm: null, content,
+  }
+  s.files.push(file)
+  for (const t of due) {
+    t.processStatus = 'PROCESSED'
+    scheduleNext(s, t)
+  }
+  const fedStatus = transmit(s, file)
+  return { fileID, fedStatus, message: `${fileID}: ${fedStatus}` }
+}
+
+/** EX-02: 3 attempts. The demo doesn't wait between them. */
+function transmit(s: State, file: AchFileRow): string {
+  file.fedStatus = Number(param(s, 'FED_SIM_FAIL_ATTEMPTS')) >= 3 ? 'ERROR' : 'SENT'
+  if (file.fedStatus === 'SENT') file.sendTm = isoDateTime(new Date())
+  return file.fedStatus
 }

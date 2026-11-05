@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError, DEMO, logout } from './api'
+import AchFilesPage from './files/AchFilesPage'
 import LoginPage from './LoginPage'
 import AccountsPage from './member/AccountsPage'
 import ExternalTransferPage from './member/ExternalTransferPage'
@@ -12,6 +13,7 @@ type Me = { username: string; roles: string[]; mfaVerified: boolean }
 
 const ROUTES = {
   params: '#/system-configuration',
+  files: '#/ach-files',
   accounts: '#/accounts',
   external: '#/transfer-pay/external-ach',
 }
@@ -72,7 +74,7 @@ export default function App() {
 
   let page = null
   if (signedOut) page = <LoginPage onSignedIn={loadMe} />
-  else if (isAdmin) page = <ParameterPage />
+  else if (isAdmin) page = hash === ROUTES.files ? <AchFilesPage /> : <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
   else if (memberReady) page = hash === ROUTES.external ? <ExternalTransferPage /> : <AccountsPage />
   else if (me) page = <p className="card narrow">There are no screens for your role yet.</p>
@@ -99,7 +101,12 @@ export default function App() {
       </header>
       {me && (
         <nav className="mainnav" aria-label="Main">
-          {isAdmin && <a className="active" href={ROUTES.params}>System Configuration</a>}
+          {isAdmin && (
+            <>
+              <a className={hash !== ROUTES.files ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
+              <a className={hash === ROUTES.files ? 'active' : ''} href={ROUTES.files}>ACH Files</a>
+            </>
+          )}
           {memberReady && (
             <>
               <a className={hash !== ROUTES.external ? 'active' : ''} href={ROUTES.accounts}>Accounts</a>

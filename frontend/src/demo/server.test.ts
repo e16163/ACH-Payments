@@ -90,17 +90,17 @@ describe('demo transfer (UC-ACH-ORG-01)', () => {
     expect(e.message).toBe("Your available balance of $500 isn't enough for this transfer.")
   })
 
-  it('submits: PENDING with a reference number, and holds the money', async () => {
+  it('submits: PENDING_BATCH with a reference number, and holds the money', async () => {
     const r = await post('/transfers', await transfer()) as Record<string, unknown>
     expect(r.transferSerNo).toMatch(/^TRF-\d{8}-0001$/)
-    expect(r).toMatchObject({ processStatus: 'PENDING', memoStatus: 'POSTED', recvName: 'JANE SMITH', memo: 'RENT', amount: 1500, total: 1500 })
+    expect(r).toMatchObject({ processStatus: 'PENDING_BATCH', ofacStatus: 'OFAC_PASSED', memoStatus: 'POSTED', recvName: 'JANE SMITH', memo: 'RENT', amount: 1500, total: 1500 })
     const accounts = await demoApi<{ acctNo: string; availBal: number }[]>('/member/accounts')
     expect(accounts.find((a) => a.acctNo === '100049281920')?.availBal).toBe(7000)
   })
 
   it('flags an OFAC name for review without holding the money', async () => {
     const r = await post('/transfers', await transfer({ recvName: 'Blocked Test Person' })) as Record<string, unknown>
-    expect(r).toMatchObject({ ofacStatus: 'FLAGGED', memoStatus: 'REVIEW' })
+    expect(r).toMatchObject({ processStatus: 'PENDING', ofacStatus: 'FLAGGED', memoStatus: 'REVIEW' })
   })
 
   it('rejects amounts with more than 2 decimals and weekend dates', async () => {
@@ -131,5 +131,106 @@ describe('demo Parameter UI (UC-SYS-PARAM-01)', () => {
       body: JSON.stringify({ paramDesc: '', paramRawType: 'INTEGER', paramRawValue: 'abc' }),
     }))
     expect(e.message).toBe('Value must be a valid integer.')
+  })
+})
+
+describe('demo ACH Files (UC-ACH-EOD-01)', () => {
+  type Status = {
+    nextBusinessDate: string
+    pending: { transferSerNo: string; effectiveDt: string }[]
+    leftOut: { recvName: string; reason: string }[]
+    files: { fileID: string; fedStatus: string; totalCreditCount: number; totalCreditAmt: number }[]
+  }
+  const status = () => demoApi<Status>('/eod/status')
+  const run = (businessDate: string) => post('/eod/run', { businessDate }) as Promise<{ fileID: string | null; fedStatus: string; message: string }>
+  const asAdmin = async () => {
+    await demoLogout()
+    await demoLogin('admin', 'admin123')
+  }
+  const available = async () => (await demoApi<{ acctNo: string; availBal: number }[]>('/member/accounts')).find((a) => a.acctNo === '100049281920')?.availBal
+  const setFailures = (n: string) => demoApi('/params/ACH_ORIG/FED_SIM_FAIL_ATTEMPTS', {
+    method: 'PUT',
+    body: JSON.stringify({ paramDesc: 'Fed simulator', paramRawType: 'INTEGER', paramRawValue: n }),
+  })
+
+  it('only lets admins in', async () => {
+    await memberWithMfa()
+    expect((await error(demoApi('/eod/status'))).status).toBe(403)
+  })
+
+  it('sends a valid file, marks the transfer Processed, and a rerun adds nothing', async () => {
+    await memberWithMfa()
+    const r = await post('/transfers', await transfer()) as { transferSerNo: string; effectiveDt: string; estimatedArrival: string }
+    expect(r.estimatedArrival > r.effectiveDt).toBe(true)
+    await asAdmin()
+    const s = await status()
+    expect(s.pending).toHaveLength(1)
+    expect(s.nextBusinessDate).toBe(r.effectiveDt)
+
+    const result = await run(r.effectiveDt)
+    expect(result.fedStatus).toBe('SENT')
+    const { content } = await demoApi<{ content: string }>(`/eod/files/${result.fileID}/content`)
+    const lines = content.trimEnd().split('\n')
+    expect(lines.length % 10).toBe(0)
+    expect(lines.every((l) => l.length === 94)).toBe(true)
+    expect(lines[2]).toContain(r.transferSerNo.replace(/-/g, ''))
+    expect(lines[1].slice(53, 63).trim()).toBe('RENT')
+
+    expect((await run(r.effectiveDt)).fileID).toBeNull()
+    expect((await status()).files).toHaveLength(1)
+    expect((await status()).pending).toHaveLength(0)
+    await demoLogout()
+    await memberWithMfa()
+    expect(await demoApi(`/transfers/${r.transferSerNo}`)).toMatchObject({ processStatus: 'PROCESSED' })
+  })
+
+  it('EX-01: a flagged item stays out and the clean one proceeds', async () => {
+    await memberWithMfa()
+    const clean = await post('/transfers', await transfer({ amount: '10.00' })) as { effectiveDt: string }
+    await post('/transfers', await transfer({ recvName: 'Blocked Test Person', amount: '20.00' }))
+    await asAdmin()
+    await run(clean.effectiveDt)
+    const s = await status()
+    expect(s.files[0]).toMatchObject({ totalCreditCount: 1, totalCreditAmt: 10 })
+    expect(s.leftOut).toEqual([expect.objectContaining({ recvName: 'BLOCKED TEST PERSON', reason: 'OFAC review' })])
+  })
+
+  it('EX-02: three failed attempts end in ERROR; a resend sends it; a sent file can\'t be resent', async () => {
+    await memberWithMfa()
+    const t = await post('/transfers', await transfer()) as { effectiveDt: string }
+    await asAdmin()
+    await setFailures('3')
+    const r = await run(t.effectiveDt)
+    expect(r.fedStatus).toBe('ERROR')
+    await setFailures('2')
+    expect(await post(`/eod/files/${r.fileID}/resend`, {})).toEqual({ fedStatus: 'SENT' })
+    expect((await error(post(`/eod/files/${r.fileID}/resend`, {}))).message).toBe('Only a file in ERROR can be resent.')
+    expect((await error(demoApi('/eod/files/NOPE/content'))).status).toBe(404)
+  })
+
+  it('makes each recurring payment its own row; short funds reject that one and the series goes on', async () => {
+    await memberWithMfa()
+    const first = await post('/transfers', await transfer({ amount: '6000.00', frequency: 'WEEKLY', transferCount: 3 })) as { effectiveDt: string; transferCount: number }
+    expect(first.transferCount).toBe(3)
+    await asAdmin()
+    await run(first.effectiveDt)
+    const second = (await status()).pending[0]
+    await run(second.effectiveDt) // $2,500 left, so the $6,000 hold fails
+    let s = await status()
+    expect(s.leftOut).toEqual([expect.objectContaining({ reason: 'Insufficient funds' })])
+    expect(s.files).toHaveLength(1)
+    expect(s.pending).toHaveLength(1)
+    await run(s.pending[0].effectiveDt) // the last one, also short
+    s = await status()
+    expect(s.leftOut).toHaveLength(2)
+    expect(s.pending).toHaveLength(0)
+    await demoLogout()
+    await memberWithMfa()
+    expect(await available()).toBe(2500)
+  })
+
+  it('builds no file on a day that is not a banking day', async () => {
+    await demoLogin('admin', 'admin123')
+    expect((await run('2030-01-05')).message).toBe("2030-01-05 isn't a banking day, so no file was built.")
   })
 })

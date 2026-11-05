@@ -65,6 +65,17 @@ Flyway manages all three (`spring.flyway.schemas`), and `ach_app` gets privilege
 | M1–M8 new tables | ✅ Adds | Placed per the layout above |
 | D5 finding: `fileID` FK skipped when `batchID` is NULL | ✅ Adds (V6) | A MySQL 26.10 bug: an FK column that leads Ba's `(fileID, batchID)` index isn't checked when the other column is NULL. V6 adds `CHECK (fileID IS NULL OR batchID IS NOT NULL)` on both transaction tables (a NACHA rule anyway: every entry in a file is in a batch), so the FKs always run. Ba's definitions are unchanged. |
 
+### Changes for UC-ACH-EOD-01 (V11, V12)
+
+| Change | Marked | Why |
+| --- | --- | --- |
+| `ACHOrigTransaction.recvRoutingNo CHAR(9) NULL` | Adds | A Type 6 record needs the receiving bank's routing number, and the table had none. |
+| `ofacStatus` `CLEARED` → `OFAC_PASSED`, `processStatus` `PENDING` → `PENDING_BATCH` | Ba's new names | From his UC-ACH-EOD-01. His sample row is updated. A flagged transfer stays `PENDING`. A transfer in a file is `PROCESSED`. |
+| `transferReqNo` = position in the series, `transferReqRemaining` = what's left | FIX | The app stored the total in both. Ba's sample row (1 and 0) was already right. |
+| `AppParam`: `FED_IMMEDIATE_DEST`, `ORIG_COMPANY_NAME`, `FED_SIM_FAIL_ATTEMPTS` | Adds | Values for the file and the Fed simulator. |
+| `Action`: 402 `FILE_QUEUED`, 403 `FED_SEND_FAILED`, 404 `FILE_ERROR` | Adds | Next to Ba's 401 `FED_SEND`. |
+| Triggers `TR_ACHOrigFedAction_NoUpdate`, `_NoDelete` (V12) | Adds | Ba: "an unalterable audit trail". Needs the root setting in README section 4. |
+
 ---
 
 ## 1. Ba's tables by component

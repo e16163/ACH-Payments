@@ -140,6 +140,16 @@ class MemberAccessTest {
     }
 
     @Test
+    void onlyAdminsCanRunTheEodFile() throws Exception {
+        mvc.perform(get("/api/eod/status").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/eod/status").with(httpBasic("operator", "operator-pw"))).andExpect(status().isForbidden());
+        mvc.perform(post("/api/eod/run").with(httpBasic(MEMBER, "member-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"businessDate\":\"2026-11-05\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/eod/status")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void anonymousMustLogIn() throws Exception {
         mvc.perform(get("/api/transfers/dates")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/me")).andExpect(status().isUnauthorized())

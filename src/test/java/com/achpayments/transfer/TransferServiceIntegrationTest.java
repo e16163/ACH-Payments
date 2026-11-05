@@ -126,8 +126,9 @@ class TransferServiceIntegrationTest {
         TransferService.Receipt receipt = service.submit(MEMBER, request("1500.00"));
 
         assertTrue(receipt.transferSerNo().matches("TRF-\\d{8}-\\d{4}"), receipt.transferSerNo());
-        assertEquals("PENDING", receipt.processStatus());
-        assertEquals("CLEARED", receipt.ofacStatus());
+        assertEquals("PENDING_BATCH", receipt.processStatus());
+        assertEquals("OFAC_PASSED", receipt.ofacStatus());
+        assertEquals(dates.estimatedArrival(dates.earliest()), receipt.estimatedArrival());
         assertEquals("POSTED", receipt.memoStatus());
         assertEquals("JPMorgan Chase Bank, N.A.", receipt.bankName());
         assertEquals("6789", receipt.acctLast4());
@@ -136,7 +137,7 @@ class TransferServiceIntegrationTest {
         var row = jdbc.queryForMap("SELECT processStatus, sourceID, originatorID, companyEntryDesc, feeAmt, lastModBy, "
                 + "transferAmt, effectiveDt, origAcctType FROM " + orig + ".ACHOriginatorTransfer WHERE transferSerNo = ?",
                 receipt.transferSerNo());
-        assertEquals("PENDING", row.get("processStatus"));
+        assertEquals("PENDING_BATCH", row.get("processStatus"));
         assertEquals("ONLINE_BANKING", row.get("sourceID"));
         assertEquals("9000000001", row.get("originatorID"));
         assertEquals("RENT", row.get("companyEntryDesc"));
@@ -198,8 +199,9 @@ class TransferServiceIntegrationTest {
                 + orig + ".ACHOriginatorTransfer WHERE transferSerNo = ?", receipt.transferSerNo());
         assertEquals(true, row.get("recurringFlag"));
         assertEquals("MONTHLY", row.get("pmtFrequency"));
-        assertEquals(6, row.get("transferReqNo"));
-        assertEquals(6, row.get("transferReqRemaining"));
+        assertEquals(1, row.get("transferReqNo")); // Ba: the position in the series
+        assertEquals(5, row.get("transferReqRemaining"));
+        assertEquals(6, receipt.transferCount());
     }
 
     @Test

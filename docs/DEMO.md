@@ -1,6 +1,6 @@
 # Demo guide for Ba
 
-A 10-minute walk-through of what's built from your three documents, and what isn't yet.
+A 15-minute walk-through of what's built from your four documents, and what isn't yet.
 
 ## Two ways to run it
 
@@ -11,6 +11,7 @@ A 10-minute walk-through of what's built from your three documents, and what isn
 | Saved? | No. Resets when you close the tab | Yes, in the `ach_payments` / `ach_origination` / `ach_receiving` databases |
 | Member login | `member` / `member123` | `member` / `member123` |
 | Admin login | `admin` / `admin123` | Ben's admin login |
+| ACH files | Kept in the browser tab | Written to `~/dev/fed/outbound`, the simulated Fed |
 
 Use the online demo to click through. Use the full app to see the rows land in your tables (the last section).
 
@@ -64,7 +65,7 @@ Keep the $2.50 fee; Part 2 uses it.
 1. **Review your transfer** shows the fee, the total and the estimated arrival:
    - **Fee $2.50**, from the parameter you changed in Part 1
    - **Total $1,502.50**
-   - **Estimated arrival** date
+   - **Estimated arrival** date: the next banking day after the transfer date, because the 5 PM file settles the next banking day
 2. Under **Fee disclosure and transfer terms**, **Confirm Transfer** stays disabled until you tick the box. Tick it and click **Confirm Transfer**.
 
 **Step 7 (confirmation):**
@@ -76,16 +77,35 @@ Keep the $2.50 fee; Part 2 uses it.
 2. **Download receipt** saves a text receipt.
 3. Click **Done**, then **Accounts**. Checking now shows **$6,997.50**: $1,502.50 is on memo hold.
 
-**Extra, OFAC screening:** start another transfer with recipient name `Blocked Test Person`. That's a made-up name on the simulated SDN list. The review page says "This transfer will be reviewed by our compliance team before it's sent." The result is **Transfer under review**, and no money is held.
+**OFAC screening:** start another transfer with recipient name `Blocked Test Person`. Keep it; Part 3 uses it. That's a made-up name on the simulated SDN list. The review page says "This transfer will be reviewed by our compliance team before it's sent." The result is **Transfer under review**, and no money is held.
 
 ---
 
-## Part 3: System Design (in the full app)
+## Part 3: End-of-day ACH file (UC-ACH-EOD-01)
+
+The file normally builds by itself after `FED_FILE_CUTOFF_TIME` (5 PM Eastern) on each banking day. **Run now** does the same thing on demand.
+
+1. Sign out, sign in as **admin**, and click **ACH Files**.
+2. You see:
+   - **Waiting for a file (1):** Jane Smith's transfer
+   - **Left out (1):** Blocked Test Person, reason **OFAC review**
+   - a **Compliance alert** (your EX-01)
+3. **Business date** is already set to the date of Jane's transfer. Run now takes a date because a transfer made today is dated the next banking day or later.
+4. **EX-02 (the Fed is down):** in **System Configuration**, edit `FED_SIM_FAIL_ATTEMPTS` and set it to `3`. Back in **ACH Files**, click **Run now**. The file ends in **ERROR** with an **Operations alert**. The full app waits 1 second, then 2, between its 3 tries.
+5. Set `FED_SIM_FAIL_ATTEMPTS` back to `0`, and click **Resend** on the file. It's now **SENT**.
+6. Click **View** to read the NACHA file: the file header, batch header, Jane's entry line, the batch and file controls, and the rows of 9s that pad it to a multiple of 10 records. **Download** saves the `.ach` file.
+7. Click **Run now** again: "Nothing is due". A rerun can't duplicate anything.
+
+In the full app, the transfer's `processStatus` is now `PROCESSED` (the query in Part 4). There's no member screen yet that lists past transfers.
+
+To see a recurring series, make a Weekly transfer with 3 payments in Part 2. Each time you run the file, the next payment appears under **Waiting**, with its own date and its own hold. If the money isn't there on that date, that payment is rejected, shows under **Left out**, and the series continues.
+
+## Part 4: System Design (in the full app)
 
 These screens write to your tables. On Ben's Mac, after a transfer, run:
 
 ```sql
--- the transfer, PENDING, with T8 columns (originatorID 9000000001, sourceID ONLINE_BANKING)
+-- the transfer, PENDING_BATCH then PROCESSED, with T8 columns (originatorID 9000000001, sourceID ONLINE_BANKING)
 SELECT transferSerNo, memberNo, transferAmt, feeAmt, effectiveDt, processStatus, ofacStatus, memoStatus, originatorID, lastModBy
 FROM ach_origination.ACHOriginatorTransfer ORDER BY createTm DESC LIMIT 5;
 
@@ -95,6 +115,11 @@ SELECT recvAcctSerNo, acctOwner, routingNo, acctType FROM ach_origination.ACHOri
 -- the memo hold and the balance it reduced
 SELECT tranRef, acctNo, amount, postType, memoStatus FROM ach_payments.ACHMemoPost ORDER BY memoPostID DESC LIMIT 5;
 SELECT acctNo, ledgerBal, availBal FROM ach_payments.SimCoreAccount;
+
+-- the file, its batches and entries, and the audit trail
+SELECT fileID, fedStatus, totalCreditCount, totalCreditAmt, sendTm FROM ach_origination.ACHOrigFile ORDER BY fileID DESC LIMIT 5;
+SELECT transferSerNo, tranCode, recvRoutingNo, recvName, amount, traceNo, fedStatus FROM ach_origination.ACHOrigTransaction ORDER BY traceNo DESC LIMIT 5;
+SELECT * FROM ach_origination.ACHOrigFedAction ORDER BY actionTm DESC LIMIT 10;
 
 -- Parameter UI changes and security events
 SELECT * FROM ach_payments.AppParam;
@@ -115,14 +140,13 @@ What's in the database today:
 
 ## What isn't built yet
 
-The transfer stops at **PENDING**. The back office from your System Design isn't built yet:
-- the outbound NACHA file builder and Same Day windows
-- a simulated Fed
+The transfer now reaches the (simulated) Fed. The rest of the back office from your System Design isn't built yet:
+- Same Day windows
 - inbound file ingestion and the Receiving UI
 - returns, NOCs, reversals and resubmissions
 - fraud rules and the review queue
 - end-of-day posting
 
-These are roadmap cards R3–R17, in `docs/PLAN.md`. The next one turns pending transfers into a real NACHA file, so you can open it and see the transfer as an entry line.
+These are the remaining roadmap cards in `docs/PLAN.md`.
 
 **Questions for you:** anything in Parts 1–2 that doesn't match what you meant, and the open decisions in `docs/USE-CASES.md`.

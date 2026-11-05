@@ -3,7 +3,9 @@ import type { Receipt } from './types'
 
 export function statusLabel(r: Pick<Receipt, 'ofacStatus' | 'processStatus'>): string {
   if (r.ofacStatus === 'FLAGGED') return 'Under review'
-  return r.processStatus === 'PENDING' ? 'Scheduled' : r.processStatus
+  if (r.processStatus === 'PENDING_BATCH') return 'Scheduled'
+  if (r.processStatus === 'PROCESSED') return 'Processed'
+  return r.processStatus === 'REJECTED' ? 'Rejected' : r.processStatus
 }
 
 /** The text of the downloadable receipt (UC-ACH-ORG-01 step 7). Account numbers are masked to the last 4. */
