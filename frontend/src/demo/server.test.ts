@@ -229,6 +229,15 @@ describe('demo ACH Files (UC-ACH-EOD-01)', () => {
     expect(await available()).toBe(2500)
   })
 
+  it("doesn't send a reserved Nacha word as the entry description", async () => {
+    await memberWithMfa()
+    const t = await post('/transfers', await transfer({ memo: 'reversal' })) as { effectiveDt: string }
+    await asAdmin()
+    const { fileID } = await run(t.effectiveDt)
+    const { content } = await demoApi<{ content: string }>(`/eod/files/${fileID}/content`)
+    expect(content.split('\n')[1].slice(53, 63).trim()).toBe('TRANSFER')
+  })
+
   it('builds no file on a day that is not a banking day', async () => {
     await demoLogin('admin', 'admin123')
     expect((await run('2030-01-05')).message).toBe("2030-01-05 isn't a banking day, so no file was built.")

@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -48,6 +49,9 @@ public class EodFileStore {
     private static final String SEC_CODE = "WEB"; // USE-CASES T1
     private static final String SERVICE_CLASS_CREDITS = "220";
     private static final String DEFAULT_ENTRY_DESC = "TRANSFER"; // the field is required, the member's memo isn't
+    /** Nacha gives these entry descriptions a meaning, so a member's memo can't be sent as one. */
+    private static final Set<String> RESERVED_ENTRY_DESC = Set.of("REVERSAL", "RECLAIM", "NONSETTLED", "RETRY PYMT",
+            "REDEPCHECK", "HCCLAIMPMT", "AUTOENROLL");
 
     /** One due transfer, joined to its recipient and originator. */
     private record Due(String serNo, String firstSerNo, String acctNo, BigDecimal amount, BigDecimal fee, String memoStatus,
@@ -100,7 +104,7 @@ public class EodFileStore {
         Map<BatchKey, List<Due>> groups = new TreeMap<>();
         for (Due d : dueTransfers(businessDate)) {
             if (readyForFile(d)) {
-                String desc = d.memo() == null ? DEFAULT_ENTRY_DESC : d.memo();
+                String desc = d.memo() == null || RESERVED_ENTRY_DESC.contains(d.memo()) ? DEFAULT_ENTRY_DESC : d.memo();
                 groups.computeIfAbsent(new BatchKey(SEC_CODE, d.originatorID(), d.odfiRouting(), d.effectiveDt(), desc),
                         k -> new ArrayList<>()).add(d);
             }
@@ -210,11 +214,12 @@ public class EodFileStore {
         for (Due d : items) { // the trace numbers ascend within the batch, as NACHA requires
             jdbc.update("INSERT INTO " + orig + ".ACHOrigTransaction (transferSerNo, transferVersion, fileID, batchID, creditFlag, "
                     + "tranCode, companyName, companyID, stdEntryCode, companyEntryDesc, effectiveDt, originatorID, amount, recvAcctID, "
-                    + "recvName, transactionDiscData, traceNo, fedStatus, sourceID, recvRoutingNo) "
-                    + "VALUES (?, 1, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?)",
+                    + "recvName, transactionDiscData, traceNo, fedStatus, sourceID, recvRoutingNo, individualID, addendaInd) "
+                    + "VALUES (?, 1, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?, ?, '0')",
                     d.serNo(), fileID, batchID, "SAVINGS".equals(d.recvAcctType()) ? "32" : "22", companyName, key.companyId(),
                     key.secCode(), key.entryDesc(), d.effectiveDt(), d.originatorID(), d.amount(), d.recvAcctNo(), d.recvName(),
-                    d.recurring() ? "R" : "S", traces.next(d.odfiRouting()), d.sourceID(), d.routingNo());
+                    d.recurring() ? "R" : "S", traces.next(d.odfiRouting()), d.sourceID(), d.routingNo(),
+                    d.serNo().replace("-", "")); // TRF-20261105-0001 fits the 15-character field
             // Ba: the batch updates the transfer's status to Processed; delivery is tracked by fedStatus.
             jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processStatus = 'PROCESSED', processTm = NOW() "
                     + "WHERE transferSerNo = ? AND transferVersion = 1", d.serNo());
@@ -248,13 +253,13 @@ public class EodFileStore {
     }
 
     private List<Entry> entries(String batchID) {
-        return jdbc.query("SELECT tranCode, recvRoutingNo, recvAcctID, amount, transferSerNo, recvName, transactionDiscData, traceNo "
+        return jdbc.query("SELECT tranCode, recvRoutingNo, recvAcctID, amount, individualID, recvName, transactionDiscData, addendaInd, traceNo "
                 + "FROM " + orig + ".ACHOrigTransaction WHERE batchID = ? ORDER BY traceNo", (rs, i) -> {
                     String routing = rs.getString("recvRoutingNo");
                     return new Entry(rs.getString("tranCode"), routing.substring(0, 8), routing.substring(8),
                             rs.getString("recvAcctID"), rs.getBigDecimal("amount").movePointRight(2).longValueExact(),
-                            rs.getString("transferSerNo").replace("-", ""), // TRF-20261105-0001 fits the 15-character field
-                            rs.getString("recvName"), rs.getString("transactionDiscData"), "0", rs.getString("traceNo"), List.of());
+                            rs.getString("individualID"), rs.getString("recvName"), rs.getString("transactionDiscData"),
+                            rs.getString("addendaInd"), rs.getString("traceNo"), List.of());
                 }, batchID);
     }
 

@@ -188,7 +188,7 @@ The Transfer UI is finished when all of these hold:
 ### Fixes to what's already built
 
 - **`transferReqNo` bug:** Ba defines it as the current position in a series, and his one-time sample has 1 with 0 remaining. `TransferService` stores the total count in both columns. Fix: 1 and count - 1, with the receipt showing `transferReqNo + transferReqRemaining` as the total.
-- **Blank memo:** `companyEntryDesc` is required in a NACHA batch header, but the memo is optional. A blank memo sends `TRANSFER`.
+- **Blank memo:** `companyEntryDesc` is required in a NACHA batch header, but the memo is optional. A blank memo sends `TRANSFER`. So does a memo that's a word Nacha reserves (`REVERSAL`, `RECLAIM`, `NONSETTLED`, `RETRY PYMT`, `REDEPCHECK`, `HCCLAIMPMT`, `AUTOENROLL`).
 
 ### Assumptions (the spec is silent)
 

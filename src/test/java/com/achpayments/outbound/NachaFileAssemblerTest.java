@@ -75,6 +75,28 @@ class NachaFileAssemblerTest {
         assertEquals(152551, c.totalCreditCents());
     }
 
+    private static AchFile withEntries(int count) throws IOException {
+        AchFile base = fromFixture();
+        Entry e = base.batches().get(0).entries().get(0);
+        List<Entry> entries = new ArrayList<>();
+        for (int i = 1; i <= count; i++) {
+            entries.add(new Entry(e.transactionCode(), e.receivingDfi(), e.checkDigit(), e.accountNumber(), e.amountCents(),
+                    e.individualId(), e.individualName(), e.discretionaryData(), e.addendaIndicator(), "12345678" + "%07d".formatted(i), List.of()));
+        }
+        return NachaFileAssembler.assemble(base.header(), List.of(new BatchInput(base.batches().get(0).header(), entries)));
+    }
+
+    /** 1 + 1 + entries + 1 + 1 records: 6 entries fill a block exactly, the 7th starts another. */
+    @Test
+    void aFullBlockGetsNoPaddingAndOneMoreRecordStartsAnother() throws IOException {
+        String[] full = AchFileWriter.write(withEntries(6)).split("\n");
+        assertEquals(10, full.length);
+        assertTrue(full[9].startsWith("9000001000001"));
+        assertEquals(1, withEntries(6).control().blockCount());
+        assertEquals(20, AchFileWriter.write(withEntries(7)).split("\n").length);
+        assertEquals(2, withEntries(7).control().blockCount());
+    }
+
     @Test
     void matchesTheGoldenFile() throws IOException {
         assertEquals(resource("eod-golden.ach"), AchFileWriter.write(fromFixture()));

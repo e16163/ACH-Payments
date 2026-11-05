@@ -137,12 +137,14 @@ class EodFileJobIntegrationTest {
         assertEquals(1, file.get("totalCreditCount"));
         assertEquals(new BigDecimal("1500.00"), file.get("totalCreditAmt"));
         assertEquals(1, count("SELECT COUNT(*) FROM " + orig + ".ACHOrigBatch WHERE fileID = ? AND stdEntryCode = 'WEB' AND odfiID = '12345678'", fileID));
-        var entry = jdbc.queryForMap("SELECT tranCode, recvRoutingNo, recvAcctID, recvName, transactionDiscData, fedStatus, traceNo FROM "
+        var entry = jdbc.queryForMap("SELECT tranCode, recvRoutingNo, recvAcctID, recvName, transactionDiscData, fedStatus, traceNo, individualID, addendaInd FROM "
                 + orig + ".ACHOrigTransaction WHERE transferSerNo = ?", serNo);
         assertEquals("22", entry.get("tranCode"));
         assertEquals("021000021", entry.get("recvRoutingNo"));
         assertEquals("S", entry.get("transactionDiscData"));
         assertEquals("SENT", entry.get("fedStatus"));
+        assertEquals(serNo.replace("-", ""), entry.get("individualID"));
+        assertEquals("0", String.valueOf(entry.get("addendaInd")));
         assertEquals(List.of("FILE_QUEUED", "FED_SEND"), actions(fileID));
 
         AchFile sent = sentFile(fileID);
@@ -176,6 +178,13 @@ class EodFileJobIntegrationTest {
         assertEquals("TRANSFER", sent.batches().get(1).header().companyEntryDescription()); // blank memo
         var traces = sent.batches().get(0).entries().stream().map(AchFile.Entry::traceNumber).toList();
         assertEquals(traces.stream().sorted().toList(), traces);
+    }
+
+    @Test
+    void aMemoThatIsAReservedNachaWordIsNotSentAsTheEntryDescription() throws IOException {
+        submit("Jane Smith", "10.00", "Reversal");
+        AchFile sent = sentFile(job.run(date).fileID());
+        assertEquals("TRANSFER", sent.batches().get(0).header().companyEntryDescription());
     }
 
     @Test

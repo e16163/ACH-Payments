@@ -45,6 +45,8 @@ const LIMIT_RULES = [
 ]
 const MAX_CENTS = 9_999_999_999_999 // Ba's DECIMAL(13,2): 99,999,999,999.99
 const FREQUENCIES = ['ONETIME', 'WEEKLY', 'BIWEEKLY', 'MONTHLY']
+// Nacha gives these entry descriptions a meaning, so a member's memo can't be sent as one (EodFileStore).
+const RESERVED_ENTRY_DESC = ['REVERSAL', 'RECLAIM', 'NONSETTLED', 'RETRY PYMT', 'REDEPCHECK', 'HCCLAIMPMT', 'AUTOENROLL']
 
 type Account = { acctNo: string; acctName: string; acctType: string; cents: number }
 type Param = { systemName: string; paramName: string; paramDesc: string; paramRawType: string; paramRawValue: string; lastModTm: string; lastModBy: string }
@@ -461,9 +463,10 @@ function runEod(s: State, businessDate: string) {
     .filter((t) => readyForFile(s, t))
   if (due.length === 0) return { fileID: null, fedStatus: null, message: `Nothing is due for ${businessDate}.` }
 
+  const entryDesc = (t: Transfer) => (t.memo === null || RESERVED_ENTRY_DESC.includes(t.memo) ? 'TRANSFER' : t.memo)
   const groups = new Map<string, Transfer[]>() // E5: one effective date and one entry description per batch
   for (const t of due) {
-    const key = `${t.effectiveDt}|${t.memo ?? 'TRANSFER'}]`
+    const key = `${t.effectiveDt}|${entryDesc(t)}]`
     groups.set(key, [...(groups.get(key) ?? []), t])
   }
   const batches: NachaBatch[] = [...groups.keys()].sort().map((key, i) => {
@@ -474,7 +477,7 @@ function runEod(s: State, businessDate: string) {
       trace: `12345678${pad(s.nextTrace++, 7)}`,
     }))
     return {
-      companyName: param(s, 'ORIG_COMPANY_NAME'), companyId: '9000000001', secCode: 'WEB', entryDesc: items[0].memo ?? 'TRANSFER',
+      companyName: param(s, 'ORIG_COMPANY_NAME'), companyId: '9000000001', secCode: 'WEB', entryDesc: entryDesc(items[0]),
       effectiveDate: items[0].effectiveDt.replace(/-/g, '').slice(2), odfi: '12345678', batchNumber: i + 1, entries,
     }
   })
