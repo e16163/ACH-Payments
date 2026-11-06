@@ -66,7 +66,7 @@ Create the project database and app user. Pick your own password:
 mysql -u root -p
 ```
 
-Following Ba's diagram, there are separate databases: `ach_payments` (shared config and logging), `ach_receiving` and `ach_origination`. Flyway creates the tables in all three.
+Following the design diagram, there are separate databases: `ach_payments` (shared config and logging), `ach_receiving` and `ach_origination`. Flyway creates the tables in all three.
 
 ```sql
 CREATE DATABASE ach_payments CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -136,13 +136,13 @@ The app opens on a **Sign in** page, and **Sign out** is at the top right. These
 | --- | --- | --- |
 | `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, ACH Origination File, ACH Receiving File, ACH Receiving Transactions |
 | `ACHOperator` (or `APP_OPERATOR_USERNAME`) | ACH operations (`ACH_OPS`) | ACH Receiving File, ACH Receiving Transactions |
-| `member` | Member: Ba's sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
+| `member` | Member: the sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
 
 Scripts and tests can still send HTTP Basic credentials, but a browser never gets the Basic login popup.
 
 ### 7. Running the database tests
 
-Some tests run against real MySQL, in separate **test** databases so they never touch your data. `ba_reference_test` holds Ba's original DDL, which a test compares our schema against. One-time setup, as root:
+Some tests run against real MySQL, in separate **test** databases so they never touch your data. `ba_reference_test` holds the original design DDL, which a test compares our schema against. One-time setup, as root:
 
 ```sql
 CREATE DATABASE ach_payments_test CHARACTER SET utf8mb4;
@@ -170,8 +170,8 @@ mvn test
 - [x] Step 0: Spring Boot + React skeleton deployed on Tomcat, with DB health check
 - [x] Step 1: NACHA file parser
 - [x] Parameter UI (UC-SYS-PARAM-01): designers add/edit parameters per app
-- [x] Ba's design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
-- [x] Database schema: all 30 of Ba's tables exactly as written, plus approved additions (V1–V13), with Ba's sample data
+- [x] Design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
+- [x] Database schema: all 30 designed tables exactly as written, plus approved additions (V1–V13), with the sample data
 - [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
 - [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, admin ACH Origination File page
 - [x] Inbound FedACH ingestion (UC-ACH-RCV-01): the 6 AM pickup, signature, control totals, EX-01 to EX-03, audit trail
