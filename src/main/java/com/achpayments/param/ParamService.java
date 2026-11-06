@@ -2,6 +2,8 @@ package com.achpayments.param;
 
 import org.springframework.stereotype.Service;
 
+import com.achpayments.common.AppLogRepository;
+
 @Service
 public class ParamService {
 
@@ -14,10 +16,12 @@ public class ParamService {
 
     private final ParamRepository repo;
     private final ParamCache cache;
+    private final AppLogRepository appLog;
 
-    public ParamService(ParamRepository repo, ParamCache cache) {
+    public ParamService(ParamRepository repo, ParamCache cache, AppLogRepository appLog) {
         this.repo = repo;
         this.cache = cache;
+        this.appLog = appLog;
     }
 
     /**
@@ -29,6 +33,7 @@ public class ParamService {
         if (error != null) throw new InvalidParamException(error);
 
         repo.upsert(systemName, paramName, paramDesc, type, value, user);
+        appLog.log(systemName, "INFO", "User '%s' saved parameter %s/%s = %s".formatted(user, systemName, paramName, value));
         cache.clear();
         return repo.find(systemName, paramName).orElseThrow();
     }

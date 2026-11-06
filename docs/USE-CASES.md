@@ -285,6 +285,42 @@ Assumptions, to replace when the use cases arrive:
 - **B3. Receiving Reversal.** There's no receiving reversal table, so the screen shows received entries that Nacha marks as reversals.
 - **B4. Sample rows.** V14 adds made-up rows so the screens aren't empty.
 
+## UC-SYS-LOG-01: App Log capture and System Audit & App Logs UI
+
+Spec: [Use-Case-AppLog-UI.docx](design/Use-Case-AppLog-UI.docx). Every row goes through one function, `AppLogRepository.log(...)`, which is the only code that inserts into `AppLog`.
+
+### What gets logged
+
+We log one row per business action, not one per SQL statement. OWASP's logging guide warns that logging too much hides real problems.
+
+| Event | Level | `systemID` |
+| --- | --- | --- |
+| Sign-in and sign-out, on the sign-in page | INFO | `ACH_ORIG` for `achorig` and members, `ACH_RCV` for `achrecv`, `ACH_SYS` for admin |
+| Failed sign-in | WARN | `ACH_SYS` |
+| Access denied, failed CSRF check | WARN | `ACH_SYS` |
+| Parameter saved | INFO | The parameter's app |
+| Transfer submitted | INFO | `ACH_ORIG` |
+| Transfer refused, by kind only | WARN | `ACH_ORIG` |
+| Run now, Resend | INFO | `ACH_ORIG` |
+| File sent to the Fed, by a user or the 5 PM job | INFO | `ACH_ORIG` |
+| Receive file | INFO | `ACH_RCV` |
+| Any failed Run now, Resend or Receive file | ERROR or WARN | As above |
+| MFA, EOD and ingestion rows that already existed | As before | `ACH_ORIG` or `ACH_RCV` |
+| Unhandled errors, with the stack trace | ERROR, or FATAL in a scheduled job | The app involved, otherwise `ACH_SYS` |
+
+### Decisions and assumptions
+
+- **L1. `systemID`.** An added nullable column. The design's table has no system field. Older rows stay `NULL`.
+- **L2. `logTm`.** `DATETIME(3)`, marked FIX, because the use case shows milliseconds.
+- **L3. Transactions.** A row written inside a transaction commits or rolls back with its action, so a failed action can't leave a success row in `AppLog`. The file in L5 isn't part of the transaction, so if the database drops mid-action it can hold a success entry for an action that then failed.
+- **L4. Safety.** Messages lose control characters and stop at 1,000 characters, and a failed sign-in logs the name only if it's a real login, because someone may type a password in that box. Stack traces stop at 60,000 characters. Rows never hold passwords, MFA codes or full account numbers.
+- **L5. EX-01.** If the insert fails, the entry goes to `~/dev/logs/app-error.log` (`APP_LOG_FALLBACK_FILE`), with no retry.
+- **L6. Filters.** Level, keyword in `logMesg`, and From and To dates. The dates are whole days, both included.
+- **L7. Button name.** The use case says both "Inspect" and "View Details". The screen uses **View Details**, from its implementation section.
+- **L8. Role.** The use case names `ROLE_ADMIN` or `ROLE_SYS_OPS`. We use `SYS_ADMIN`.
+- **L9. Grid.** A System ID column is added to the use case's columns.
+- **L10. Not logged.** HTTP Basic calls from scripts, which send credentials on every request, and sessions that simply expire.
+
 ## Build order
 
 1. **UC-SYS-PARAM-01.** ✅ Built (board P1–P3): matches the design's answers, and every "Done when" check passed in the deployed app.

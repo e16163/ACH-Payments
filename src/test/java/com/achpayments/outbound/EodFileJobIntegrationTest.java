@@ -129,6 +129,8 @@ class EodFileJobIntegrationTest {
         EodFileJob.RunResult result = job.run(date);
 
         assertEquals("SENT", result.fedStatus());
+        assertEquals(1, count("SELECT COUNT(*) FROM AppLog WHERE systemID = 'ACH_ORIG' AND logLevel = 'INFO' AND logMesg = ?",
+                "Fed send of " + result.fileID() + " succeeded on attempt 1"));
         String fileID = result.fileID();
         assertEquals("PROCESSED", status(serNo));
         var file = jdbc.queryForMap("SELECT fedStatus, sendTm, totalCreditCount, totalCreditAmt, totalDebitAmt FROM " + orig + ".ACHOrigFile WHERE fileID = ?", fileID);

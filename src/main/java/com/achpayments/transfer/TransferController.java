@@ -17,7 +17,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.achpayments.common.AppLogRepository;
 import com.achpayments.common.BankingCalendar;
+
+import jakarta.servlet.http.HttpServletRequest;
 
 /**
  * UC-ACH-ORG-01 (External ACH Transfer) API for the member screens. Only members who passed MFA get here
@@ -33,14 +36,16 @@ public class TransferController {
     private final TransferDates dates;
     private final BankingCalendar calendar;
     private final TransferService transfers;
+    private final AppLogRepository appLog;
     private final String memberUsername;
     private final String memberNumber;
 
-    public TransferController(TransferDates dates, BankingCalendar calendar, TransferService transfers,
+    public TransferController(TransferDates dates, BankingCalendar calendar, TransferService transfers, AppLogRepository appLog,
             @Value("${app.member-username}") String memberUsername, @Value("${app.member-number}") String memberNumber) {
         this.dates = dates;
         this.calendar = calendar;
         this.transfers = transfers;
+        this.appLog = appLog;
         this.memberUsername = memberUsername;
         this.memberNumber = memberNumber;
     }
@@ -79,7 +84,9 @@ public class TransferController {
     }
 
     @ExceptionHandler(TransferRejected.class)
-    public ResponseEntity<Map<String, String>> rejected(TransferRejected e) {
+    public ResponseEntity<Map<String, String>> rejected(TransferRejected e, Principal member, HttpServletRequest request) {
+        // The kind only: the messages can hold the member's balance
+        appLog.log(AppLogRepository.ACH_ORIG, "WARN", "Transfer refused for user '%s' on %s: %s".formatted(member.getName(), request.getRequestURI(), e.kind()));
         return ResponseEntity.badRequest().body(Map.of("error", e.getMessage(), "kind", e.kind().name()));
     }
 

@@ -1,5 +1,7 @@
 package com.achpayments.outbound;
 
+import static com.achpayments.common.AppLogRepository.ACH_ORIG;
+
 import java.io.IOException;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -41,7 +43,7 @@ public class EodFileJob {
     /** Idempotency note: files left QUEUED by an interrupted run go first, then anything newly due. */
     public synchronized RunResult run(java.time.LocalDate businessDate) {
         if (!calendar.isBankingDay(businessDate)) {
-            appLog.log("INFO", "EOD file: " + businessDate + " is not a banking day", null);
+            appLog.log(ACH_ORIG, "INFO", "EOD file: " + businessDate + " is not a banking day");
             return new RunResult(null, null, businessDate + " isn't a banking day, so no file was built.");
         }
         store.queuedFiles().forEach(this::transmit);
@@ -50,7 +52,7 @@ public class EodFileJob {
         try {
             fileID = store.compile(businessDate, processID);
         } catch (RuntimeException e) {
-            appLog.log("FATAL", "EOD file could not be built: " + e.getMessage(), e.toString());
+            appLog.log(ACH_ORIG, "FATAL", "EOD file could not be built: " + e.getMessage(), e);
             return new RunResult(null, "ERROR", "The file could not be built. See AppLog.");
         }
         if (fileID.isEmpty()) {
@@ -77,14 +79,15 @@ public class EodFileJob {
             try {
                 fed.send(store.fileName(fileID), text, attempt);
                 store.markSent(fileID, processID);
+                appLog.log(ACH_ORIG, "INFO", "Fed send of " + fileID + " succeeded on attempt " + attempt);
                 return "SENT";
             } catch (IOException e) {
                 store.recordFailedAttempt(fileID, processID);
-                appLog.log("WARN", "Fed send of " + fileID + " failed on attempt " + attempt + ": " + e.getMessage(), null);
+                appLog.log(ACH_ORIG, "WARN", "Fed send of " + fileID + " failed on attempt " + attempt + ": " + e.getMessage());
                 if (attempt == MAX_ATTEMPTS) {
                     store.markError(fileID, processID);
-                    appLog.log("FATAL", "Operations alert: " + fileID + " could not be sent to the Fed after "
-                            + MAX_ATTEMPTS + " attempts", e.toString());
+                    appLog.log(ACH_ORIG, "FATAL", "Operations alert: " + fileID + " could not be sent to the Fed after "
+                            + MAX_ATTEMPTS + " attempts", e);
                 } else {
                     sleep(backoffMillis << (attempt - 1));
                 }

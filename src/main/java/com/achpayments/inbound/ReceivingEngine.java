@@ -1,9 +1,9 @@
 package com.achpayments.inbound;
 
+import static com.achpayments.common.AppLogRepository.ACH_RCV;
+
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.PrintWriter;
-import java.io.StringWriter;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryStream;
@@ -82,7 +82,7 @@ public class ReceivingEngine {
             try {
                 results.add(ingest(file));
             } catch (IOException | RuntimeException e) {
-                appLog.log("FATAL", "Inbound file " + file.getFileName() + " stopped and stays in the inbound folder: " + e, stackTrace(e));
+                appLog.log(ACH_RCV, "FATAL", "Inbound file " + file.getFileName() + " stopped and stays in the inbound folder: " + e, e);
             }
         }
         return results;
@@ -103,16 +103,16 @@ public class ReceivingEngine {
     private Result ingest(Path file) throws IOException {
         String fileName = file.getFileName().toString();
         String fileID = store.insertFile(fileName);
-        appLog.log("INFO", fileID + " In-Flight: received " + fileName, null);
+        appLog.log(ACH_RCV, "INFO", fileID + " In-Flight: received " + fileName);
 
         if (!signature.isValid(file)) { // EX-01
             store.markFailed(fileID, SIGNATURE_FAILED);
             String message = "Security Operations alert: " + fileName + " failed signature verification and was quarantined.";
-            appLog.log("FATAL", fileID + " " + message, null);
+            appLog.log(ACH_RCV, "FATAL", fileID + " " + message);
             moveTo(quarantine, fileID, file);
             return new Result(fileID, fileName, SIGNATURE_FAILED, message);
         }
-        appLog.log("INFO", fileID + " Decrypted: signature verified", null);
+        appLog.log(ACH_RCV, "INFO", fileID + " Decrypted: signature verified");
 
         FileHeader[] header = new FileHeader[1];
         try {
@@ -123,7 +123,7 @@ public class ReceivingEngine {
             return reject(file, fileID, header[0], REJECTED, e);
         }
         store.saveHeader(fileID, header[0]);
-        appLog.log("INFO", fileID + " Validated: entries saved", null);
+        appLog.log(ACH_RCV, "INFO", fileID + " Validated: entries saved");
         moveTo(archive, fileID, file);
         events.publishEvent(new AchFileIngestedEvent(fileID));
         return new Result(fileID, fileName, VALIDATED, fileName + " was validated and saved.");
@@ -180,7 +180,7 @@ public class ReceivingEngine {
             Files.createDirectories(outbound);
             Files.writeString(outbound.resolve(fileID + ".rejection.txt"), "FedACH file rejection: " + message + System.lineSeparator());
         }
-        appLog.log(status.equals(DUPLICATE) ? "WARN" : "ERROR", "Operations alert: " + fileID + " " + message, status.equals(OUT_OF_BALANCE) ? stackTrace(e) : null);
+        appLog.log(ACH_RCV, status.equals(DUPLICATE) ? "WARN" : "ERROR", "Operations alert: " + fileID + " " + message, status.equals(OUT_OF_BALANCE) ? e : null);
         moveTo(quarantine, fileID, file);
         return new Result(fileID, file.getFileName().toString(), status, message);
     }
@@ -193,11 +193,5 @@ public class ReceivingEngine {
         if (Files.exists(sig)) {
             Files.move(sig, folder.resolve(fileID + "-" + sig.getFileName()), StandardCopyOption.ATOMIC_MOVE);
         }
-    }
-
-    private static String stackTrace(Exception e) {
-        StringWriter out = new StringWriter();
-        e.printStackTrace(new PrintWriter(out));
-        return out.toString();
     }
 }

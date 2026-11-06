@@ -1,6 +1,7 @@
 package com.achpayments.common;
 
 import java.io.IOException;
+import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -10,8 +11,9 @@ import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
@@ -32,11 +34,12 @@ import jakarta.servlet.http.HttpServletResponse;
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http, AccessDeniedHandler deniedHandler) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, AccessDeniedHandler deniedHandler, AppLogRepository appLog,
+            InMemoryUserDetailsManager users) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
-                        .requestMatchers("/api/params/**").hasRole("SYS_ADMIN")
+                        .requestMatchers("/api/params/**", "/api/v1/admin/**").hasRole("SYS_ADMIN")
                         .requestMatchers("/api/eod/**").hasAnyRole("ACH_ORIG_OPS", "SYS_ADMIN")
                         .requestMatchers("/api/v1/ach/back-office/origination/**").hasRole("ACH_ORIG_OPS")
                         .requestMatchers("/api/v1/ach/back-office/receiving/**").hasRole("ACH_RECV_OPS")
@@ -50,10 +53,24 @@ public class SecurityConfig {
                         .anyRequest().permitAll()) // the React app's static files
                 .httpBasic(Customizer.withDefaults())
                 .formLogin(form -> form.loginProcessingUrl("/api/login")
-                        .successHandler((request, response, auth) -> response.setStatus(204))
-                        .failureHandler((request, response, e) -> json(response, 401, "Incorrect username or password.")))
+                        .successHandler((request, response, auth) -> {
+                            appLog.log(systemOf(auth), "INFO", "User '%s' signed in".formatted(auth.getName()));
+                            response.setStatus(204);
+                        })
+                        .failureHandler((request, response, e) -> {
+                            // Only a real login name: someone may have typed their password in that box
+                            String name = request.getParameter("username");
+                            appLog.log(AppLogRepository.ACH_SYS, "WARN", "Failed sign-in for user '%s'"
+                                    .formatted(name != null && users.userExists(name) ? name : "(unknown)"));
+                            json(response, 401, "Incorrect username or password.");
+                        }))
                 .logout(logout -> logout.logoutUrl("/api/logout")
-                        .logoutSuccessHandler((request, response, auth) -> response.setStatus(204)))
+                        .logoutSuccessHandler((request, response, auth) -> {
+                            if (auth != null) { // null when there was no session
+                                appLog.log(systemOf(auth), "INFO", "User '%s' signed out".formatted(auth.getName()));
+                            }
+                            response.setStatus(204);
+                        }))
                 // The browser resends Basic credentials automatically, so writes need a CSRF token:
                 // the XSRF-TOKEN cookie, echoed back by the React app in the X-XSRF-TOKEN header.
                 .csrf(csrf -> csrf.spa())
@@ -61,6 +78,13 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex.accessDeniedHandler(deniedHandler)
                         .authenticationEntryPoint((request, response, e) -> json(response, 401, "Please sign in.")));
         return http.build();
+    }
+
+    private static String systemOf(Authentication auth) {
+        List<String> roles = auth.getAuthorities().stream().map(GrantedAuthority::getAuthority).toList();
+        if (roles.contains("ROLE_ACH_RECV_OPS")) return AppLogRepository.ACH_RCV;
+        if (roles.contains("ROLE_ACH_ORIG_OPS") || roles.contains("ROLE_MEMBER")) return AppLogRepository.ACH_ORIG;
+        return AppLogRepository.ACH_SYS;
     }
 
     /**
@@ -72,10 +96,10 @@ public class SecurityConfig {
         return (request, response, e) -> {
             String target = request.getMethod() + " " + request.getRequestURI();
             if (e instanceof CsrfException) {
-                appLog.log("WARN", "CSRF check failed: missing or invalid token on " + target, null);
+                appLog.log(AppLogRepository.ACH_SYS, "WARN", "CSRF check failed: missing or invalid token on " + target);
             } else {
                 String user = request.getUserPrincipal() == null ? "anonymous" : request.getUserPrincipal().getName();
-                appLog.log("WARN", "Access denied: user '%s' attempted %s".formatted(user, target), null);
+                appLog.log(AppLogRepository.ACH_SYS, "WARN", "Access denied: user '%s' attempted %s".formatted(user, target));
             }
             json(response, 403, "You don't have permission to do this.");
         };
@@ -88,7 +112,7 @@ public class SecurityConfig {
     }
 
     @Bean
-    UserDetailsService users(@Value("${app.admin-username}") String adminUsername,
+    InMemoryUserDetailsManager users(@Value("${app.admin-username}") String adminUsername,
             @Value("${app.admin-password}") String adminPassword,
             @Value("${app.orig-username}") String origUsername,
             @Value("${app.orig-password}") String origPassword,

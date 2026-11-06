@@ -1,5 +1,7 @@
 package com.achpayments.inbound;
 
+import static com.achpayments.common.AppLogRepository.ACH_RCV;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -38,6 +40,14 @@ public class ReceivingScheduler {
 
     @Scheduled(fixedDelay = 60_000)
     public void tick() {
+        try {
+            runIfDue();
+        } catch (RuntimeException e) {
+            appLog.log(ACH_RCV, "FATAL", "Inbound pickup stopped: " + e, e);
+        }
+    }
+
+    private void runIfDue() {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDate today = now.toLocalDate();
         if (today.equals(lastRun) || !calendar.isBankingDay(today)) {
@@ -50,7 +60,7 @@ public class ReceivingScheduler {
             }
         } catch (DateTimeParseException e) {
             lastRun = today; // one alert a day, not one a minute
-            appLog.log("FATAL", "Inbound pickup not run: FED_RECV_FILE_TIME '" + time + "' isn't a time like 06:00:00", null);
+            appLog.log(ACH_RCV, "FATAL", "Inbound pickup not run: FED_RECV_FILE_TIME '" + time + "' isn't a time like 06:00:00");
             return;
         }
         lastRun = today;

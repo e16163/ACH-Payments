@@ -59,8 +59,7 @@ class ParamSecurityTest {
         mvc.perform(get("/api/params/systems").with(httpBasic("achrecv", "recv-pw")))
                 .andExpect(status().isForbidden());
 
-        verify(appLog).log(eq("WARN"), startsWith("Access denied: user 'achrecv' attempted GET /api/params/systems"),
-                isNull());
+        verify(appLog).log(eq("ACH_SYS"), eq("WARN"), startsWith("Access denied: user 'achrecv' attempted GET /api/params/systems"));
     }
 
     @Test
@@ -97,8 +96,8 @@ class ParamSecurityTest {
                 .andExpect(status().isForbidden());
 
         verify(service, never()).save(any(), any(), any(), any(), any(), any());
-        verify(appLog).log(eq("WARN"),
-                eq("CSRF check failed: missing or invalid token on PUT /api/params/ACH_ORIG/FED_FILE_CUTOFF_TIME"), isNull());
+        verify(appLog).log(eq("ACH_SYS"), eq("WARN"),
+                eq("CSRF check failed: missing or invalid token on PUT /api/params/ACH_ORIG/FED_FILE_CUTOFF_TIME"));
     }
 
     @Test

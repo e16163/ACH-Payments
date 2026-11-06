@@ -1,5 +1,7 @@
 package com.achpayments.outbound;
 
+import static com.achpayments.common.AppLogRepository.ACH_ORIG;
+
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -38,6 +40,14 @@ public class EodScheduler {
 
     @Scheduled(fixedDelay = 60_000)
     public void tick() {
+        try {
+            runIfDue();
+        } catch (RuntimeException e) {
+            appLog.log(ACH_ORIG, "FATAL", "EOD run stopped: " + e, e);
+        }
+    }
+
+    private void runIfDue() {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDate today = now.toLocalDate();
         if (today.equals(lastRun)) {
@@ -50,7 +60,7 @@ public class EodScheduler {
             }
         } catch (DateTimeParseException e) {
             lastRun = today; // one alert a day, not one a minute
-            appLog.log("FATAL", "EOD file not run: FED_FILE_CUTOFF_TIME '" + cutoff + "' isn't a time like 17:00:00", null);
+            appLog.log(ACH_ORIG, "FATAL", "EOD file not run: FED_FILE_CUTOFF_TIME '" + cutoff + "' isn't a time like 17:00:00");
             return;
         }
         lastRun = today;

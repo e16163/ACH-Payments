@@ -1,5 +1,7 @@
 package com.achpayments.outbound;
 
+import static com.achpayments.common.AppLogRepository.ACH_ORIG;
+
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -110,7 +112,7 @@ public class EodFileStore {
             }
         }
         if (groups.isEmpty()) {
-            appLog.log("INFO", "EOD file: nothing due for " + businessDate, null);
+            appLog.log(ACH_ORIG, "INFO", "EOD file: nothing due for " + businessDate);
             return Optional.empty();
         }
 
@@ -133,7 +135,7 @@ public class EodFileStore {
     private void alertOnFlaggedItems(LocalDate businessDate) {
         jdbc.queryForList("SELECT transferSerNo FROM " + orig + ".ACHOriginatorTransfer WHERE processStatus = 'PENDING' "
                 + "AND ofacStatus = 'FLAGGED' AND effectiveDt <= ? AND transferVersion = 1", String.class, businessDate)
-                .forEach(serNo -> appLog.log("WARN", "Compliance alert: " + serNo + " is flagged by OFAC and left out of the EOD file", null));
+                .forEach(serNo -> appLog.log(ACH_ORIG, "WARN", "Compliance alert: " + serNo + " is flagged by OFAC and left out of the EOD file"));
     }
 
     private List<Due> dueTransfers(LocalDate businessDate) {
@@ -158,14 +160,14 @@ public class EodFileStore {
         if (ofac.isHit(d.recvName())) {
             jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET ofacStatus = 'FLAGGED', ofacTm = NOW(), processStatus = 'PENDING' "
                     + "WHERE transferSerNo = ? AND transferVersion = 1", d.serNo());
-            appLog.log("WARN", "Compliance alert: " + d.serNo() + " is flagged by OFAC and left out of the EOD file", null);
+            appLog.log(ACH_ORIG, "WARN", "Compliance alert: " + d.serNo() + " is flagged by OFAC and left out of the EOD file");
             return false;
         }
         if ("POSTED".equals(d.memoStatus())) {
             return true;
         }
         if (!"PENDING".equals(d.memoStatus())) {
-            appLog.log("WARN", "EOD file: " + d.serNo() + " left out, memoStatus is " + d.memoStatus(), null);
+            appLog.log(ACH_ORIG, "WARN", "EOD file: " + d.serNo() + " left out, memoStatus is " + d.memoStatus());
             return false;
         }
         var hold = memo.post(new MemoPostingEngine.Request(Source.ORIG, d.serNo(), d.acctNo(), false,
@@ -178,7 +180,7 @@ public class EodFileStore {
         // E4: this payment is rejected with no retry, and the series continues.
         jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processStatus = 'REJECTED', processTm = NOW(), memoStatus = ?, "
                 + "memoTm = NOW() WHERE transferSerNo = ? AND transferVersion = 1", hold.status().name(), d.serNo());
-        appLog.log("WARN", "EOD file: " + d.serNo() + " rejected, " + hold.reason(), null);
+        appLog.log(ACH_ORIG, "WARN", "EOD file: " + d.serNo() + " rejected, " + hold.reason());
         transfers.scheduleNextPayment(d.serNo());
         return false;
     }

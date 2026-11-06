@@ -135,6 +135,70 @@ describe('demo Parameter UI (UC-SYS-PARAM-01)', () => {
   })
 })
 
+describe('demo AppLog (UC-SYS-LOG-01)', () => {
+  type Log = { logAppId: number; systemID: string | null; logLevel: string; logMesg: string; logTm: string }
+  type Page = { items: Log[]; total: number; page: number; limit: number }
+  const logs = (query = 'page=1&limit=20&level=ALL') => demoApi<Page>(`/v1/admin/logs?${query}`)
+  const messages = async () => (await logs()).items.map((l) => `${l.systemID} ${l.logLevel} ${l.logMesg}`)
+
+  it('logs sign-ins, failed sign-ins and sign-outs with their systems', async () => {
+    await error(demoLogin('achrecv', 'wrong-secret'))
+    await demoLogin('achrecv', 'achrecv123')
+    await demoLogout()
+    await demoLogin('achorig', 'achorig123')
+    await demoLogout()
+    await demoLogin('admin', 'admin123')
+    const seen = await messages()
+    expect(seen).toEqual(expect.arrayContaining([
+      "ACH_SYS WARN Failed sign-in for user 'achrecv'", "ACH_RCV INFO User 'achrecv' signed in", "ACH_RCV INFO User 'achrecv' signed out",
+      "ACH_ORIG INFO User 'achorig' signed in", "ACH_ORIG INFO User 'achorig' signed out", "ACH_SYS INFO User 'admin' signed in",
+    ]))
+    expect(seen.join()).not.toContain('wrong-secret')
+  })
+
+  it('logs a saved parameter and a denied call, and keeps the logs for admins', async () => {
+    await demoLogin('achrecv', 'achrecv123')
+    expect((await error(logs())).status).toBe(403)
+    await demoLogin('admin', 'admin123')
+    await demoApi('/params/ACH_ORIG/EXTERNAL_XFER_FEE', { method: 'PUT', body: JSON.stringify({ paramDesc: 'Fee', paramRawType: 'DECIMAL', paramRawValue: '2.50' }) })
+    expect(await messages()).toEqual(expect.arrayContaining([
+      "ACH_SYS WARN Access denied: user 'achrecv' attempted GET /api/v1/admin/logs?page=1&limit=20&level=ALL",
+      "ACH_ORIG INFO User 'admin' saved parameter ACH_ORIG/EXTERNAL_XFER_FEE = 2.50",
+    ]))
+  })
+
+  it('never logs a sign-in name that is not a login', async () => {
+    await error(demoLogin('my-password-in-the-wrong-box', 'x'))
+    await demoLogin('admin', 'admin123')
+    expect(await messages()).toContain("ACH_SYS WARN Failed sign-in for user '(unknown)'")
+    expect((await messages()).join()).not.toContain('wrong-box')
+  })
+
+  it('logs a received file', async () => {
+    await demoLogin('achrecv', 'achrecv123')
+    const r = (await post('/v1/ach/receiving/files/receive', { sample: 'PAYROLL' }) as { fileID: string }[])[0]
+    await demoLogin('admin', 'admin123')
+    expect(await messages()).toContain(`ACH_RCV INFO User 'achrecv' received sample PAYROLL: ${r.fileID} VALIDATED`)
+  })
+
+  it('filters by level, keyword and date, newest first', async () => {
+    await demoLogin('admin', 'admin123')
+    expect((await logs('level=ERROR')).items.map((l) => l.logAppId)).toEqual([1])
+    expect((await logs('search=HEADER')).total).toBe(1)
+    expect((await logs('search=nothing-like-this')).total).toBe(0)
+    expect((await logs('from=2026-11-03&to=2026-11-03')).items.map((l) => l.logAppId)).toEqual([1])
+    expect((await logs('to=2026-11-02')).total).toBe(0)
+    expect((await error(logs('from=2026-11-04&to=2026-11-03'))).status).toBe(400)
+    expect((await logs()).items[0].logMesg).toBe("User 'admin' signed in")
+  })
+
+  it('returns the stack trace for one entry', async () => {
+    await demoLogin('admin', 'admin123')
+    expect(await demoApi('/v1/admin/logs/1')).toMatchObject({ logExceptionData: expect.stringContaining('IllegalArgumentException') })
+    expect((await error(demoApi('/v1/admin/logs/999'))).status).toBe(404)
+  })
+})
+
 describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
   type File = { fileID: string; processStatus: string; entryCount: number; totalCreditAmt: number; totalDebitAmt: number }
   type Page = { items: { traceNo: string; tranID: number }[]; total: number }

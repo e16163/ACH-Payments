@@ -37,6 +37,7 @@ class ParamServiceIntegrationTest {
 
     @BeforeEach
     void resetToSeedData() {
+        jdbc.update("DELETE FROM AppLog WHERE logMesg LIKE 'User %saved parameter%'");
         jdbc.update("DELETE FROM AppParam WHERE NOT (paramName IN ('FED_IMMEDIATE_DEST', 'ORIG_COMPANY_NAME', 'FED_SIM_FAIL_ATTEMPTS', 'MEMO_POST_IMMEDIATE', 'FED_FILE_CUTOFF_TIME', 'FED_RECV_FILE_TIME', 'RDFI_ROUTING_NO'))");
         jdbc.update("UPDATE AppParam SET paramRawValue = '17:00:00', lastModBy = 'SYS_ADMIN'"
                 + " WHERE paramName = 'FED_FILE_CUTOFF_TIME'");
@@ -47,6 +48,20 @@ class ParamServiceIntegrationTest {
     void migrationLoadsTheDesignSampleParameters() {
         assertEquals("17:00:00", repo.find("ACH_ORIG", "FED_FILE_CUTOFF_TIME").orElseThrow().paramRawValue());
         assertEquals("TRUE", repo.find("ACH_RCV", "MEMO_POST_IMMEDIATE").orElseThrow().paramRawValue());
+    }
+
+    @Test
+    void savingIsLoggedUnderTheParametersApp() {
+        service.save("ACH_RCV", "MAX_RETRY_COUNT", "Max resubmissions", "INTEGER", "2", "admin");
+        assertEquals("ACH_RCV INFO User 'admin' saved parameter ACH_RCV/MAX_RETRY_COUNT = 2", jdbc.queryForObject(
+                "SELECT CONCAT_WS(' ', systemID, logLevel, logMesg) FROM AppLog WHERE logMesg LIKE 'User %saved parameter%'", String.class));
+    }
+
+    @Test
+    void anInvalidSaveIsNotLogged() {
+        org.junit.jupiter.api.Assertions.assertThrows(ParamService.InvalidParamException.class,
+                () -> service.save("ACH_ORIG", "MAX_RETRY_COUNT", "Max resubmissions", "INTEGER", "abc", "admin"));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM AppLog WHERE logMesg LIKE 'User %saved parameter%'", Integer.class));
     }
 
     @Test

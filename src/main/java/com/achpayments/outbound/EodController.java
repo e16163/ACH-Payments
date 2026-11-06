@@ -1,6 +1,9 @@
 package com.achpayments.outbound;
 
+import static com.achpayments.common.AppLogRepository.ACH_ORIG;
+
 import java.math.BigDecimal;
+import java.security.Principal;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -18,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.achpayments.common.AppLogRepository;
 import com.achpayments.param.ParamCache;
 
 /** API for the admin ACH Origination File page (USE-CASES E3). Only ROLE_SYS_ADMIN gets here; see SecurityConfig. */
@@ -41,15 +45,17 @@ public class EodController {
     private final EodFileStore store;
     private final JdbcTemplate jdbc;
     private final ParamCache params;
+    private final AppLogRepository appLog;
     private final Clock clock;
     private final String orig;
 
-    public EodController(EodFileJob job, EodFileStore store, JdbcTemplate jdbc, ParamCache params, Clock clock,
+    public EodController(EodFileJob job, EodFileStore store, JdbcTemplate jdbc, ParamCache params, AppLogRepository appLog, Clock clock,
             @Value("${app.db.origination}") String orig) {
         this.job = job;
         this.store = store;
         this.jdbc = jdbc;
         this.params = params;
+        this.appLog = appLog;
         this.clock = clock;
         this.orig = orig;
     }
@@ -78,16 +84,24 @@ public class EodController {
 
     /** Run now. Design step 2 allows a "scheduled business date", which is what lets a demo send a future-dated transfer. */
     @PostMapping("/api/eod/run")
-    public EodFileJob.RunResult run(@RequestBody RunRequest body) {
+    public EodFileJob.RunResult run(@RequestBody RunRequest body, Principal user) {
         if (body.businessDate() == null) {
             throw new IllegalArgumentException("Choose a business date.");
         }
-        return job.run(body.businessDate());
+        EodFileJob.RunResult result = job.run(body.businessDate());
+        appLog.log(ACH_ORIG, level(result.fedStatus()), "User '%s' ran the EOD file for %s: %s".formatted(user.getName(), body.businessDate(), result.message()));
+        return result;
     }
 
     @PostMapping("/api/eod/files/{fileID}/resend")
-    public Map<String, String> resend(@PathVariable String fileID) {
-        return Map.of("fedStatus", job.resend(fileID));
+    public Map<String, String> resend(@PathVariable String fileID, Principal user) {
+        String status = job.resend(fileID);
+        appLog.log(ACH_ORIG, level(status), "User '%s' resent %s: %s".formatted(user.getName(), fileID, status));
+        return Map.of("fedStatus", status);
+    }
+
+    private static String level(String fedStatus) {
+        return "ERROR".equals(fedStatus) ? "ERROR" : "INFO";
     }
 
     @GetMapping("/api/eod/files/{fileID}/content")

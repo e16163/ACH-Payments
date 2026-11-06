@@ -1,5 +1,7 @@
 package com.achpayments.inbound;
 
+import static com.achpayments.common.AppLogRepository.ACH_RCV;
+
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -20,6 +22,6 @@ public class IngestedFileListener {
 
     @EventListener
     public void onIngested(AchFileIngestedEvent event) {
-        appLog.log("INFO", "ACH_FILE_INGESTED_EVENT " + event.fileID() + ": entries stay UNPROCESSED until memo posting is built", null);
+        appLog.log(ACH_RCV, "INFO", "ACH_FILE_INGESTED_EVENT " + event.fileID() + ": entries stay UNPROCESSED until memo posting is built");
     }
 }

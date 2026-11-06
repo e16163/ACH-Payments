@@ -1,12 +1,16 @@
 package com.achpayments.inbound;
 
+import static com.achpayments.common.AppLogRepository.ACH_RCV;
+
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.security.Principal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -22,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.achpayments.common.AppLogRepository;
 import com.achpayments.inbound.FedInboundSimulator.Sample;
 
 /** The received files, and UC-ACH-RCV-02 phase 2. Who gets here is set in SecurityConfig. */
@@ -53,12 +58,15 @@ public class ReceivingController {
     private final JdbcTemplate jdbc;
     private final ReceivingEngine engine;
     private final FedInboundSimulator fed;
+    private final AppLogRepository appLog;
     private final String recv;
 
-    public ReceivingController(JdbcTemplate jdbc, ReceivingEngine engine, FedInboundSimulator fed, @Value("${app.db.receiving}") String recv) {
+    public ReceivingController(JdbcTemplate jdbc, ReceivingEngine engine, FedInboundSimulator fed, AppLogRepository appLog,
+            @Value("${app.db.receiving}") String recv) {
         this.jdbc = jdbc;
         this.engine = engine;
         this.fed = fed;
+        this.appLog = appLog;
         this.recv = recv;
     }
 
@@ -76,12 +84,17 @@ public class ReceivingController {
 
     /** Simulates the Fed delivering a file, then ingests it, so a demo needn't wait for 6 AM. */
     @PostMapping("/files/receive")
-    public List<ReceivingEngine.Result> receive(@RequestBody ReceiveRequest body) throws IOException {
+    public List<ReceivingEngine.Result> receive(@RequestBody ReceiveRequest body, Principal user) throws IOException {
         if (body.sample() == null) {
             throw new IllegalArgumentException("Choose a file to receive.");
         }
         fed.deliver(body.sample());
-        return engine.ingestAll();
+        List<ReceivingEngine.Result> results = engine.ingestAll();
+        String outcome = results.stream().map(r -> r.fileID() + " " + r.processStatus()).collect(Collectors.joining(", "));
+        boolean validated = !results.isEmpty() && results.stream().allMatch(r -> r.processStatus().equals(ReceivingEngine.VALIDATED));
+        appLog.log(ACH_RCV, validated ? "INFO" : "WARN", "User '%s' received sample %s: %s"
+                .formatted(user.getName(), body.sample(), results.isEmpty() ? "no file finished" : outcome));
+        return results;
     }
 
     /** Steps 4-5, from the design's SQL. It filters by file, so the page's file comes as fileID; without one, every file is listed. */

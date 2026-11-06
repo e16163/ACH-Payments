@@ -64,6 +64,15 @@ class ReceivingSchedulerTest {
         s.tick();
         s.tick();
         verify(engine, never()).ingestAll();
-        verify(appLog, times(1)).log(eq("FATAL"), startsWith("Inbound pickup not run"), any());
+        verify(appLog, times(1)).log(eq("ACH_RCV"), eq("FATAL"), startsWith("Inbound pickup not run"));
+    }
+
+    @Test
+    void anErrorInTheScheduledRunIsLoggedWithItsStackTrace() {
+        ReceivingScheduler s = at("2026-11-06T12:00:00Z", "06:00:00");
+        IllegalStateException failure = new IllegalStateException("disk gone");
+        when(engine.ingestAll()).thenThrow(failure);
+        s.tick();
+        verify(appLog).log(eq("ACH_RCV"), eq("FATAL"), startsWith("Inbound pickup stopped"), eq(failure));
     }
 }

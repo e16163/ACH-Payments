@@ -57,6 +57,7 @@ class TransferServiceIntegrationTest {
 
     @AfterEach
     void cleanUp() {
+        jdbc.update("DELETE FROM AppLog WHERE logMesg LIKE 'Member %'");
         jdbc.update("DELETE FROM ACHMemoPost WHERE acctNo = ?", CHECKING);
         jdbc.update("DELETE FROM " + orig + ".ACHOriginatorTransfer WHERE memberNo = ?", MEMBER);
         jdbc.update("DELETE FROM " + orig + ".ACHOrigRecvAccount WHERE memberNo = ?", MEMBER);
@@ -83,7 +84,7 @@ class TransferServiceIntegrationTest {
     // ---- X5: limits (EX-02), OFAC, account verification (EX-03) ----
 
     @Test
-    void exactlyAtTheDailyLimitPassesOneCentOverIsRejectedWithBasMessage() {
+    void exactlyAtTheDailyLimitPassesOneCentOverIsRejectedWithTheDesignMessage() {
         // The design's DAILY_CHECKING_DEBIT_CAP: CHECKING, 1 day, $25,000
         assertEquals(new BigDecimal("25000.00"), service.preview(MEMBER, request("25000.00")).amount());
         TransferRejected e = assertThrows(TransferRejected.class, () -> service.preview(MEMBER, request("25000.01")));
@@ -155,6 +156,20 @@ class TransferServiceIntegrationTest {
         assertFalse(first.equals(second));
         assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM " + orig + ".ACHOrigRecvAccount WHERE memberNo = ?",
                 Integer.class, MEMBER));
+    }
+
+    @Test
+    void aSubmittedTransferIsLoggedOnce() {
+        TransferService.Receipt receipt = service.submit(MEMBER, request("20.00"));
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM AppLog WHERE systemID = 'ACH_ORIG' AND logLevel = 'INFO' AND logMesg LIKE ?",
+                Integer.class, "Member " + MEMBER + " submitted transfer " + receipt.transferSerNo() + "%"));
+    }
+
+    @Test
+    void aRejectedTransferLogsNoSubmission() {
+        jdbc.update("UPDATE SimCoreAccount SET availBal = 50.00 WHERE acctNo = ?", CHECKING);
+        assertThrows(TransferRejected.class, () -> service.submit(MEMBER, request("50.01")));
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM AppLog WHERE logMesg LIKE 'Member %'", Integer.class));
     }
 
     @Test

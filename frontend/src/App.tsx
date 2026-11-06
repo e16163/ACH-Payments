@@ -9,6 +9,7 @@ import LoginPage from './LoginPage'
 import AccountsPage from './member/AccountsPage'
 import ExternalTransferPage from './member/ExternalTransferPage'
 import MfaPage from './member/MfaPage'
+import AppLogPage from './logs/AppLogPage'
 import ParameterPage from './params/ParameterPage'
 import './app.css'
 
@@ -17,6 +18,7 @@ type Me = { username: string; roles: string[]; mfaVerified: boolean }
 
 const ROUTES = {
   params: '#/system-configuration',
+  appLogs: '#/system-audit-app-logs',
   originationFile: '#/ach-origination-file',
   receivingFile: '#/ach-receiving-file',
   receivingTransactions: '#/ach-receiving-transactions',
@@ -81,12 +83,13 @@ export default function App() {
   const memberReady = isMember && me?.mfaVerified
 
   const onTransactions = hash.startsWith(ROUTES.receivingTransactions)
-  const adminElsewhere = hash === ROUTES.originationFile || hash === ROUTES.receivingFile || onTransactions
+  const adminElsewhere = hash === ROUTES.appLogs || hash === ROUTES.originationFile || hash === ROUTES.receivingFile || onTransactions
   const myScreens = SCREENS.filter((s) => me?.roles.includes(s.role))
   const screen = myScreens.find((s) => s.route === hash)
 
   let page = null
   if (signedOut) page = <LoginPage onSignedIn={loadMe} />
+  else if (isAdmin && hash === ROUTES.appLogs) page = <AppLogPage />
   else if (screen) page = <BackOfficePage key={screen.route} screen={screen} />
   else if (isOrigOps || (isAdmin && hash === ROUTES.originationFile)) page = <AchOriginationFilePage />
   else if ((isAdmin || isRecvOps) && onTransactions) {
@@ -120,7 +123,12 @@ export default function App() {
       </header>
       {me && (
         <nav className="mainnav" aria-label="Main">
-          {isAdmin && <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>}
+          {isAdmin && (
+            <>
+              <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
+              <a className={hash === ROUTES.appLogs ? 'active' : ''} href={ROUTES.appLogs}>System Audit &amp; App Logs</a>
+            </>
+          )}
           {(isAdmin || isOrigOps) && (
             <a className={(isAdmin ? hash === ROUTES.originationFile : !screen) ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
           )}

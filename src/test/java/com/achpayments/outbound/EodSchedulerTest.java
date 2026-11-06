@@ -48,11 +48,27 @@ class EodSchedulerTest {
     }
 
     @Test
+    void anErrorInTheScheduledRunIsLoggedWithItsStackTrace() {
+        IllegalStateException failure = new IllegalStateException("boom");
+        when(job.run(any())).thenThrow(failure);
+        at("17:00:00", "17:00:00").tick();
+        verify(appLog).log("ACH_ORIG", "FATAL", "EOD run stopped: " + failure, failure);
+    }
+
+    @Test
+    void anErrorReadingTheCutoffIsLoggedToo() {
+        IllegalStateException failure = new IllegalStateException("database down");
+        when(params.get("ACH_ORIG", "FED_FILE_CUTOFF_TIME")).thenThrow(failure);
+        new EodScheduler(job, params, appLog, Clock.systemUTC()).tick();
+        verify(appLog).log("ACH_ORIG", "FATAL", "EOD run stopped: " + failure, failure);
+    }
+
+    @Test
     void aBadCutoffValueRaisesOneFatalAlertAndDoesNotRun() {
         EodScheduler scheduler = at("17:00:00", "5 PM");
         scheduler.tick();
         scheduler.tick();
         verify(job, never()).run(any());
-        verify(appLog, times(1)).log(org.mockito.ArgumentMatchers.eq("FATAL"), anyString(), any());
+        verify(appLog, times(1)).log(org.mockito.ArgumentMatchers.eq("ACH_ORIG"), org.mockito.ArgumentMatchers.eq("FATAL"), anyString());
     }
 }

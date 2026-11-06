@@ -1,5 +1,7 @@
 package com.achpayments.transfer;
 
+import static com.achpayments.common.AppLogRepository.ACH_ORIG;
+
 import java.math.BigDecimal;
 import java.text.NumberFormat;
 import java.time.Clock;
@@ -18,6 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.achpayments.common.AppLogRepository;
 import com.achpayments.memo.MemoPostingEngine;
 import com.achpayments.memo.MemoPostingEngine.Screening;
 import com.achpayments.memo.MemoPostingEngine.Source;
@@ -67,11 +70,13 @@ public class TransferService {
     private final MemoPostingEngine memo;
     private final ParamCache params;
     private final OfacScreening ofac;
+    private final AppLogRepository appLog;
     private final Clock clock;
     private final String orig;
 
     public TransferService(JdbcTemplate jdbc, RoutingService routing, TransferDates dates, AccountVerifier verifier,
-            MemoPostingEngine memo, ParamCache params, OfacScreening ofac, Clock clock, @Value("${app.db.origination}") String orig) {
+            MemoPostingEngine memo, ParamCache params, OfacScreening ofac, AppLogRepository appLog, Clock clock,
+            @Value("${app.db.origination}") String orig) {
         this.jdbc = jdbc;
         this.routing = routing;
         this.dates = dates;
@@ -79,6 +84,7 @@ public class TransferService {
         this.memo = memo;
         this.params = params;
         this.ofac = ofac;
+        this.appLog = appLog;
         this.clock = clock;
         this.orig = orig;
     }
@@ -113,6 +119,7 @@ public class TransferService {
         }
         jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET memoStatus = ?, memoTm = NOW() "
                 + "WHERE transferSerNo = ? AND transferVersion = 1", hold.status().name(), serNo);
+        appLog.log(ACH_ORIG, "INFO", "Member %s submitted transfer %s for %s, memo status %s".formatted(memberNo, serNo, c.total(), hold.status()));
         return receipt(memberNo, serNo).orElseThrow();
     }
 

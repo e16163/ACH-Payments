@@ -74,8 +74,10 @@ type RecvFile = {
   fileID: string; fileName: string; fileHeaderDt: string; fileHeaderTm: string; fedStatus: string; processStatus: string; modifier: string
 }
 type RecvRow = RecvEntry & { tranID: number; transferSerNo: string; transferVersion: number; fileID: string; batchID: string; fedStatus: string; sourceID: string; createTm: string }
+type LogRow = { logAppId: number; systemID: string | null; logLevel: string; logMesg: string; logExceptionData: string | null; logTm: string }
 type State = {
   user: string | null
+  logs: LogRow[]
   mfaVerified: boolean
   mfa: { code: string; expires: number; tries: number } | null
   accounts: Account[]
@@ -87,11 +89,17 @@ type State = {
   receivedEntries: RecvRow[]
 }
 
-const KEY = 'ach-demo-state-3' // new name: state saved by an older demo has no received files
+const KEY = 'ach-demo-state-4' // new name: state saved by an older demo has no logs
 
 function freshState(): State {
   return {
     user: null,
+    // The design's sample AppLog row (V7)
+    logs: [{
+      logAppId: 1, systemID: null, logLevel: 'ERROR', logMesg: 'Failed to parse incoming ACH file HEADER record for file ID FILE_20261103_09',
+      logExceptionData: 'java.lang.IllegalArgumentException: Invalid routing number length at line 1 char 23\n\tat com.ach.engine.FileParser.parseHeader(FileParser.java:42)',
+      logTm: '2026-11-03T15:10:00',
+    }],
     mfaVerified: false,
     mfa: null,
     accounts: [
@@ -140,6 +148,15 @@ function save(s: State) {
 const pad = (n: number, w = 2) => String(n).padStart(w, '0')
 const isoDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const isoDateTime = (d: Date) => `${isoDate(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+
+/** AppLogRepository.log, without the database fallback. */
+function log(s: State, systemID: string, logLevel: string, logMesg: string) {
+  const now = new Date()
+  s.logs.push({
+    logAppId: s.logs.length + 1, systemID, logLevel, logMesg: logMesg.slice(0, 1000), logExceptionData: null,
+    logTm: `${isoDateTime(now)}.${pad(now.getMilliseconds(), 3)}`,
+  })
+}
 
 function isBankingDay(iso: string): boolean {
   const day = new Date(`${iso}T12:00:00`).getDay()
@@ -202,15 +219,23 @@ const invalid = (msg: string): never => fail(400, msg, 'INVALID')
 
 // ---- sign-in (SecurityConfig) ----
 
+const systemOf = (role: Role) => (role === 'ACH_RECV_OPS' ? 'ACH_RCV' : role === 'SYS_ADMIN' ? 'ACH_SYS' : 'ACH_ORIG')
+
 export async function demoLogin(username: string, password: string): Promise<void> {
   const user = USERS[username]
-  if (!user || user.password !== password) fail(401, 'Incorrect username or password.')
   const s = load()
+  if (!user || user.password !== password) {
+    log(s, 'ACH_SYS', 'WARN', `Failed sign-in for user '${user ? username : '(unknown)'}'`)
+    save(s)
+    fail(401, 'Incorrect username or password.')
+  }
+  log(s, systemOf(user.role), 'INFO', `User '${username}' signed in`)
   save({ ...s, user: username, mfaVerified: false, mfa: null })
 }
 
 export async function demoLogout(): Promise<void> {
   const s = load()
+  if (s.user) log(s, systemOf(USERS[s.user].role), 'INFO', `User '${s.user}' signed out`)
   save({ ...s, user: null, mfaVerified: false, mfa: null })
 }
 
@@ -222,9 +247,36 @@ export async function demoApi<T>(path: string, init: RequestInit = {}): Promise<
   const method = init.method ?? 'GET'
   const body: Body = init.body ? JSON.parse(String(init.body)) : {}
   const s = load()
-  const result = route(s, method, path, body)
-  save(s)
-  return result as T
+  try {
+    const result = route(s, method, path, body)
+    save(s)
+    return result as T
+  } catch (e) {
+    const fresh = load() // a failed call changes nothing, except for its log row
+    if (e instanceof ApiError && e.status === 403) log(fresh, 'ACH_SYS', 'WARN', `Access denied: user '${s.user}' attempted ${method} /api${path}`)
+    if (e instanceof ApiError && e.kind && path.startsWith('/transfers')) log(fresh, 'ACH_ORIG', 'WARN', `Transfer refused for user '${s.user}' on /api${path}: ${e.kind}`)
+    save(fresh)
+    throw e
+  }
+}
+
+/** AppLogController */
+function logs(s: State, path: string) {
+  const one = /^\/v1\/admin\/logs\/(\d+)$/.exec(path)
+  if (one) return s.logs.find((l) => l.logAppId === Number(one[1])) ?? fail(404, 'No such log entry.')
+  const q = new URLSearchParams(path.split('?')[1])
+  const page = Number(q.get('page') ?? 1)
+  const limit = Number(q.get('limit') ?? 20)
+  const level = q.get('level') ?? 'ALL'
+  const search = (q.get('search') ?? '').toLowerCase()
+  const from = q.get('from')
+  const to = q.get('to')
+  if (from && to && from > to) fail(400, "The From date can't be after the To date.")
+  const rows = s.logs
+    .filter((l) => (level === 'ALL' || l.logLevel === level) && l.logMesg.toLowerCase().includes(search)
+      && (!from || l.logTm.slice(0, 10) >= from) && (!to || l.logTm.slice(0, 10) <= to))
+    .sort((a, b) => b.logTm.localeCompare(a.logTm) || b.logAppId - a.logAppId)
+  return { items: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit }
 }
 
 function route(s: State, method: string, path: string, body: Body): unknown {
@@ -234,6 +286,10 @@ function route(s: State, method: string, path: string, body: Body): unknown {
 
   if (path === '/me') return { username: s.user, roles: [role], mfaVerified: s.mfaVerified }
 
+  if (path.startsWith('/v1/admin/logs')) {
+    if (role !== 'SYS_ADMIN') denied()
+    return logs(s, path)
+  }
   if (path.startsWith('/params')) {
     if (role !== 'SYS_ADMIN') denied()
     return params(s, method, path, body)
@@ -322,6 +378,7 @@ function params(s: State, method: string, path: string, body: Body) {
     if (error) fail(400, error)
     const row: Param = { systemName, paramName, paramDesc: desc, paramRawType: type, paramRawValue: value, lastModTm: isoDateTime(new Date()), lastModBy: s.user! }
     s.params = s.params.filter((p) => !(p.systemName === systemName && p.paramName === paramName)).concat(row)
+    log(s, systemName, 'INFO', `User '${s.user}' saved parameter ${systemName}/${paramName} = ${value}`)
     return row
   }
   fail(404, 'Not found')
@@ -416,6 +473,7 @@ function submit(s: State, body: Body) {
     effectiveDt: c.effectiveDt, frequency: c.frequency, memo: c.memo, submitted: isoDateTime(new Date()),
   }
   s.transfers.push(t)
+  log(s, 'ACH_ORIG', 'INFO', `Member M10982347 submitted transfer ${t.transferSerNo} for ${((c.amount + c.fee) / 100).toFixed(2)}, memo status ${memoStatus}`)
   return receipt(t)
 }
 
@@ -444,7 +502,11 @@ function receiving(s: State, method: string, path: string, body: Body) {
       return { ...f, entryCount: entries.length, totalCreditAmt: total(1), totalDebitAmt: total(0) }
     }).sort((a, b) => b.fileHeaderDt.localeCompare(a.fileHeaderDt) || b.fileID.localeCompare(a.fileID))
   }
-  if (path === '/files/receive' && method === 'POST') return [receiveSample(s, String(body.sample))]
+  if (path === '/files/receive' && method === 'POST') {
+    const result = receiveSample(s, String(body.sample))
+    log(s, 'ACH_RCV', result.processStatus === 'VALIDATED' ? 'INFO' : 'WARN', `User '${s.user}' received sample ${body.sample}: ${result.fileID} ${result.processStatus}`)
+    return [result]
+  }
   if (path.startsWith('/transactions?') && method === 'GET') {
     const q = new URLSearchParams(path.split('?')[1])
     const page = Number(q.get('page') ?? 1)
@@ -490,7 +552,10 @@ function eod(s: State, method: string, path: string, body: Body) {
   if (path === '/eod/status' && method === 'GET') return eodStatus(s)
   if (path === '/eod/run' && method === 'POST') {
     const date = typeof body.businessDate === 'string' ? body.businessDate : ''
-    return date ? runEod(s, date) : fail(400, 'Choose a business date.')
+    if (!date) fail(400, 'Choose a business date.')
+    const result = runEod(s, date)
+    log(s, 'ACH_ORIG', result.fedStatus === 'ERROR' ? 'ERROR' : 'INFO', `User '${s.user}' ran the EOD file for ${date}: ${result.message}`)
+    return result
   }
   const m = /^\/eod\/files\/([^/]+)\/(resend|content)$/.exec(path)
   const file = m && s.files.find((f) => f.fileID === decodeURIComponent(m[1]))
@@ -498,7 +563,9 @@ function eod(s: State, method: string, path: string, body: Body) {
   if (m![2] === 'content' && method === 'GET') return { fileName: file.fileName, content: file.content }
   if (m![2] === 'resend' && method === 'POST') {
     if (file.fedStatus !== 'ERROR') fail(400, 'Only a file in ERROR can be resent.')
-    return { fedStatus: transmit(s, file) }
+    const fedStatus = transmit(s, file)
+    log(s, 'ACH_ORIG', fedStatus === 'ERROR' ? 'ERROR' : 'INFO', `User '${s.user}' resent ${file.fileID}: ${fedStatus}`)
+    return { fedStatus }
   }
   fail(404, 'Not found')
 }
@@ -598,7 +665,14 @@ function runEod(s: State, businessDate: string) {
 
 /** EX-02: 3 attempts. The demo doesn't wait between them. */
 function transmit(s: State, file: AchFileRow): string {
-  file.fedStatus = Number(param(s, 'FED_SIM_FAIL_ATTEMPTS')) >= 3 ? 'ERROR' : 'SENT'
-  if (file.fedStatus === 'SENT') file.sendTm = isoDateTime(new Date())
+  const failures = Math.min(Number(param(s, 'FED_SIM_FAIL_ATTEMPTS')), 3)
+  for (let attempt = 1; attempt <= failures; attempt++) log(s, 'ACH_ORIG', 'WARN', `Fed send of ${file.fileID} failed on attempt ${attempt}`)
+  file.fedStatus = failures === 3 ? 'ERROR' : 'SENT'
+  if (file.fedStatus === 'SENT') {
+    file.sendTm = isoDateTime(new Date())
+    log(s, 'ACH_ORIG', 'INFO', `Fed send of ${file.fileID} succeeded on attempt ${failures + 1}`)
+  } else {
+    log(s, 'ACH_ORIG', 'FATAL', `Operations alert: ${file.fileID} could not be sent to the Fed after 3 attempts`)
+  }
   return file.fedStatus
 }

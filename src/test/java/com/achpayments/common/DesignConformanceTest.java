@@ -26,7 +26,8 @@ import org.springframework.test.context.ActiveProfiles;
 /**
  * "Follow the design" as a test (docs/DB-MODEL.md section 0): runs the original DDL in a scratch database,
  * then checks that every design table we've built keeps all the columns (type, nullability, default, extra),
- * primary key, indexes and foreign keys exactly. Our additions are allowed; changes are not.
+ * primary key, indexes and foreign keys exactly. Our additions are allowed; changes are not,
+ * apart from the one marked FIX below.
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "TEST_JDBC_URL", matches = ".+")
@@ -104,6 +105,9 @@ class DesignConformanceTest {
             }
             checked++;
             for (Map<String, Object> col : columns(REFERENCE_DB, table)) {
+                if (table.equals("AppLog") && col.get("name").equals("logTm")) {
+                    continue; // FIX in V15: milliseconds. AppLogIntegrationTest checks the whole new definition.
+                }
                 Map<String, Object> mine = columns(ours, table).stream()
                         .filter(c -> c.get("name").equals(col.get("name"))).findFirst().orElse(null);
                 if (!col.equals(mine)) {

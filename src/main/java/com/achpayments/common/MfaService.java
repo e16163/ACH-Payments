@@ -1,5 +1,7 @@
 package com.achpayments.common;
 
+import static com.achpayments.common.AppLogRepository.ACH_ORIG;
+
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Instant;
@@ -44,7 +46,7 @@ public class MfaService {
         session.setAttribute(EXPIRES, Instant.now(clock).plusSeconds(300));
         session.setAttribute(TRIES, 0);
         session.removeAttribute(VERIFIED);
-        appLog.log("INFO", "MFA code sent to member " + user + " (simulated)", null);
+        appLog.log(ACH_ORIG, "INFO", "MFA code sent to member " + user + " (simulated)");
         return code;
     }
 
@@ -61,13 +63,13 @@ public class MfaService {
             if (expired || tries >= MAX_TRIES) {
                 session.removeAttribute(CODE); // must request a new code
             }
-            appLog.log("WARN", "MFA verification failed for member " + user, null);
+            appLog.log(ACH_ORIG, "WARN", "MFA verification failed for member " + user);
             return false;
         }
         session.removeAttribute(CODE);
         session.setAttribute(VERIFIED, true);
         request.changeSessionId(); // session fixation protection
-        appLog.log("INFO", "MFA verified for member " + user, null);
+        appLog.log(ACH_ORIG, "INFO", "MFA verified for member " + user);
         return true;
     }
 }

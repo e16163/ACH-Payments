@@ -131,6 +131,16 @@ These are read-only for now. They're guessed from your table design until your u
    - **ACH Receiving NOC:** NOCs we sent, and the substitutions
 3. **admin** keeps System Configuration, ACH Origination File, ACH Receiving File and ACH Receiving Transactions, and doesn't get these back-office screens.
 
+## Part 3D: System Audit & App Logs (UC-SYS-LOG-01)
+
+1. Do a few things first: sign in and out as **achorig** and **achrecv**, and type a wrong password once.
+2. Sign in as **admin** and click **System Audit & App Logs**. You see 20 rows a page, newest first, with milliseconds and a colored level badge.
+3. **Filter:** set **Level** to `WARN` to find the failed sign-in. Then try **Search**, **From** and **To**.
+4. **EX-02:** search for `zzz`: "No system logs found matching the selected criteria."
+5. Set **Level** to `ALL`, clear the search, and click **View Details** on the sample `ERROR` row, `Failed to parse incoming ACH file HEADER record`. The stack trace opens in a code viewer, with **Copy stack trace**.
+
+**EX-01** only happens when the database is down, so the entry goes to `~/dev/logs/app-error.log` in the full app. The online demo has no database.
+
 ## Part 4: System Design (in the full app)
 
 These screens write to your tables. On the local machine, after a transfer, run:
