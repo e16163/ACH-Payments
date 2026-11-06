@@ -134,15 +134,80 @@ describe('demo Parameter UI (UC-SYS-PARAM-01)', () => {
   })
 })
 
-describe('demo ACH Receiving File', () => {
-  it("lists Ba's sample file for admins", async () => {
+describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
+  type File = { fileID: string; processStatus: string; entryCount: number; totalCreditAmt: number; totalDebitAmt: number }
+  type Page = { items: { traceNo: string; tranID: number }[]; total: number }
+  const BASE = '/v1/ach/receiving'
+  const asOperator = () => demoLogin('ACHOperator', 'operator123')
+  const receive = async (sample: string) => (await post(`${BASE}/files/receive`, { sample }) as { fileID: string; processStatus: string; message: string }[])[0]
+  const files = () => demoApi<File[]>(`${BASE}/files`)
+  const page = (fileID: string, n = 1) => demoApi<Page>(`${BASE}/transactions?fileID=${fileID}&page=${n}&limit=10&sortBy=traceNo&sortDir=ASC`)
+
+  it("starts with Ba's sample file for operators and admins, and keeps members out", async () => {
+    await asOperator()
+    expect(await files()).toEqual([expect.objectContaining({ fileID: 'ACHFILE-88392', processStatus: 'PROCESSED', entryCount: 1, totalCreditAmt: 3450.5 })])
     await demoLogin('admin', 'admin123')
-    expect(await demoApi('/receiving/files')).toEqual([expect.objectContaining({ fileID: 'ACHFILE-88392', fedStatus: 'PROCESSED', entryCount: 1, totalCreditAmt: 3450.5 })])
+    expect(await files()).toHaveLength(1)
+    await memberWithMfa()
+    expect((await error(files())).status).toBe(403)
   })
 
-  it('keeps members out', async () => {
-    await memberWithMfa()
-    expect((await error(demoApi('/receiving/files'))).status).toBe(403)
+  it('keeps the ACHOperator out of the other screens', async () => {
+    await asOperator()
+    expect(await demoApi('/me')).toMatchObject({ username: 'ACHOperator', roles: ['ACH_OPS'] })
+    expect((await error(demoApi('/params/systems'))).status).toBe(403)
+    expect((await error(demoApi('/eod/status'))).status).toBe(403)
+    expect((await error(demoApi('/transfers/dates'))).status).toBe(403)
+  })
+
+  it('saves sample 1 with the same totals as the Java engine', async () => {
+    await asOperator()
+    const r = await receive('PAYROLL')
+    expect(r.processStatus).toBe('VALIDATED')
+    expect((await files())[0]).toMatchObject({ fileID: r.fileID, entryCount: 50, totalCreditAmt: 129450, totalDebitAmt: 0 })
+  })
+
+  it('saves sample 2 with debits and credits', async () => {
+    await asOperator()
+    const r = await receive('RETAIL')
+    expect(r.processStatus).toBe('VALIDATED')
+    expect((await files())[0]).toMatchObject({ entryCount: 50, totalCreditAmt: 71840, totalDebitAmt: 1144.9 })
+  })
+
+  it('pages 10 rows by trace number and shows all 24 fields of a row', async () => {
+    await asOperator()
+    const { fileID } = await receive('PAYROLL')
+    const first = await page(fileID)
+    expect(first.total).toBe(50)
+    expect(first.items).toHaveLength(10)
+    expect(first.items[0].traceNo).toBe('198765430000001')
+    expect((await page(fileID, 5)).items[9].traceNo).toBe('198765430000050')
+    const d = await demoApi<Record<string, unknown>>(`${BASE}/transactions/${first.items[0].tranID}`)
+    expect(d).toMatchObject({ fileID, batchID: `${fileID}-B001`, creditFlag: 1, tranCode: '22', companyName: 'ACME PAYROLL', companyID: '1900483920', companyDiscData: 'WEEKLY PAYROLL', stdEntryCode: 'PPD', companyEntryDesc: 'PAIDROLL', descriptiveDt: '2026-11-06', effectiveDt: '2026-11-06', settlementDt: '2026-11-06', originatorID: '1900483920', amount: 1500, recvAcctID: '987654321019', recvName: 'JOHN DOE', traceNo: '198765430000001', fedStatus: 'SETTLED', sourceID: 'FED_ACH_INBOUND', transferVersion: 1 })
+    expect(d.transferSerNo).toMatch(/^TRF-\d{8}-0001$/)
+  })
+
+  it('EX-01: a tampered file saves nothing', async () => {
+    await asOperator()
+    const r = await receive('TAMPERED')
+    expect(r.processStatus).toBe('REJECTED_SIG_FAIL')
+    expect((await page(r.fileID)).total).toBe(0)
+  })
+
+  it('EX-02: a wrong batch total saves nothing, with the same message as the server', async () => {
+    await asOperator()
+    const r = await receive('OUT_OF_BALANCE')
+    expect(r.processStatus).toBe('OUT_OF_BALANCE')
+    expect(r.message).toContain('Batch 3: total credits says 2675000 but the entries add up to 2670000')
+    expect((await page(r.fileID)).total).toBe(0)
+  })
+
+  it('EX-03: the same file twice is flagged and adds no entries', async () => {
+    await asOperator()
+    await receive('PAYROLL')
+    const second = await receive('PAYROLL')
+    expect(second.processStatus).toBe('DUPLICATE')
+    expect((await page(second.fileID)).total).toBe(0)
   })
 })
 

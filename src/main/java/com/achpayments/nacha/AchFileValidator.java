@@ -26,11 +26,42 @@ public final class AchFileValidator {
     }
 
     public static List<String> validate(AchFile file) {
-        List<String> problems = new ArrayList<>();
-        long fileHash = 0, fileDebits = 0, fileCredits = 0, fileEntryAddenda = 0, records = 2;
-        long previousBatchNumber = 0;
+        Check check = new Check();
+        file.batches().forEach(check::add);
+        return check.finish(file.control());
+    }
 
-        for (Batch batch : file.batches()) {
+    /** The same checks one batch at a time, for a file too big to hold in memory (UC-ACH-RCV-01). */
+    public static final class Check {
+
+        private final List<String> problems = new ArrayList<>();
+        private boolean outOfBalance;
+        private int batchCount;
+        private long fileHash, fileDebits, fileCredits, fileEntryAddenda, records = 2, previousBatchNumber, debitCount, creditCount;
+
+        /** Whether a stated count, hash or total differs from the entries (UC-ACH-RCV-01 EX-02). */
+        public boolean outOfBalance() {
+            return outOfBalance;
+        }
+
+        public long debitCount() {
+            return debitCount;
+        }
+
+        public long creditCount() {
+            return creditCount;
+        }
+
+        public long totalDebitCents() {
+            return fileDebits;
+        }
+
+        public long totalCreditCents() {
+            return fileCredits;
+        }
+
+        public void add(Batch batch) {
+            batchCount++;
             BatchHeader h = batch.header();
             BatchControl c = batch.control();
             String where = "Batch " + h.batchNumber() + ": ";
@@ -52,17 +83,19 @@ public final class AchFileValidator {
                 }
                 if (isDebit(e.transactionCode())) {
                     debits += e.amountCents();
+                    debitCount++;
                 } else {
                     credits += e.amountCents();
+                    creditCount++;
                 }
                 entryAddenda += 1 + e.addenda().size();
             }
             hash %= HASH_MODULUS;
 
-            compare(problems, where + "entry/addenda count", c.entryAddendaCount(), entryAddenda);
-            compare(problems, where + "entry hash", c.entryHash(), hash);
-            compare(problems, where + "total debits", c.totalDebitCents(), debits);
-            compare(problems, where + "total credits", c.totalCreditCents(), credits);
+            compare(where + "entry/addenda count", c.entryAddendaCount(), entryAddenda);
+            compare(where + "entry hash", c.entryHash(), hash);
+            compare(where + "total debits", c.totalDebitCents(), debits);
+            compare(where + "total credits", c.totalCreditCents(), credits);
             if (!c.serviceClassCode().equals(h.serviceClassCode())) {
                 problems.add(where + "Batch Control service class " + c.serviceClassCode()
                         + " doesn't match the Batch Header's " + h.serviceClassCode());
@@ -81,14 +114,22 @@ public final class AchFileValidator {
             records += 2 + entryAddenda;
         }
 
-        AchFile.FileControl fc = file.control();
-        compare(problems, "File Control batch count", fc.batchCount(), file.batches().size());
-        compare(problems, "File Control entry/addenda count", fc.entryAddendaCount(), fileEntryAddenda);
-        compare(problems, "File Control entry hash", fc.entryHash(), fileHash % HASH_MODULUS);
-        compare(problems, "File Control total debits", fc.totalDebitCents(), fileDebits);
-        compare(problems, "File Control total credits", fc.totalCreditCents(), fileCredits);
-        compare(problems, "File Control block count", fc.blockCount(), (records + 9) / 10);
-        return problems;
+        public List<String> finish(AchFile.FileControl fc) {
+            compare("File Control batch count", fc.batchCount(), batchCount);
+            compare("File Control entry/addenda count", fc.entryAddendaCount(), fileEntryAddenda);
+            compare("File Control entry hash", fc.entryHash(), fileHash % HASH_MODULUS);
+            compare("File Control total debits", fc.totalDebitCents(), fileDebits);
+            compare("File Control total credits", fc.totalCreditCents(), fileCredits);
+            compare("File Control block count", fc.blockCount(), (records + 9) / 10);
+            return problems;
+        }
+
+        private void compare(String what, long stated, long actual) {
+            if (stated != actual) {
+                outOfBalance = true;
+                problems.add(what + " says " + stated + " but the entries add up to " + actual);
+            }
+        }
     }
 
     /** ABA routing check: weights 3-7-1 repeated; the weighted sum of all 9 digits is a multiple of 10. */
@@ -130,12 +171,6 @@ public final class AchFileValidator {
             return Optional.of("TEL entries must be debits, found " + code);
         }
         return Optional.empty();
-    }
-
-    private static void compare(List<String> problems, String what, long stated, long actual) {
-        if (stated != actual) {
-            problems.add(what + " says " + stated + " but the entries add up to " + actual);
-        }
     }
 
     private static boolean isNumeric(String s) {

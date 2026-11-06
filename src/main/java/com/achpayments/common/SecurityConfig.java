@@ -5,6 +5,7 @@ import java.io.IOException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.Customizer;
@@ -23,7 +24,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Demo login (docs/USE-CASES.md P1, T7): the app's own sign-in page (POST /api/login, POST /api/logout) for an
- * admin, an operator and a member, whose passwords come from environment variables. HTTP Basic still works for
+ * admin, the ACHOperator (ROLE_ACH_OPS) and a member, whose passwords come from environment variables. HTTP Basic still works for
  * scripts and tests, but a 401 never sends the browser's login popup. Members also pass a simulated MFA step.
  * Real users come in step 16.
  */
@@ -35,7 +36,10 @@ public class SecurityConfig {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
-                        .requestMatchers("/api/params/**", "/api/eod/**", "/api/receiving/**").hasRole("SYS_ADMIN")
+                        .requestMatchers("/api/params/**", "/api/eod/**").hasRole("SYS_ADMIN")
+                        // UC-ACH-RCV-02: ACH_OPS or SUPPORT. Only operations receive files; admins keep this screen too.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ach/receiving/**").hasAnyRole("ACH_OPS", "SYS_ADMIN")
+                        .requestMatchers("/api/v1/ach/receiving/**").hasAnyRole("ACH_OPS", "SUPPORT", "SYS_ADMIN")
                         .requestMatchers("/api/member/mfa/**").hasRole("MEMBER")
                         // UC-ACH-ORG-01 precondition: the member is logged in AND has passed MFA
                         .requestMatchers("/api/member/**", "/api/transfers/**", "/api/routing/**").access(MEMBER_WITH_MFA)
@@ -90,7 +94,7 @@ public class SecurityConfig {
         PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
         return new InMemoryUserDetailsManager(
                 User.withUsername(adminUsername).password(encoder.encode(adminPassword)).roles("SYS_ADMIN").build(),
-                User.withUsername(operatorUsername).password(encoder.encode(operatorPassword)).roles("OPERATOR").build(),
+                User.withUsername(operatorUsername).password(encoder.encode(operatorPassword)).roles("ACH_OPS").build(),
                 User.withUsername(memberUsername).password(encoder.encode(memberPassword)).roles("MEMBER").build());
     }
 

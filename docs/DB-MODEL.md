@@ -76,6 +76,24 @@ Flyway manages all three (`spring.flyway.schemas`), and `ach_app` gets privilege
 | `Action`: 402 `FILE_QUEUED`, 403 `FED_SEND_FAILED`, 404 `FILE_ERROR` | Adds | Next to Ba's 401 `FED_SEND`. |
 | Triggers `TR_ACHOrigFedAction_NoUpdate`, `_NoDelete` (V12) | Adds | Ba: "an unalterable audit trail". Needs the root setting in README section 4. |
 
+### Changes for UC-ACH-RCV-01 and UC-ACH-RCV-02 (V13)
+
+| Change | Marked | Why |
+| --- | --- | --- |
+| `ACHRecvFile.processStatus VARCHAR(20)` | Adds | Ba's use case uses it, and `REJECTED_SIG_FAIL` doesn't fit in `fedStatus VARCHAR(15)`. This replaces the "F8" note above: `fedStatus` is now `RECEIVED`. |
+| `ACHRecvTransaction.processStatus VARCHAR(15)` | Adds | RCV-01 marks entries `UNPROCESSED`, RCV-02 sets `fedStatus` to `SETTLED`. Two columns keep both. |
+| `ACHRecvFile` index on date, time and modifier | Adds | EX-03. Not unique: a duplicate is recorded too. |
+| `Source`: `FED_ACH_INBOUND`; `AppParam`: `FED_RECV_FILE_TIME`, `RDFI_ROUTING_NO` | Adds | Values Ba's use cases need. |
+| `transferSerNo` on received entries is `TRF-yyyyMMdd-nnnn` | Ba's new rule | RCV-02 generates it; this replaces `NULL` in "F10" above. |
+
+**Ba's two sample files (`src/main/resources/fed-samples`), rebuilt, each change a FIX:**
+- Word collapsed the spaces, so no record was 94 characters. Rebuilt by field position; all 100 entries keep his account, amount, ID and name.
+- Destination and entry routing `021000021` and `031000030` (which fails its check digit) → our `123456780`.
+- Batch and File Control records rebuilt from the entries. His stated totals didn't match: Sample 1 batch 3 ($26,750 vs $26,700), Sample 2 batches 1, 4 and 5 ($895 vs $945, $1,625 vs $1,670, $2,675 vs $2,670).
+- Trace numbers → the batch's 8-digit ODFI + a 7-digit sequence. Each account is the first 12 digits of his run; the zeros after it belong to the amount.
+- `sample3-out-of-balance.ach` is Sample 1 with his wrong $26,750 kept and modifier `C`, to show EX-02.
+- Ba's spec lists Immediate Destination at 03-12 and Amount at 30-41. Nacha's are 04-13 and 30-39, which the code uses.
+
 ---
 
 ## 1. Ba's tables by component

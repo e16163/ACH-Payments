@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError, DEMO, logout } from './api'
 import AchOriginationFilePage from './files/AchOriginationFilePage'
 import AchReceivingFilePage from './files/AchReceivingFilePage'
+import AchReceivingTransactionPage from './files/AchReceivingTransactionPage'
 import LoginPage from './LoginPage'
 import AccountsPage from './member/AccountsPage'
 import ExternalTransferPage from './member/ExternalTransferPage'
@@ -16,6 +17,7 @@ const ROUTES = {
   params: '#/system-configuration',
   originationFile: '#/ach-origination-file',
   receivingFile: '#/ach-receiving-file',
+  receivingTransactions: '#/ach-receiving-transactions',
   accounts: '#/accounts',
   external: '#/transfer-pay/external-ach',
 }
@@ -71,14 +73,21 @@ export default function App() {
   useEffect(() => setMenuOpen(false), [hash])
 
   const isAdmin = me?.roles.includes('SYS_ADMIN')
+  const isOperator = me?.roles.includes('ACH_OPS')
   const isMember = me?.roles.includes('MEMBER')
   const memberReady = isMember && me?.mfaVerified
+
+  const onTransactions = hash.startsWith(ROUTES.receivingTransactions)
+  const adminElsewhere = hash === ROUTES.originationFile || hash === ROUTES.receivingFile || onTransactions
 
   let page = null
   if (signedOut) page = <LoginPage onSignedIn={loadMe} />
   else if (isAdmin && hash === ROUTES.originationFile) page = <AchOriginationFilePage />
-  else if (isAdmin && hash === ROUTES.receivingFile) page = <AchReceivingFilePage />
-  else if (isAdmin) page = <ParameterPage />
+  else if ((isAdmin || isOperator) && onTransactions) {
+    page = <AchReceivingTransactionPage route={ROUTES.receivingTransactions} fileID={decodeURIComponent(hash.slice(ROUTES.receivingTransactions.length + 1))} />
+  } else if (isOperator || (isAdmin && hash === ROUTES.receivingFile)) {
+    page = <AchReceivingFilePage transactionsRoute={ROUTES.receivingTransactions} />
+  } else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
   else if (memberReady) page = hash === ROUTES.external ? <ExternalTransferPage /> : <AccountsPage />
   else if (me) page = <p className="card narrow">There are no screens for your role yet.</p>
@@ -107,9 +116,14 @@ export default function App() {
         <nav className="mainnav" aria-label="Main">
           {isAdmin && (
             <>
-              <a className={hash !== ROUTES.originationFile && hash !== ROUTES.receivingFile ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
+              <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
               <a className={hash === ROUTES.originationFile ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
-              <a className={hash === ROUTES.receivingFile ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>
+            </>
+          )}
+          {(isAdmin || isOperator) && (
+            <>
+              <a className={(isAdmin ? hash === ROUTES.receivingFile : !onTransactions) ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>
+              <a className={onTransactions ? 'active' : ''} href={ROUTES.receivingTransactions}>ACH Receiving Transactions</a>
             </>
           )}
           {memberReady && (

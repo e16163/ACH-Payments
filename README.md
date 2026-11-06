@@ -5,7 +5,7 @@ This repo will hold two systems:
 1. **Same Day ACH Payments**: originates and processes Same Day ACH entries.
 2. **ACH Fraud Monitoring & Prevention**: risk-based detection of fraudulent entries, as the 2026 Nacha rules require.
 
-**Try the demo:** https://e16163.github.io/ACH-Payments/ (sign in as `member` / `member123` or `admin` / `admin123`). It's the real screens running on made-up data in your browser. GitHub Pages can't run the Java server or MySQL, so nothing is saved, and the demo resets when you close the tab. It's rebuilt from `main` on every push (`.github/workflows/pages.yml`, `npm run build:demo`).
+**Try the demo:** https://e16163.github.io/ACH-Payments/ (sign in as `member` / `member123`, `admin` / `admin123` or `ACHOperator` / `operator123`). It's the real screens running on made-up data in your browser. GitHub Pages can't run the Java server or MySQL, so nothing is saved, and the demo resets when you close the tab. It's rebuilt from `main` on every push (`.github/workflows/pages.yml`, `npm run build:demo`).
 
 Step-by-step demo script: [docs/DEMO.md](docs/DEMO.md).
 
@@ -134,8 +134,8 @@ The app opens on a **Sign in** page, and **Sign out** is at the top right. These
 
 | User | Role | Can use |
 | --- | --- | --- |
-| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, ACH Origination File, ACH Receiving File |
-| `operator` | Operator | Not the Parameter UI or the ACH file pages (gets "403 Forbidden") |
+| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, ACH Origination File, ACH Receiving File, ACH Receiving Transactions |
+| `ACHOperator` (or `APP_OPERATOR_USERNAME`) | ACH operations (`ACH_OPS`) | ACH Receiving File, ACH Receiving Transactions |
 | `member` | Member: Ba's sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
 
 Scripts and tests can still send HTTP Basic credentials, but a browser never gets the Basic login popup.
@@ -171,9 +171,10 @@ mvn test
 - [x] Step 1: NACHA file parser
 - [x] Parameter UI (UC-SYS-PARAM-01): designers add/edit parameters per app
 - [x] Ba's design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
-- [x] Database schema: all 30 of Ba's tables exactly as written, plus approved additions (V1–V12), with Ba's sample data
+- [x] Database schema: all 30 of Ba's tables exactly as written, plus approved additions (V1–V13), with Ba's sample data
 - [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
 - [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, admin ACH Origination File page
-- [x] ACH Receiving File page: read-only list of `ACHRecvFile`; the ACH Receiving Engine comes next
+- [x] Inbound FedACH ingestion (UC-ACH-RCV-01): the 6 AM pickup, signature, control totals, EX-01 to EX-03, audit trail
+- [x] ACH Receiving Transaction UI (UC-ACH-RCV-02): files by day, 10 per page by trace number, all 24 fields
 - [ ] Same Day ACH payments service
 - [ ] Fraud monitoring service

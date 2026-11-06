@@ -29,8 +29,9 @@ export default function LoginPage({ onSignedIn }: { onSignedIn: () => void }) {
       {DEMO && (
         <p className="notice">
           Demo logins: <strong className="code">member</strong> / <strong className="code">member123</strong> for online
-          banking, or <strong className="code">admin</strong> / <strong className="code">admin123</strong> for System
-          Configuration.
+          banking, <strong className="code">admin</strong> / <strong className="code">admin123</strong> for System
+          Configuration, or <strong className="code">ACHOperator</strong> / <strong className="code">operator123</strong> for
+          ACH Receiving.
         </p>
       )}
       <label className="field">

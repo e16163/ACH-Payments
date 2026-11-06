@@ -37,7 +37,7 @@ class ParamServiceIntegrationTest {
 
     @BeforeEach
     void resetToSeedData() {
-        jdbc.update("DELETE FROM AppParam WHERE NOT (paramName IN ('FED_IMMEDIATE_DEST', 'ORIG_COMPANY_NAME', 'FED_SIM_FAIL_ATTEMPTS', 'MEMO_POST_IMMEDIATE', 'FED_FILE_CUTOFF_TIME'))");
+        jdbc.update("DELETE FROM AppParam WHERE NOT (paramName IN ('FED_IMMEDIATE_DEST', 'ORIG_COMPANY_NAME', 'FED_SIM_FAIL_ATTEMPTS', 'MEMO_POST_IMMEDIATE', 'FED_FILE_CUTOFF_TIME', 'FED_RECV_FILE_TIME', 'RDFI_ROUTING_NO'))");
         jdbc.update("UPDATE AppParam SET paramRawValue = '17:00:00', lastModBy = 'SYS_ADMIN'"
                 + " WHERE paramName = 'FED_FILE_CUTOFF_TIME'");
         cache.clear();

@@ -771,3 +771,73 @@ pre.nacha {
   overflow: auto;
   max-height: 60vh;
 }
+
+/* ---- ACH Receiving ---- */
+.toolbar select {
+  display: block;
+  margin-top: 4px;
+}
+
+a.button {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 13px;
+  padding: 6px 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.badge {
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+}
+
+.badge.credit {
+  background: rgb(34 197 94 / 0.16);
+  color: #4ade80;
+}
+
+.badge.debit {
+  background: rgb(239 68 68 / 0.16);
+  color: #f87171;
+}
+
+.pager {
+  align-items: center;
+  color: var(--mute);
+  display: flex;
+  font-size: 14px;
+  gap: 16px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+.toast.warn {
+  align-items: center;
+  border-left-color: #f87171;
+  display: flex;
+  gap: 12px;
+}
+
+.details {
+  display: grid;
+  gap: 12px 24px;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0 0 16px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.details dt {
+  color: var(--mute);
+  font-size: 12px;
+}
+
+.details dd {
+  font-size: 14px;
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}

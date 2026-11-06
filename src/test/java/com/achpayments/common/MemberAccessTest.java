@@ -22,6 +22,9 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.achpayments.inbound.FedInboundSimulator;
+import com.achpayments.inbound.ReceivingController;
+import com.achpayments.inbound.ReceivingEngine;
 import com.achpayments.param.ParamController;
 import com.achpayments.param.ParamRepository;
 import com.achpayments.param.ParamService;
@@ -31,7 +34,7 @@ import com.achpayments.transfer.TransferDates;
 import tools.jackson.databind.json.JsonMapper;
 
 /** USE-CASES T7: members must pass MFA before the transfer APIs; admins and members stay in their own areas. */
-@WebMvcTest({MeController.class, TransferController.class, ParamController.class})
+@WebMvcTest({MeController.class, TransferController.class, ParamController.class, ReceivingController.class})
 @Import({SecurityConfig.class, MfaService.class, MemberAccessTest.Clocks.class})
 @TestPropertySource(properties = {"app.admin-password=admin-pw", "app.operator-password=operator-pw",
         "app.member-password=member-pw"})
@@ -50,6 +53,15 @@ class MemberAccessTest {
 
     @Autowired
     MockMvc mvc;
+
+    @MockitoBean
+    org.springframework.jdbc.core.JdbcTemplate jdbc;
+
+    @MockitoBean
+    ReceivingEngine receivingEngine;
+
+    @MockitoBean
+    FedInboundSimulator fedInbound;
 
     @MockitoBean
     AppLogRepository appLog;
@@ -141,15 +153,30 @@ class MemberAccessTest {
 
     @Test
     void onlyAdminsCanSeeReceivingFiles() throws Exception {
-        mvc.perform(get("/api/receiving/files").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/receiving/files").with(httpBasic("operator", "operator-pw"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/receiving/files")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/ach/receiving/files")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic(MEMBER, "member-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("ACHOperator", "operator-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void theAchOperatorSeesOnlyTheReceivingScreens() throws Exception {
+        mvc.perform(get("/api/params/systems").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/eod/status").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/transfers/dates").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/me").with(httpBasic("ACHOperator", "operator-pw")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.roles[0]").value("ACH_OPS"));
     }
 
     @Test
     void onlyAdminsCanRunTheEodFile() throws Exception {
         mvc.perform(get("/api/eod/status").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/eod/status").with(httpBasic("operator", "operator-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/eod/status").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isForbidden());
         mvc.perform(post("/api/eod/run").with(httpBasic(MEMBER, "member-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"businessDate\":\"2026-11-05\"}"))
                 .andExpect(status().isForbidden());

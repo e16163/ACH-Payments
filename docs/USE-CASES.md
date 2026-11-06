@@ -156,7 +156,7 @@ The Transfer UI is finished when all of these hold:
 
 ## UC-ACH-EOD-01: EOD ACH File Generation & Fed Transmission
 
-**Status: plan only, nothing built.** Source: Ba's `Use Case ACH Origination File Creation.docx`. This is the step after UC-ACH-ORG-01: at the cutoff, pending transfers become one NACHA file and go to the simulated Fed. Same Day windows (PLAN 5.6) stay out of scope, because Ba's spec is one EOD file and T5 says no Same Day for retail. Board card R10 shrinks to those windows.
+**Status: built.** Source: Ba's `Use Case ACH Origination File Creation.docx`. This is the step after UC-ACH-ORG-01: at the cutoff, pending transfers become one NACHA file and go to the simulated Fed. Same Day windows (PLAN 5.6) stay out of scope, because Ba's spec is one EOD file and T5 says no Same Day for retail. Board card R10 shrinks to those windows.
 
 ### Flow → build pieces
 
@@ -209,7 +209,34 @@ The Transfer UI is finished when all of these hold:
 - **E11. Simulated parts.** Ba's "compliance dashboard" and "notification to operations" don't exist yet, so both are an `AppLog` row plus a notice on the ACH Origination File page, until card R15. `ACH_ORIG/FED_SIM_FAIL_ATTEMPTS` (default 0) makes the simulator fail, so EX-02 can be shown.
 - **Ba's sample transfer** `TRF-20261101-9921` has no `effectiveDt` and `memoStatus = 'PENDING'`, so it never enters a file.
 
-### Build order
+### UC-ACH-RCV-01 and UC-ACH-RCV-02: Inbound FedACH file and Receiving Transaction UI
+
+**Status: built.** Sources: Ba's `Use Case - Inbound FedACH File - ACH Receiving Processing.docx`, `Use Case ACH Receiving Processing and UI.docx` (which says UC-ACH-RCV-04; Ba confirmed it's 02) and `NACHA ACH File Format Specification-2.docx`.
+
+| Ba's step | What was built |
+|---|---|
+| 1. Ingestion | `ReceivingScheduler` picks up `fed/inbound/*.ach` once on each banking day at `ACH_RCV/FED_RECV_FILE_TIME` (06:00:00 Eastern). `ACHRecvFile` starts as `INGESTING`. |
+| 2. Header | The signature, then the Type 1 record: destination = `ACH_RCV/RDFI_ROUTING_NO`, date, time and modifier valid, 94 characters. |
+| 3-4. Batches, entries | `AchFileParser.stream` hands over one batch at a time; entries go in by bulk INSERT with `fedStatus = 'SETTLED'`, `processStatus = 'UNPROCESSED'`, `sourceID = 'FED_ACH_INBOUND'`. Addenda go to `ACHRecvAddenda`. |
+| 5. Control check | `AchFileValidator.Check` compares Types 8 and 9 one batch at a time; the record count must be a multiple of 10. |
+| 6. Handoff | `VALIDATED`, the file moves to `fed/archive`, and `ACH_FILE_INGESTED_EVENT` is published. It's only logged until Ba's memo posting use case. |
+| EX-01 | `REJECTED_SIG_FAIL`, `fed/quarantine`, a FATAL `AppLog` row. A missing `.sig` counts as a failure. |
+| EX-02 | `OUT_OF_BALANCE`, everything rolled back, `fed/outbound/<fileID>.rejection.txt`, the stack trace in `AppLog`. |
+| EX-03 | `DUPLICATE`, `fed/quarantine`, a WARN `AppLog` row, no entries. |
+| RCV-02 screens | ACH Receiving File (by day) and ACH Inbound Overview, with `GET /api/v1/ach/receiving/transactions` and `/transactions/{tranID}`, EX-01 banner, EX-02 toast. |
+
+Decisions:
+- **R1. No OFAC on received entries.** Ba: screened once, at origination. Real RDFIs still answer for their own members, and IAT entries can't rely on the ODFI.
+- **R2. No memo posting yet.** Ba: only certain received entries are memo posted, in a use case to come.
+- **R3. Simulated.** Decryption is a log line, and the signature is a detached HMAC-SHA256 (`app.fed.signing-key`, PLAN A6). "Security Operations", "Operations" and the Fed rejection are an `AppLog` row, a page notice and a text file.
+- **R4. `REJECTED`.** Ba has no exception for a file that's malformed or for another bank, so these get this extra status.
+- **R5. `fileID` filter.** Ba's SQL filters by file but his URL has no such parameter, so `fileID` is added.
+- **R6. Blank settlement date.** Means the effective date.
+- **R7. Duplicates, as Ba wrote it.** A file with the same date, time and modifier as any recorded file is `DUPLICATE`, even if the earlier one was rejected, so a corrected resend needs a new modifier.
+- **R8. Streaming limit.** One batch is held in memory at a time, so a single huge batch is still all in memory.
+- **R9. Roles.** `ROLE_SUPPORT` can read, but no support user exists yet. `ACHOperator` and admins can receive.
+
+## Build order
 
 1. Migrations: V11 for the E2 status update, E6 column, E7 and E11 parameters and E8 actions; V12 for the audit triggers. → verify: full suite from empty DBs; a test proves `UPDATE` and `DELETE` on `ACHOrigFedAction` fail.
 2. Fix `transferReqNo`, status names and estimated arrival. → verify: updated transfer tests, a Friday date shows Monday.
@@ -229,8 +256,36 @@ The Transfer UI is finished when all of these hold:
 
 ---
 
+## UC-ACH-RCV-01 and UC-ACH-RCV-02: Inbound FedACH file and Receiving Transaction UI
+
+**Status: built.** Sources: Ba's `Use Case - Inbound FedACH File - ACH Receiving Processing.docx`, `Use Case ACH Receiving Processing and UI.docx` (which says UC-ACH-RCV-04; Ba confirmed it's 02) and `NACHA ACH File Format Specification-2.docx`.
+
+| Ba's step | What was built |
+|---|---|
+| 1. Ingestion | `ReceivingScheduler` picks up `fed/inbound/*.ach` once on each banking day at `ACH_RCV/FED_RECV_FILE_TIME` (06:00:00 Eastern). `ACHRecvFile` starts as `INGESTING`. |
+| 2. Header | The signature, then the Type 1 record: destination = `ACH_RCV/RDFI_ROUTING_NO`, date, time and modifier valid, 94 characters. |
+| 3-4. Batches, entries | `AchFileParser.stream` hands over one batch at a time; entries go in by bulk INSERT with `fedStatus = 'SETTLED'`, `processStatus = 'UNPROCESSED'`, `sourceID = 'FED_ACH_INBOUND'`. Addenda go to `ACHRecvAddenda`. |
+| 5. Control check | `AchFileValidator.Check` compares Types 8 and 9 one batch at a time; the record count must be a multiple of 10. |
+| 6. Handoff | `VALIDATED`, the file moves to `fed/archive`, and `ACH_FILE_INGESTED_EVENT` is published. It's only logged until Ba's memo posting use case. |
+| EX-01 | `REJECTED_SIG_FAIL`, `fed/quarantine`, a FATAL `AppLog` row. A missing `.sig` counts as a failure. |
+| EX-02 | `OUT_OF_BALANCE`, everything rolled back, `fed/outbound/<fileID>.rejection.txt`, the stack trace in `AppLog`. |
+| EX-03 | `DUPLICATE`, `fed/quarantine`, a WARN `AppLog` row, no entries. |
+| RCV-02 screens | ACH Receiving File (by day) and ACH Inbound Overview, with `GET /api/v1/ach/receiving/transactions` and `/transactions/{tranID}`, EX-01 banner, EX-02 toast. |
+
+Decisions:
+- **R1. No OFAC on received entries.** Ba: screened once, at origination. Real RDFIs still answer for their own members, and IAT entries can't rely on the ODFI.
+- **R2. No memo posting yet.** Ba: only certain received entries are memo posted, in a use case to come.
+- **R3. Simulated.** Decryption is a log line, and the signature is a detached HMAC-SHA256 (`app.fed.signing-key`, PLAN A6). "Security Operations", "Operations" and the Fed rejection are an `AppLog` row, a page notice and a text file.
+- **R4. `REJECTED`.** Ba has no exception for a file that's malformed or for another bank, so these get this extra status.
+- **R5. `fileID` filter.** Ba's SQL filters by file but his URL has no such parameter, so `fileID` is added.
+- **R6. Blank settlement date.** Means the effective date.
+- **R7. Duplicates, as Ba wrote it.** A file with the same date, time and modifier as any recorded file is `DUPLICATE`, even if the earlier one was rejected, so a corrected resend needs a new modifier.
+- **R8. Streaming limit.** One batch is held in memory at a time, so a single huge batch is still all in memory.
+- **R9. Roles.** `ROLE_SUPPORT` can read, but no support user exists yet. `ACHOperator` and admins can receive.
+
 ## Build order
 
 1. **UC-SYS-PARAM-01.** ✅ Built (board P1–P3): matches Ba's answers, and every "Done when" check passed in the deployed app.
 2. **UC-ACH-ORG-01.** ✅ Built (board X1–X7, D6, R6, T7 member login): every "Done when" check passed, including a full member run in the deployed app (MFA → Transfer & Pay → EX-01/EX-02 → review → Confirm Transfer → receipt).
-3. **UC-ACH-EOD-01.** Plan written 2026-11-05; not built yet.
+3. **UC-ACH-EOD-01.** ✅ Built.
+4. **UC-ACH-RCV-01, UC-ACH-RCV-02.** ✅ Built.

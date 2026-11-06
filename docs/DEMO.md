@@ -1,6 +1,6 @@
 # Demo guide for Ba
 
-A 15-minute walk-through of what's built from your four documents, and what isn't yet.
+A walk-through of what's built from your documents, and what isn't yet.
 
 ## Two ways to run it
 
@@ -11,6 +11,7 @@ A 15-minute walk-through of what's built from your four documents, and what isn'
 | Saved? | No. Resets when you close the tab | Yes, in the `ach_payments` / `ach_origination` / `ach_receiving` databases |
 | Member login | `member` / `member123` | `member` / `member123` |
 | Admin login | `admin` / `admin123` | Ben's admin login |
+| ACH operator login | `ACHOperator` / `operator123` | `ACHOperator` with Ben's password |
 | ACH files | Kept in the browser tab | Written to `~/dev/fed/outbound`, the simulated Fed |
 
 Use the online demo to click through. Use the full app to see the rows land in your tables (the last section).
@@ -100,9 +101,20 @@ In the full app, the transfer's `processStatus` is now `PROCESSED` (the query in
 
 To see a recurring series, make a Weekly transfer with 3 payments in Part 2. Each time you run the file, the next payment appears under **Waiting**, with its own date and its own hold. If the money isn't there on that date, that payment is rejected, shows under **Left out**, and the series continues.
 
-## ACH Receiving File
+## Part 3B: ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)
 
-Sign in as **admin** and click **ACH Receiving File**. This is the file the Fed sends the bank at 6 AM each morning. The page is read-only for now: it lists what's in `ACHRecvFile`, which today is your sample file `ACHFILE-88392.ach` with its one entry ($3,450.50 credit). Nothing fetches or processes a file yet; that comes with your ACH Receiving Engine use case.
+The engine picks up the Fed's file by itself at 6 AM Eastern on banking days. **Receive file** simulates a delivery, so you needn't wait.
+
+1. Sign out and sign in as **ACHOperator**. You see only **ACH Receiving File** and **ACH Receiving Transactions**.
+2. In **Simulate a file from the Fed**, choose **Sample 1: payroll (valid)** and click **Receive file**: **VALIDATED**, 50 entries, $129,450.00. Do the same with **Sample 2: retail (valid)**: 50 entries, $71,840.00 credits and $1,144.90 debits.
+3. Click **View transactions** on Sample 1. The **ACH Inbound Overview** shows your 9 columns, 10 rows a page, sorted by trace number. Click **Next**.
+4. Click **Select** on a row to see all 24 fields.
+5. Back in **ACH Receiving File**, try your exceptions:
+   - **EX-03:** receive Sample 1 again: **DUPLICATE**, no new entries.
+   - **EX-02:** choose **Sample 1 with a wrong batch total**: **OUT_OF_BALANCE**, nothing saved, and a rejection notice for the Fed.
+   - **EX-01:** choose **Sample 1 changed in transit**: **REJECTED_SIG_FAIL**, nothing saved, and a Security Operations alert. **View transactions** on it shows "No receiving transactions found in this file batch."
+
+Received entries stay `UNPROCESSED`. They aren't OFAC screened (they were screened at origination), and memo posting waits for your use case.
 
 ## Part 4: System Design (in the full app)
 
@@ -125,9 +137,10 @@ SELECT fileID, fedStatus, totalCreditCount, totalCreditAmt, sendTm FROM ach_orig
 SELECT transferSerNo, tranCode, recvRoutingNo, recvName, amount, traceNo, fedStatus FROM ach_origination.ACHOrigTransaction ORDER BY traceNo DESC LIMIT 5;
 SELECT * FROM ach_origination.ACHOrigFedAction ORDER BY actionTm DESC LIMIT 10;
 
--- the files received from the Fed, with their entries
-SELECT fileID, fileName, fileHeaderDt, fedStatus FROM ach_receiving.ACHRecvFile;
-SELECT transferSerNo, fileID, recvName, amount, creditFlag FROM ach_receiving.ACHRecvTransaction;
+-- the files received from the Fed, with their batches and entries
+SELECT fileID, fileName, fileHeaderDt, fileHeaderTm, processStatus, totalCreditAmt, totalDebitAmt FROM ach_receiving.ACHRecvFile;
+SELECT batchID, fileID, companyName, stdEntryCode, totalBatchCount, totalCreditAmt, totalDebitAmt FROM ach_receiving.ACHRecvBatch;
+SELECT tranID, transferSerNo, fileID, recvName, amount, creditFlag, traceNo, fedStatus, processStatus FROM ach_receiving.ACHRecvTransaction ORDER BY traceNo LIMIT 10;
 
 -- Parameter UI changes and security events
 SELECT * FROM ach_payments.AppParam;
@@ -150,7 +163,7 @@ What's in the database today:
 
 The transfer now reaches the (simulated) Fed. The rest of the back office from your System Design isn't built yet:
 - Same Day windows
-- inbound file ingestion and the Receiving UI
+- memo posting of received entries
 - returns, NOCs, reversals and resubmissions
 - fraud rules and the review queue
 - end-of-day posting

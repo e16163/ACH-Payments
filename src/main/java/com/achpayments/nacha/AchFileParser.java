@@ -1,8 +1,13 @@
 package com.achpayments.nacha;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.StringReader;
+import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import com.achpayments.nacha.AchFile.Addenda;
 import com.achpayments.nacha.AchFile.Batch;
@@ -25,31 +30,60 @@ public final class AchFileParser {
             '1', "File Header", '5', "Batch Header", '6', "Entry Detail",
             '7', "Addenda", '8', "Batch Control", '9', "File Control");
 
-    private final List<String> lines;
-    private int index;
+    /** What a stream of records ends with, once every batch has been handed over. */
+    public record Summary(FileControl control, int recordCount) {
+    }
 
-    private AchFileParser(List<String> lines) {
-        this.lines = lines;
+    private final BufferedReader reader;
+    private String current;
+    private int index; // zero-based line number of current
+
+    private AchFileParser(BufferedReader reader) {
+        this.reader = reader;
+        current = read();
     }
 
     public static AchFile parse(String content) {
-        return new AchFileParser(content.lines().toList()).parseFile();
+        List<Batch> batches = new ArrayList<>();
+        FileHeader[] header = new FileHeader[1];
+        Summary summary = stream(new BufferedReader(new StringReader(content)), h -> header[0] = h, batches::add);
+        return new AchFile(header[0], batches, summary.control());
     }
 
-    private AchFile parseFile() {
-        FileHeader header = fileHeader(next('1'));
-        List<Batch> batches = new ArrayList<>();
+    /**
+     * UC-ACH-RCV-01: hands over the header, then one batch at a time, so a file with millions of records is never all
+     * in memory at once. Only the largest batch is.
+     */
+    public static Summary stream(BufferedReader reader, Consumer<FileHeader> onHeader, Consumer<Batch> onBatch) {
+        return new AchFileParser(reader).parseFile(onHeader, onBatch);
+    }
+
+    private Summary parseFile(Consumer<FileHeader> onHeader, Consumer<Batch> onBatch) {
+        onHeader.accept(fileHeader(next('1')));
         while (peekType() == '5') {
-            batches.add(batch());
+            onBatch.accept(batch());
         }
         expectOneOf('5', '9');
         FileControl control = fileControl(next('9'));
-        for (; index < lines.size(); index++) {
-            if (!lines.get(index).equals(PADDING)) {
+        for (; current != null; advance()) {
+            if (!current.equals(PADDING)) {
                 throw new AchParseException(index + 1, "only 9-filler records may follow the File Control record");
             }
         }
-        return new AchFile(header, batches, control);
+        return new Summary(control, index);
+    }
+
+    private String read() {
+        try {
+            return reader.readLine();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private void advance() {
+        current = read();
+        index++;
     }
 
     private Batch batch() {
@@ -96,15 +130,12 @@ public final class AchFileParser {
     }
 
     private char peekType() {
-        if (index >= lines.size() || lines.get(index).isEmpty()) {
-            return 0;
-        }
-        return lines.get(index).charAt(0);
+        return current == null || current.isEmpty() ? 0 : current.charAt(0);
     }
 
     /** Gives a precise error when the next record is well-formed but neither of the allowed types. */
     private void expectOneOf(char a, char b) {
-        if (index < lines.size() && lines.get(index).length() == RECORD_LENGTH
+        if (current != null && current.length() == RECORD_LENGTH
                 && peekType() != a && peekType() != b) {
             throw new AchParseException(index + 1,
                     "expected " + describe(a) + " or " + describe(b) + ", found type " + peekType());
@@ -118,10 +149,10 @@ public final class AchFileParser {
     private Line next(char expectedType) {
         int lineNumber = index + 1;
         String expected = describe(expectedType);
-        if (index >= lines.size()) {
+        if (current == null) {
             throw new AchParseException(lineNumber, "expected " + expected + " but the file ended");
         }
-        String text = lines.get(index);
+        String text = current;
         if (text.length() != RECORD_LENGTH) {
             throw new AchParseException(lineNumber,
                     "record is " + text.length() + " characters, expected " + RECORD_LENGTH);
@@ -129,7 +160,7 @@ public final class AchFileParser {
         if (text.charAt(0) != expectedType) {
             throw new AchParseException(lineNumber, "expected " + expected + ", found type " + text.charAt(0));
         }
-        index++;
+        advance();
         return new Line(text, lineNumber);
     }
 

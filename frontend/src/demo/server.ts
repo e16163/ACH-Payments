@@ -3,13 +3,18 @@
 // on made-up data, and keeps its state in sessionStorage, so closing the tab resets it.
 import { ApiError } from '../api'
 import { buildNachaFile, type NachaBatch, type NachaEntry } from './nacha'
+import { ingest, type RecvEntry } from './receive'
+import payrollSample from '../../../src/main/resources/fed-samples/sample1-payroll.ach?raw'
+import retailSample from '../../../src/main/resources/fed-samples/sample2-retail.ach?raw'
+import outOfBalanceSample from '../../../src/main/resources/fed-samples/sample3-out-of-balance.ach?raw'
 import { validateDesc, validateName, validateValue, PARAM_TYPES } from '../params/validation'
 import { isValidRouting } from '../member/rules'
 
-type Role = 'MEMBER' | 'SYS_ADMIN'
+type Role = 'MEMBER' | 'SYS_ADMIN' | 'ACH_OPS'
 const USERS: Record<string, { password: string; role: Role }> = {
   member: { password: 'member123', role: 'MEMBER' },
   admin: { password: 'admin123', role: 'SYS_ADMIN' },
+  ACHOperator: { password: 'operator123', role: 'ACH_OPS' },
 }
 
 const APPS: [string, string][] = [
@@ -60,6 +65,10 @@ type AchFileRow = {
   fileID: string; fileName: string; fedStatus: string; fileHeaderDt: string; totalCreditCount: number
   totalCreditAmt: number; sendTm: string | null; content: string
 }
+type RecvFile = {
+  fileID: string; fileName: string; fileHeaderDt: string; fileHeaderTm: string; fedStatus: string; processStatus: string; modifier: string
+}
+type RecvRow = RecvEntry & { tranID: number; transferSerNo: string; transferVersion: number; fileID: string; batchID: string; fedStatus: string; sourceID: string; createTm: string }
 type State = {
   user: string | null
   mfaVerified: boolean
@@ -69,9 +78,11 @@ type State = {
   transfers: Transfer[]
   files: AchFileRow[]
   nextTrace: number
+  receivedFiles: RecvFile[]
+  receivedEntries: RecvRow[]
 }
 
-const KEY = 'ach-demo-state-2' // new name: state saved by an older demo has no files
+const KEY = 'ach-demo-state-3' // new name: state saved by an older demo has no received files
 
 function freshState(): State {
   return {
@@ -93,6 +104,14 @@ function freshState(): State {
     transfers: [],
     files: [],
     nextTrace: 1,
+    // Ba's sample ACHRecvFile and ACHRecvTransaction rows (V7)
+    receivedFiles: [{ fileID: 'ACHFILE-88392', fileName: 'ACHFILE-88392.ach', fileHeaderDt: '2026-11-01', fileHeaderTm: '16:00:00', fedStatus: 'PROCESSED', processStatus: 'PROCESSED', modifier: 'A' }],
+    receivedEntries: [{
+      tranID: 1, transferSerNo: 'TRF-20261101-0089', transferVersion: 1, fileID: 'ACHFILE-88392', batchID: 'BATCH-001', creditFlag: 1, tranCode: '22',
+      companyName: 'ACME CORP', companyID: '1234567890', companyDiscData: 'DIRECT DEP', stdEntryCode: 'PPD', companyEntryDesc: 'PAYROLL', descriptiveDt: '2026-11-01',
+      effectiveDt: '2026-11-03', settlementDt: '2026-11-03', originatorID: '9000123456', amount: 3450.5, recvAcctID: '987654321012', recvName: 'JOHN DOE',
+      transactionDiscData: 'S', traceNo: '051000031234567', fedStatus: 'SETTLED', sourceID: 'PAYROLL_SYS', createTm: '2026-11-01T16:00:00', batchNo: 1,
+    }],
   }
 }
 
@@ -212,9 +231,9 @@ function route(s: State, method: string, path: string, body: Body): unknown {
     if (role !== 'SYS_ADMIN') denied()
     return eod(s, method, path, body)
   }
-  if (path === '/receiving/files') {
-    if (role !== 'SYS_ADMIN') denied()
-    return RECEIVING_FILES
+  if (path.startsWith('/v1/ach/receiving')) {
+    if (role !== 'SYS_ADMIN' && role !== 'ACH_OPS') denied()
+    return receiving(s, method, path.slice('/v1/ach/receiving'.length), body)
   }
   if (role !== 'MEMBER') denied()
   if (path === '/member/mfa/send' && method === 'POST') {
@@ -396,10 +415,58 @@ function receipt(t: Transfer) {
 
 // ---- ACH Origination File (EodController, EodFileJob, EodFileStore, FedSimulator) ----
 
-/** Ba's sample ACHRecvFile row (V7), with the counts ReceivingFileController takes from its entry. */
-const RECEIVING_FILES = [
-  { fileID: 'ACHFILE-88392', fileName: 'ACHFILE-88392.ach', fileHeaderDt: '2026-11-01', fileHeaderTm: '16:00:00', fedStatus: 'PROCESSED', entryCount: 1, totalCreditAmt: 3450.5, totalDebitAmt: 0 },
-]
+// ---- ACH Receiving (ReceivingController, ReceivingEngine, FedInboundSimulator) ----
+
+const RDFI = '123456780' // ACH_RCV/RDFI_ROUTING_NO
+const SAMPLES: Record<string, string> = { PAYROLL: payrollSample, RETAIL: retailSample, OUT_OF_BALANCE: outOfBalanceSample }
+
+function receiving(s: State, method: string, path: string, body: Body) {
+  if (path === '/files' && method === 'GET') {
+    return s.receivedFiles.map((f) => {
+      const entries = s.receivedEntries.filter((e) => e.fileID === f.fileID)
+      const total = (credit: number) => entries.filter((e) => e.creditFlag === credit).reduce((sum, e) => sum + Math.round(e.amount * 100), 0) / 100
+      return { ...f, entryCount: entries.length, totalCreditAmt: total(1), totalDebitAmt: total(0) }
+    }).sort((a, b) => b.fileHeaderDt.localeCompare(a.fileHeaderDt) || b.fileID.localeCompare(a.fileID))
+  }
+  if (path === '/files/receive' && method === 'POST') return [receiveSample(s, String(body.sample))]
+  if (path.startsWith('/transactions?') && method === 'GET') {
+    const q = new URLSearchParams(path.split('?')[1])
+    const page = Number(q.get('page') ?? 1)
+    const limit = Number(q.get('limit') ?? 10)
+    const rows = s.receivedEntries.filter((e) => e.fileID === q.get('fileID')).sort((a, b) => a.traceNo.localeCompare(b.traceNo) || a.tranID - b.tranID)
+    return { items: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit }
+  }
+  const m = /^\/transactions\/(\d+)$/.exec(path)
+  const row = m && s.receivedEntries.find((e) => e.tranID === Number(m[1]))
+  if (!row) fail(404, 'No such transaction.')
+  return row
+}
+
+function receiveSample(s: State, sample: string) {
+  const today = isoDate(new Date())
+  const prefix = `ACHFILE-${today.replace(/-/g, '')}-`
+  const fileID = `${prefix}${pad(s.receivedFiles.filter((f) => f.fileID.startsWith(prefix)).length + 1)}`
+  const fileName = `${sample}.ach`
+  const row: RecvFile = { fileID, fileName, fileHeaderDt: today, fileHeaderTm: '06:00:00', fedStatus: 'RECEIVED', processStatus: 'REJECTED_SIG_FAIL', modifier: 'A' }
+  s.receivedFiles.push(row)
+  if (sample === 'TAMPERED') return { fileID, fileName, processStatus: row.processStatus, message: `Security Operations alert: ${fileName} failed signature verification and was quarantined.` }
+  const text = SAMPLES[sample] ?? fail(400, 'Choose a file to receive.')
+  const r = ingest(text, RDFI)
+  row.fileHeaderDt = r.fileHeaderDt ?? today
+  row.fileHeaderTm = r.fileHeaderTm ?? row.fileHeaderTm
+  row.modifier = r.modifier ?? row.modifier
+  const seen = s.receivedFiles.some((f) => f !== row && f.fileHeaderDt === row.fileHeaderDt && f.fileHeaderTm === row.fileHeaderTm && f.modifier === row.modifier)
+  row.processStatus = seen ? 'DUPLICATE' : r.status
+  if (row.processStatus === 'VALIDATED') {
+    const day = today.replace(/-/g, '')
+    const serials = s.receivedEntries.filter((e) => e.transferSerNo.startsWith(`TRF-${day}-`)).length
+    s.receivedEntries.push(...r.entries.map((e, i) => ({
+      ...e, tranID: s.receivedEntries.length + i + 1, transferSerNo: `TRF-${day}-${pad(serials + i + 1, 4)}`, transferVersion: 1, fileID,
+      batchID: `${fileID}-B${pad(e.batchNo, 3)}`, fedStatus: 'SETTLED', sourceID: 'FED_ACH_INBOUND', createTm: isoDateTime(new Date()),
+    })))
+  }
+  return { fileID, fileName, processStatus: row.processStatus, message: r.message }
+}
 
 const param = (s: State, name: string) => s.params.find((p) => p.systemName === 'ACH_ORIG' && p.paramName === name)?.paramRawValue ?? ''
 

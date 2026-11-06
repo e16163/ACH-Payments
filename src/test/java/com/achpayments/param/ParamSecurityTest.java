@@ -56,16 +56,16 @@ class ParamSecurityTest {
 
     @Test
     void nonAdminGets403AndASecurityWarningInAppLog() throws Exception {
-        mvc.perform(get("/api/params/systems").with(httpBasic("operator", "operator-pw")))
+        mvc.perform(get("/api/params/systems").with(httpBasic("ACHOperator", "operator-pw")))
                 .andExpect(status().isForbidden());
 
-        verify(appLog).log(eq("WARN"), startsWith("Access denied: user 'operator' attempted GET /api/params/systems"),
+        verify(appLog).log(eq("WARN"), startsWith("Access denied: user 'ACHOperator' attempted GET /api/params/systems"),
                 isNull());
     }
 
     @Test
     void nonAdminCannotSaveThroughTheApi() throws Exception {
-        mvc.perform(put("/api/params/ACH_ORIG/FED_FILE_CUTOFF_TIME").with(httpBasic("operator", "operator-pw"))
+        mvc.perform(put("/api/params/ACH_ORIG/FED_FILE_CUTOFF_TIME").with(httpBasic("ACHOperator", "operator-pw"))
                 .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(BODY))
                 .andExpect(status().isForbidden());
 

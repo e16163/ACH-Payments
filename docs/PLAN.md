@@ -199,7 +199,7 @@ For each entry in a validated file:
    - COR/NOC entries (addenda `98`) go to **NOC Intake** (5.10 B). Refused NOCs about NOCs *we* sent go to **NOC Generation** (5.10 A).
    - Everything else goes through normal receiving.
 2. **Match the account.** Look up `dda_account` by account number. If nothing matches, auto-return the entry: **R03** (no account) or **R04** (invalid number). If the account is closed or frozen, return **R02** or **R16**.
-3. **Screen.** Run OFAC on the individual name and company name, then the fraud rules (section 6). A hit sets `PENDING_REVIEW`.
+3. **Screen.** Run the fraud rules (section 6). A hit sets `PENDING_REVIEW`. No OFAC here: Ba screens once, at origination (USE-CASES R1).
 4. **Check the date.** Entries with a future effective date wait. Same Day entries (settlement date = today) are processed now.
 5. Hand clean entries to **Memo Posting** (5.4).
 
