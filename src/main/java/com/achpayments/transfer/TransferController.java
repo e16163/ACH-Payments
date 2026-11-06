@@ -45,7 +45,7 @@ public class TransferController {
         this.memberNumber = memberNumber;
     }
 
-    /** The demo member's login name maps to Ba's member number; any other login has no member number. */
+    /** The demo member's login name maps to the design's member number; any other login has no member number. */
     private String memberNo(Principal user) {
         if (!user.getName().equals(memberUsername)) {
             throw new AccessDeniedException("No member number for " + user.getName());

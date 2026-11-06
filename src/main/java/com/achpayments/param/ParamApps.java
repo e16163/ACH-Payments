@@ -3,7 +3,7 @@ package com.achpayments.param;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** The apps (systemName) parameters can belong to: one per UI in Ba's diagram (docs/USE-CASES.md P3). */
+/** The apps (systemName) parameters can belong to: one per UI in the design diagram (docs/USE-CASES.md P3). */
 public final class ParamApps {
 
     public static final Map<String, String> APPS = new LinkedHashMap<>();

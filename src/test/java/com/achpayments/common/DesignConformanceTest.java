@@ -24,19 +24,19 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
- * "Follow Ba's design" as a test (docs/DB-MODEL.md section 0): runs Ba's original DDL in a scratch database,
- * then checks that every Ba table we've built keeps all his columns (type, nullability, default, extra),
+ * "Follow the design" as a test (docs/DB-MODEL.md section 0): runs the original DDL in a scratch database,
+ * then checks that every design table we've built keeps all the columns (type, nullability, default, extra),
  * primary key, indexes and foreign keys exactly. Our additions are allowed; changes are not.
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "TEST_JDBC_URL", matches = ".+")
 @ActiveProfiles("dbtest")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class BaDesignConformanceTest {
+class DesignConformanceTest {
 
-    private static final String REFERENCE_DB = "ba_reference_test";
+    private static final String REFERENCE_DB = "design_reference_test";
 
-    /** All 30 of Ba's tables with SQL (D1-D3). */
+    /** All 30 of the design's tables with SQL (D1-D3). */
     private static final Set<String> REQUIRED = Set.of(
             "AppParam", "AppLog",
             "ACHRecvTransaction", "ACHRecvAccount", "ACHRecvFile", "ACHRecvBatch", "ACHRecvReturn", "ACHRecvNOC",
@@ -75,7 +75,7 @@ class BaDesignConformanceTest {
             ref.execute("DROP TABLE `" + t + "`");
         }
         ref.execute("SET FOREIGN_KEY_CHECKS = 1");
-        for (String statement : basDdl().split(";\\s*\\n")) {
+        for (String statement : designDdl().split(";\\s*\\n")) {
             if (statement.contains("CREATE TABLE")) {
                 ref.execute(statement);
             }
@@ -90,7 +90,7 @@ class BaDesignConformanceTest {
     @Test
     void requiredBaTablesExist() {
         List<String> missing = REQUIRED.stream().filter(t -> !tablesIn(schemaFor(t)).contains(t)).sorted().toList();
-        assertEquals(List.of(), missing, "Ba's tables not built yet");
+        assertEquals(List.of(), missing, "the design's tables not built yet");
     }
 
     @Test
@@ -107,17 +107,17 @@ class BaDesignConformanceTest {
                 Map<String, Object> mine = columns(ours, table).stream()
                         .filter(c -> c.get("name").equals(col.get("name"))).findFirst().orElse(null);
                 if (!col.equals(mine)) {
-                    differences.add(table + "." + col.get("name") + ": Ba " + col + " vs ours " + mine);
+                    differences.add(table + "." + col.get("name") + ": The designer " + col + " vs ours " + mine);
                 }
             }
             compare(differences, table, "primary key", keys(REFERENCE_DB, table, "PRIMARY KEY"), keys(ours, table, "PRIMARY KEY"));
             Set<String> ourIndexes = indexes(ours, table);
             for (String index : indexes(REFERENCE_DB, table)) {
-                if (!ourIndexes.contains(index)) differences.add(table + ": missing Ba's index " + index);
+                if (!ourIndexes.contains(index)) differences.add(table + ": missing the design's index " + index);
             }
             Set<String> ourFks = foreignKeys(ours, table);
             for (String fk : foreignKeys(REFERENCE_DB, table)) {
-                if (!ourFks.contains(fk)) differences.add(table + ": missing Ba's foreign key " + fk);
+                if (!ourFks.contains(fk)) differences.add(table + ": missing the design's foreign key " + fk);
             }
         }
         assertTrue(checked >= REQUIRED.size(), "checked only " + checked + " tables");
@@ -177,11 +177,11 @@ class BaDesignConformanceTest {
     }
 
     private static void compare(List<String> differences, String table, String what, Object ba, Object ours) {
-        if (!ba.equals(ours)) differences.add(table + " " + what + ": Ba " + ba + " vs ours " + ours);
+        if (!ba.equals(ours)) differences.add(table + " " + what + ": The designer " + ba + " vs ours " + ours);
     }
 
-    private static String basDdl() throws IOException {
-        try (InputStream in = BaDesignConformanceTest.class.getResourceAsStream("/ba-design/ba-design-ddl.sql")) {
+    private static String designDdl() throws IOException {
+        try (InputStream in = DesignConformanceTest.class.getResourceAsStream("/design-reference/design-ddl.sql")) {
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }

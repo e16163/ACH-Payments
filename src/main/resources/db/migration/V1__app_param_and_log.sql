@@ -1,4 +1,4 @@
--- AppParam and AppLog, as defined in Ba's ACH Payments System Design ("Database Model for Application Configuration and Logging").
+-- AppParam and AppLog, as defined in the design's ACH Payments System Design ("Database Model for Application Configuration and Logging").
 
 CREATE TABLE AppParam (
     systemName VARCHAR(30) NOT NULL,
@@ -22,7 +22,7 @@ CREATE TABLE AppLog (
     INDEX IX_AppLog_LogTm (logTm)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba's sample parameters
+-- the sample parameters
 INSERT INTO AppParam (systemName, paramName, paramDesc, paramRawType, paramRawValue, lastModBy) VALUES
 ('ACH_RCV', 'MEMO_POST_IMMEDIATE', 'Enable immediate memo posting upon transaction ingestion', 'BOOLEAN', 'TRUE', 'SYS_ADMIN'),
 ('ACH_ORIG', 'FED_FILE_CUTOFF_TIME', 'Cutoff time for building daily Fed file (EST)', 'STRING', '17:00:00', 'SYS_ADMIN');

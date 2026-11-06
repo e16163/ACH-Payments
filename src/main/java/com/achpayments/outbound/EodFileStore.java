@@ -38,7 +38,7 @@ import com.achpayments.transfer.TransferService;
 
 /**
  * UC-ACH-EOD-01 steps 2-6 and the file's status changes. The file's text is always rebuilt from the saved rows, so a
- * resend is byte-for-byte the same file. Every status change adds a row to Ba's ACHOrigFedAction audit trail.
+ * resend is byte-for-byte the same file. Every status change adds a row to the design's ACHOrigFedAction audit trail.
  */
 @Service
 public class EodFileStore {
@@ -220,7 +220,7 @@ public class EodFileStore {
                     key.secCode(), key.entryDesc(), d.effectiveDt(), d.originatorID(), d.amount(), d.recvAcctNo(), d.recvName(),
                     d.recurring() ? "R" : "S", traces.next(d.odfiRouting()), d.sourceID(), d.routingNo(),
                     d.serNo().replace("-", "")); // TRF-20261105-0001 fits the 15-character field
-            // Ba: the batch updates the transfer's status to Processed; delivery is tracked by fedStatus.
+            // Design: the batch updates the transfer's status to Processed; delivery is tracked by fedStatus.
             jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processStatus = 'PROCESSED', processTm = NOW() "
                     + "WHERE transferSerNo = ? AND transferVersion = 1", d.serNo());
             transfers.scheduleNextPayment(d.serNo());

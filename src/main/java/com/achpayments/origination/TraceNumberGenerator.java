@@ -10,7 +10,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * NACHA trace numbers for entries we originate: the ODFI's 8-digit routing prefix + a 7-digit sequence.
- * Ba's index on {@code ACHOrigTransaction.traceNo} isn't unique (DB-MODEL F7 kept as he wrote it), so uniqueness
+ * The design's index on {@code ACHOrigTransaction.traceNo} isn't unique (DB-MODEL F7 kept as written), so uniqueness
  * is guaranteed here: each prefix continues after the highest number already stored, and numbers are handed out
  * atomically. This assumes one running app instance (true for this demo).
  */

@@ -1,6 +1,6 @@
 /** Client-side rules for the External ACH Transfer screen (UC-ACH-ORG-01). The server checks all of them again. */
 
-export const MAX_AMOUNT = '99999999999.99' // Ba's DECIMAL(13,2)
+export const MAX_AMOUNT = '99999999999.99' // The design's DECIMAL(13,2)
 export const INVALID_ROUTING = 'Invalid routing number. Please check the 9-digit ABA number.'
 
 /** ABA 3-7-1 check digit (EX-01), run before asking the server for the bank name. */

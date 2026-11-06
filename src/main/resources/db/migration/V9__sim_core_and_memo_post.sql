@@ -1,6 +1,6 @@
 -- R6 (PLAN 5.4, DB-MODEL M4), in ach_payments.
 
--- The simulated core banking system's member accounts. Balances live in the core, not in Ba's ACH tables.
+-- The simulated core banking system's member accounts. Balances live in the core, not in the design's ACH tables.
 CREATE TABLE SimCoreAccount (
     acctNo VARCHAR(34) NOT NULL,
     memberNo VARCHAR(20) NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE ACHMemoPost (
     INDEX IX_ACHMemoPost_Tran (tranSource, tranRef)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Demo member: Ba's sample member M10982347 (JOHN DOE). 100049281920 is the funding account in his sample transfer.
+-- Demo member: the sample member M10982347 (JOHN DOE). 100049281920 is the funding account in the sample transfer.
 INSERT INTO SimCoreAccount (acctNo, memberNo, acctName, acctType, acctOwner, ledgerBal, availBal) VALUES
 ('100049281920', 'M10982347', 'Primary Checking', 'CHECKING', 'JOHN DOE', 8500.00, 8500.00),
 ('100049281946', 'M10982347', 'Savings', 'SAVINGS', 'JOHN DOE', 15000.00, 15000.00);

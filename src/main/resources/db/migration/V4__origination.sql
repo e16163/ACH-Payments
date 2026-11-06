@@ -1,9 +1,9 @@
--- Origination database (Ba's "ACH Origination Engine and UI" tables), in ${orig} (ach_origination).
--- Part 1: Ba's CREATE TABLEs, copied unchanged from his design doc (only the database prefix added).
--- Part 2: additions approved in docs/DB-MODEL.md section 0 and USE-CASES.md T2/T8. Nothing Ba defined is changed.
+-- Origination database (the design's "ACH Origination Engine and UI" tables), in ${orig} (ach_origination).
+-- Part 1: The design's CREATE TABLEs, copied unchanged from the design doc (only the database prefix added).
+-- Part 2: additions approved in docs/DB-MODEL.md section 0 and USE-CASES.md T2/T8. Nothing the designer defined is changed.
 
 
--- Ba: ACHOrigTransaction
+-- Design: ACHOrigTransaction
 CREATE TABLE ${orig}.ACHOrigTransaction (
     tranID BIGINT AUTO_INCREMENT NOT NULL,
     transferSerNo VARCHAR(30) NULL,
@@ -40,7 +40,7 @@ CREATE TABLE ${orig}.ACHOrigTransaction (
     INDEX IX_ACHOrigTransaction_FedStatus (fedStatus)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOriginator
+-- Design: ACHOriginator
 CREATE TABLE ${orig}.ACHOriginator (
     originatorID VARCHAR(10) NOT NULL,
     taxID VARCHAR(9) NULL,
@@ -51,7 +51,7 @@ CREATE TABLE ${orig}.ACHOriginator (
     CONSTRAINT PK_ACHOriginator PRIMARY KEY (originatorID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigRecvAccount
+-- Design: ACHOrigRecvAccount
 CREATE TABLE ${orig}.ACHOrigRecvAccount (
     recvAcctSerNo VARCHAR(30) NOT NULL,
     recvAcctVersion INT NOT NULL DEFAULT 1,
@@ -77,7 +77,7 @@ CREATE TABLE ${orig}.ACHOrigRecvAccount (
     INDEX IX_ACHOrigRecvAccount_Status (acctStatus)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigLimitRule
+-- Design: ACHOrigLimitRule
 CREATE TABLE ${orig}.ACHOrigLimitRule (
     ruleID INT AUTO_INCREMENT NOT NULL,
     ruleName VARCHAR(50) NOT NULL,
@@ -96,7 +96,7 @@ CREATE TABLE ${orig}.ACHOrigLimitRule (
     INDEX IX_ACHOrigLimitRule_AcctType (acctType)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOriginatorTransfer
+-- Design: ACHOriginatorTransfer
 CREATE TABLE ${orig}.ACHOriginatorTransfer (
     transferSerNo VARCHAR(30) NOT NULL,
     transferVersion INT NOT NULL DEFAULT 1,
@@ -139,7 +139,7 @@ CREATE TABLE ${orig}.ACHOriginatorTransfer (
     INDEX IX_ACHOriginatorTransfer_Status (processStatus, ofacStatus, postingStatus)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOperator
+-- Design: ACHOperator
 CREATE TABLE ${orig}.ACHOperator (
     operatorID VARCHAR(10) NOT NULL,
     routingNo CHAR(9) NOT NULL,
@@ -147,7 +147,7 @@ CREATE TABLE ${orig}.ACHOperator (
     CONSTRAINT PK_ACHOperator PRIMARY KEY (operatorID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: Contact
+-- Design: Contact
 CREATE TABLE ${orig}.Contact (
     contactID BIGINT AUTO_INCREMENT NOT NULL,
     contactPerson VARCHAR(100) NOT NULL,
@@ -164,7 +164,7 @@ CREATE TABLE ${orig}.Contact (
     CONSTRAINT PK_Contact PRIMARY KEY (contactID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigFile
+-- Design: ACHOrigFile
 CREATE TABLE ${orig}.ACHOrigFile (
     fileID VARCHAR(30) NOT NULL,
     processID VARCHAR(30) NULL,
@@ -186,7 +186,7 @@ CREATE TABLE ${orig}.ACHOrigFile (
     INDEX IX_ACHOrigFile_FedStatus (fedStatus)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigBatch
+-- Design: ACHOrigBatch
 CREATE TABLE ${orig}.ACHOrigBatch (
     batchID VARCHAR(30) NOT NULL,
     fileID VARCHAR(30) NOT NULL,
@@ -213,7 +213,7 @@ CREATE TABLE ${orig}.ACHOrigBatch (
     INDEX IX_ACHOrigBatch_EffectiveDt (effectiveDt)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: Company
+-- Design: Company
 CREATE TABLE ${orig}.Company (
     companyID VARCHAR(10) NOT NULL,
     companyDesc VARCHAR(100) NULL,
@@ -223,7 +223,7 @@ CREATE TABLE ${orig}.Company (
     INDEX IX_Company_OriginatorID (originatorID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: Source
+-- Design: Source
 CREATE TABLE ${orig}.Source (
     sourceID VARCHAR(30) NOT NULL,
     sourceName VARCHAR(50) NOT NULL,
@@ -243,7 +243,7 @@ ALTER TABLE ${orig}.ACHOrigFile
 ALTER TABLE ${orig}.ACHOrigBatch
     ADD COLUMN serviceClassCode CHAR(3) NULL;
 
--- S6: link originators to Ba's Contact table
+-- S6: link originators to the design's Contact table
 ALTER TABLE ${orig}.ACHOriginator
     ADD COLUMN contactID BIGINT NULL,
     ADD CONSTRAINT FK_ACHOriginator_Contact FOREIGN KEY (contactID) REFERENCES ${orig}.Contact(contactID);
@@ -252,7 +252,7 @@ ALTER TABLE ${orig}.ACHOriginator
 ALTER TABLE ${orig}.ACHOrigRecvAccount
     ADD CONSTRAINT FK_ACHOrigRecvAccount_Source FOREIGN KEY (sourceID) REFERENCES ${orig}.Source(sourceID);
 
--- T8: the inputs UC-ACH-ORG-01 collects (names as Ba's spec maps them), the fee shown, and creation time; F5 FKs
+-- T8: the inputs UC-ACH-ORG-01 collects (names as the design's spec maps them), the fee shown, and creation time; F5 FKs
 ALTER TABLE ${orig}.ACHOriginatorTransfer
     ADD COLUMN effectiveDt DATE NULL,
     ADD COLUMN companyEntryDesc VARCHAR(10) NULL,
@@ -278,7 +278,7 @@ ALTER TABLE ${orig}.ACHOrigTransaction
     ADD CONSTRAINT FK_ACHOrigTransaction_Parent FOREIGN KEY (parentTranID) REFERENCES ${orig}.ACHOrigTransaction(tranID),
     ADD CONSTRAINT FK_ACHOrigTransaction_Source FOREIGN KEY (sourceID) REFERENCES ${orig}.Source(sourceID);
 
--- F5: receiving-side sourceID columns point at Ba's Source table too (same MySQL server, so cross-database FKs work)
+-- F5: receiving-side sourceID columns point at the design's Source table too (same MySQL server, so cross-database FKs work)
 ALTER TABLE ${recv}.ACHRecvTransaction ADD CONSTRAINT FK_ACHRecvTransaction_Source FOREIGN KEY (sourceID) REFERENCES ${orig}.Source(sourceID);
 ALTER TABLE ${recv}.ACHRecvAccount ADD CONSTRAINT FK_ACHRecvAccount_Source FOREIGN KEY (sourceID) REFERENCES ${orig}.Source(sourceID);
 ALTER TABLE ${recv}.ACHRecvReturn ADD CONSTRAINT FK_ACHRecvReturn_Source FOREIGN KEY (sourceID) REFERENCES ${orig}.Source(sourceID);

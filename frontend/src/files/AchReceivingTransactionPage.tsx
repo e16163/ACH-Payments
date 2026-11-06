@@ -15,7 +15,7 @@ const usd = (n: number) => n.toLocaleString('en-US', { style: 'currency', curren
 const dateTime = (s: string) => s.replace('T', ' ').slice(0, 19)
 const creditDebit = (flag: number) => (flag === 1 ? 'CREDIT' : 'DEBIT')
 
-// Ba's 24 ACHRecvTransaction fields, in his order.
+// The design's 24 ACHRecvTransaction fields, in the design's order.
 const FIELDS: [string, string][] = [
   ['tranID', 'Tran ID'], ['transferSerNo', 'Transfer Serial No'], ['transferVersion', 'Transfer Version'], ['fileID', 'File ID'],
   ['batchID', 'Batch ID'], ['creditFlag', 'Cr/Db Indicator'], ['tranCode', 'Tran Code'], ['companyName', 'Company Name'],

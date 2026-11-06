@@ -2,7 +2,7 @@ package com.achpayments.transfer;
 
 import org.springframework.stereotype.Component;
 
-/** Placeholder until we have Plaid access (Ba, 2026-11-03): every account counts as verified. */
+/** Placeholder until we have Plaid access (the designer, 2026-11-03): every account counts as verified. */
 @Component
 public class PlaidAccountVerifier implements AccountVerifier {
 

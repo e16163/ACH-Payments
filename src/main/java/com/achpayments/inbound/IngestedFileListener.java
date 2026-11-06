@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 import com.achpayments.common.AppLogRepository;
 
 /**
- * Receives ACH_FILE_INGESTED_EVENT. Ba's use case for memo posting received entries is still to come, and received
+ * Receives ACH_FILE_INGESTED_EVENT. the use case for memo posting received entries is still to come, and received
  * entries aren't OFAC screened (they were screened at origination), so for now this only records the event.
  */
 @Component

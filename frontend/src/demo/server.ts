@@ -31,7 +31,7 @@ const BANKS: Record<string, string> = {
   '011000015': 'Federal Reserve Bank of Boston',
   '021000021': 'JPMorgan Chase Bank, N.A.',
   '026009593': 'Bank of America, N.A.',
-  '051000033': "Sample Bank (from Ba's design samples)",
+  '051000033': "Sample Bank (from the design samples)",
   '121000248': 'Wells Fargo Bank, N.A.',
   '123456780': 'Demo Credit Union',
 }
@@ -48,7 +48,7 @@ const LIMIT_RULES = [
   { acctType: 'ALL', dayNo: 7, limit: 5_000_000 },
   { acctType: 'CHECKING', dayNo: 30, limit: 50_000_000 },
 ]
-const MAX_CENTS = 9_999_999_999_999 // Ba's DECIMAL(13,2): 99,999,999,999.99
+const MAX_CENTS = 9_999_999_999_999 // The design's DECIMAL(13,2): 99,999,999,999.99
 const FREQUENCIES = ['ONETIME', 'WEEKLY', 'BIWEEKLY', 'MONTHLY']
 // Nacha gives these entry descriptions a meaning, so a member's memo can't be sent as one (EodFileStore).
 const RESERVED_ENTRY_DESC = ['REVERSAL', 'RECLAIM', 'NONSETTLED', 'RETRY PYMT', 'REDEPCHECK', 'HCCLAIMPMT', 'AUTOENROLL']
@@ -104,7 +104,7 @@ function freshState(): State {
     transfers: [],
     files: [],
     nextTrace: 1,
-    // Ba's sample ACHRecvFile and ACHRecvTransaction rows (V7)
+    // The sample ACHRecvFile and ACHRecvTransaction rows (V7)
     receivedFiles: [{ fileID: 'ACHFILE-88392', fileName: 'ACHFILE-88392.ach', fileHeaderDt: '2026-11-01', fileHeaderTm: '16:00:00', fedStatus: 'PROCESSED', processStatus: 'PROCESSED', modifier: 'A' }],
     receivedEntries: [{
       tranID: 1, transferSerNo: 'TRF-20261101-0089', transferVersion: 1, fileID: 'ACHFILE-88392', batchID: 'BATCH-001', creditFlag: 1, tranCode: '22',

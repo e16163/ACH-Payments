@@ -1,6 +1,6 @@
 # ACH Payments System: Implementation Plan
 
-This plan is based on the architecture description and component diagram from Ba. It covers the Same Day ACH payments system and leaves a place for the Fraud Monitoring & Prevention system to plug in.
+This plan is based on the architecture description and component diagram from the designer. It covers the Same Day ACH payments system and leaves a place for the Fraud Monitoring & Prevention system to plug in.
 
 ---
 
@@ -11,12 +11,12 @@ This plan is based on the architecture description and component diagram from Ba
 | A1 | **A demo system for a bank or credit union**, modeled on a large credit union like Navy Federal. It acts as both the **ODFI** (sends ACH for members) and the **RDFI** (receives ACH into members' accounts). | ✅ Confirmed |
 | A2 | **FedACH and the Core GL are simulated.** A real FedACH connection needs FedLine, a bank charter and certificates. We use drop folders (`fed/inbound`, `fed/outbound`, `core/posting`) plus small simulator tools. | ✅ Confirmed |
 | A3 | **One app, not microservices.** All "engines" are modules inside one Java web app (a WAR on Tomcat). | It's much simpler for two people. Modules can be split out later if needed. |
-| A4 | **Separate MySQL databases, as in Ba's diagram:** `ach_receiving`, `ach_origination`, plus `ach_payments` for shared config and logging. All three are on one server. | ✅ Decided 2026-11-03 (see [DB-MODEL.md](DB-MODEL.md) section 0) |
+| A4 | **Separate MySQL databases, as in the design diagram:** `ach_receiving`, `ach_origination`, plus `ach_payments` for shared config and logging. All three are on one server. | ✅ Decided 2026-11-03 (see [DB-MODEL.md](DB-MODEL.md) section 0) |
 | A5 | **The backend is Java 21, Spring Boot 4 (REST API, WAR on Tomcat 11), MySQL, Flyway for schema migrations and Maven. The frontend is React + TypeScript (Vite).** The React build is bundled into the WAR, so there's still one deployable. | ✅ React confirmed |
 | A8 | **Users:** internal credit-union staff log in to the operations app. Members and business members originate through the **digital banking channel**, which calls our Origination REST API. A demo "Business Member Portal" stands in for that channel (see 7). | ✅ Decided |
 | A9 | **The Fraud system is a module in the same app** (`screening/`). | ✅ Confirmed |
 | A6 | **"Cryptographic signatures" on inbound files** are simulated as a detached SHA-256 HMAC (or PGP) signature file next to each NACHA file. | Real FedLine security works at the transport layer. A signature check still exercises the validation step. |
-| A7 | **Money is stored as `DECIMAL(13,2)`** (Ba's DB model), never floating point. | Rounding errors in payments are unacceptable. DECIMAL is exact. |
+| A7 | **Money is stored as `DECIMAL(13,2)`** (the design's DB model), never floating point. | Rounding errors in payments are unacceptable. DECIMAL is exact. |
 
 ---
 
@@ -127,7 +127,7 @@ Every engine depends on this, so it's built first and tested heavily.
 
 ## 4. Database design (first pass)
 
-> **Superseded by Ba's DB model.** See [DB-MODEL.md](DB-MODEL.md) for Ba's tables, the review, the fixes and the open questions. The first pass below is kept only for reference.
+> **Superseded by the design's DB model.** See [DB-MODEL.md](DB-MODEL.md) for the design's tables, the review, the fixes and the open questions. The first pass below is kept only for reference.
 
 All tables get `id`, `created_at`, `updated_at` and `version` (optimistic locking). Account numbers are **encrypted at rest** and **masked in the UI** (last 4 digits only), as the Nacha data-security rules require.
 
@@ -199,7 +199,7 @@ For each entry in a validated file:
    - COR/NOC entries (addenda `98`) go to **NOC Intake** (5.10 B). Refused NOCs about NOCs *we* sent go to **NOC Generation** (5.10 A).
    - Everything else goes through normal receiving.
 2. **Match the account.** Look up `dda_account` by account number. If nothing matches, auto-return the entry: **R03** (no account) or **R04** (invalid number). If the account is closed or frozen, return **R02** or **R16**.
-3. **Screen.** Run the fraud rules (section 6). A hit sets `PENDING_REVIEW`. No OFAC here: Ba screens once, at origination (USE-CASES R1).
+3. **Screen.** Run the fraud rules (section 6). A hit sets `PENDING_REVIEW`. No OFAC here: The designer screens once, at origination (USE-CASES R1).
 4. **Check the date.** Entries with a future effective date wait. Same Day entries (settlement date = today) are processed now.
 5. Hand clean entries to **Memo Posting** (5.4).
 
@@ -490,11 +490,11 @@ Each step is small enough for one assignment and has a clear "done" check.
 
 Steps 0–3 don't depend on any open questions, so we can start immediately.
 
-Ba's use cases are planned in [USE-CASES.md](USE-CASES.md): the Parameter UI comes before step 4, and the External Transfer UI comes with steps 6 and 9. All work is tracked as tasks on the GitHub Projects kanban board.
+the use cases are planned in [USE-CASES.md](USE-CASES.md): the Parameter UI comes before step 4, and the External Transfer UI comes with steps 6 and 9. All work is tracked as tasks on the GitHub Projects kanban board.
 
 ---
 
-## 10. Questions for Ba
+## 10. Questions for the designer
 
 **Answered:**
 - Q1: it's a demo bank system (A1).

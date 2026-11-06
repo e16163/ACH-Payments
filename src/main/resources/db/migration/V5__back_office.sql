@@ -1,15 +1,15 @@
--- Back office (Ba's returns, NOCs, substitutions and action logs on the origination side), in ${orig} (ach_origination).
--- Part 1: Ba's CREATE TABLEs, copied unchanged from his design doc (only the database prefix added).
--- Part 2: additions approved in docs/DB-MODEL.md section 0 (F5, F13, S4). Nothing Ba defined is changed.
+-- Back office (the design's returns, NOCs, substitutions and action logs on the origination side), in ${orig} (ach_origination).
+-- Part 1: The design's CREATE TABLEs, copied unchanged from the design doc (only the database prefix added).
+-- Part 2: additions approved in docs/DB-MODEL.md section 0 (F5, F13, S4). Nothing the designer defined is changed.
 
--- Ba: Action
+-- Design: Action
 CREATE TABLE ${orig}.Action (
     actionID INT AUTO_INCREMENT NOT NULL,
     actionName VARCHAR(50) NOT NULL,
     CONSTRAINT PK_Action PRIMARY KEY (actionID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigReturn
+-- Design: ACHOrigReturn
 CREATE TABLE ${orig}.ACHOrigReturn (
     returnID BIGINT AUTO_INCREMENT NOT NULL,
     tranID BIGINT NULL,
@@ -36,7 +36,7 @@ CREATE TABLE ${orig}.ACHOrigReturn (
     INDEX IX_ACHOrigReturn_ReturnDt (returnDt)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigNOC
+-- Design: ACHOrigNOC
 CREATE TABLE ${orig}.ACHOrigNOC (
     nocID BIGINT AUTO_INCREMENT NOT NULL,
     tranID BIGINT NULL,
@@ -52,7 +52,7 @@ CREATE TABLE ${orig}.ACHOrigNOC (
     INDEX IX_ACHOrigNOC_NocCode (nocCode)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigAcctSubs
+-- Design: ACHOrigAcctSubs
 CREATE TABLE ${orig}.ACHOrigAcctSubs (
     acctSubsID BIGINT AUTO_INCREMENT NOT NULL,
     nocAcctNo VARCHAR(34) NOT NULL,
@@ -72,7 +72,7 @@ CREATE TABLE ${orig}.ACHOrigAcctSubs (
     INDEX IX_ACHOrigAcctSubs_NocAcct (nocAcctNo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigTransCodeSubs
+-- Design: ACHOrigTransCodeSubs
 CREATE TABLE ${orig}.ACHOrigTransCodeSubs (
     nocID BIGINT NOT NULL,
     nocAcctNo VARCHAR(34) NOT NULL,
@@ -86,7 +86,7 @@ CREATE TABLE ${orig}.ACHOrigTransCodeSubs (
     INDEX IX_ACHOrigTransCodeSubs_CompanyID (companyID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigResubAction
+-- Design: ACHOrigResubAction
 CREATE TABLE ${orig}.ACHOrigResubAction (
     fileID VARCHAR(30) NOT NULL,
     processID VARCHAR(30) NOT NULL,
@@ -99,7 +99,7 @@ CREATE TABLE ${orig}.ACHOrigResubAction (
     CONSTRAINT PK_ACHOrigResubAction PRIMARY KEY (fileID, processID, actionID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigNOCAction
+-- Design: ACHOrigNOCAction
 CREATE TABLE ${orig}.ACHOrigNOCAction (
     nocID BIGINT NOT NULL,
     processID VARCHAR(30) NOT NULL,
@@ -112,7 +112,7 @@ CREATE TABLE ${orig}.ACHOrigNOCAction (
     CONSTRAINT PK_ACHOrigNOCAction PRIMARY KEY (nocID, processID, actionID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigFedAction
+-- Design: ACHOrigFedAction
 CREATE TABLE ${orig}.ACHOrigFedAction (
     fileID VARCHAR(30) NOT NULL,
     processID VARCHAR(30) NOT NULL,
@@ -125,7 +125,7 @@ CREATE TABLE ${orig}.ACHOrigFedAction (
     CONSTRAINT PK_ACHOrigFedAction PRIMARY KEY (fileID, processID, actionID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHOrigReversalAction
+-- Design: ACHOrigReversalAction
 CREATE TABLE ${orig}.ACHOrigReversalAction (
     fileID VARCHAR(30) NOT NULL,
     processID VARCHAR(30) NOT NULL,
@@ -140,7 +140,7 @@ CREATE TABLE ${orig}.ACHOrigReversalAction (
 
 -- ===== Part 2: additions =====
 
--- F13: Ba lists ACHOrigReturnAction's fields but gives no SQL; same shape as his other action tables, keyed by returnID
+-- F13: The designer lists ACHOrigReturnAction's fields but gives no SQL; same shape as the other action tables, keyed by returnID
 CREATE TABLE ${orig}.ACHOrigReturnAction (
     returnID BIGINT NOT NULL,
     processID VARCHAR(30) NOT NULL,

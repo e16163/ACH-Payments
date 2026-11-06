@@ -1,17 +1,17 @@
-# Demo guide for Ba
+# Demo guide for the designer
 
 A walk-through of what's built from your documents, and what isn't yet.
 
 ## Two ways to run it
 
-| | Online demo | Full app (Ben's Mac) |
+| | Online demo | Full app (the local machine) |
 |---|---|---|
 | Where | https://e16163.github.io/ACH-Payments/ | http://localhost:8080/ach/ |
 | What runs | The real screens; the server's rules run in the browser on made-up data | Java server (Spring Boot on Tomcat) + MySQL, with your tables |
 | Saved? | No. Resets when you close the tab | Yes, in the `ach_payments` / `ach_origination` / `ach_receiving` databases |
 | Member login | `member` / `member123` | `member` / `member123` |
-| Admin login | `admin` / `admin123` | Ben's admin login |
-| ACH operator login | `ACHOperator` / `operator123` | `ACHOperator` with Ben's password |
+| Admin login | `admin` / `admin123` | the local admin login |
+| ACH operator login | `ACHOperator` / `operator123` | `ACHOperator` with the local password |
 | ACH files | Kept in the browser tab | Written to `~/dev/fed/outbound`, the simulated Fed |
 
 Use the online demo to click through. Use the full app to see the rows land in your tables (the last section).
@@ -118,7 +118,7 @@ Received entries stay `UNPROCESSED`. They aren't OFAC screened (they were screen
 
 ## Part 4: System Design (in the full app)
 
-These screens write to your tables. On Ben's Mac, after a transfer, run:
+These screens write to your tables. On the local machine, after a transfer, run:
 
 ```sql
 -- the transfer, PENDING_BATCH then PROCESSED, with T8 columns (originatorID 9000000001, sourceID ONLINE_BANKING)

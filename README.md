@@ -142,17 +142,17 @@ Scripts and tests can still send HTTP Basic credentials, but a browser never get
 
 ### 7. Running the database tests
 
-Some tests run against real MySQL, in separate **test** databases so they never touch your data. `ba_reference_test` holds the original design DDL, which a test compares our schema against. One-time setup, as root:
+Some tests run against real MySQL, in separate **test** databases so they never touch your data. `design_reference_test` holds the original design DDL, which a test compares our schema against. One-time setup, as root:
 
 ```sql
 CREATE DATABASE ach_payments_test CHARACTER SET utf8mb4;
 CREATE DATABASE ach_receiving_test CHARACTER SET utf8mb4;
 CREATE DATABASE ach_origination_test CHARACTER SET utf8mb4;
-CREATE DATABASE ba_reference_test CHARACTER SET utf8mb4;
+CREATE DATABASE design_reference_test CHARACTER SET utf8mb4;
 GRANT ALL PRIVILEGES ON ach_payments_test.* TO 'ach_app'@'localhost';
 GRANT ALL PRIVILEGES ON ach_receiving_test.* TO 'ach_app'@'localhost';
 GRANT ALL PRIVILEGES ON ach_origination_test.* TO 'ach_app'@'localhost';
-GRANT ALL PRIVILEGES ON ba_reference_test.* TO 'ach_app'@'localhost';
+GRANT ALL PRIVILEGES ON design_reference_test.* TO 'ach_app'@'localhost';
 ```
 
 Then run the tests with `TEST_JDBC_URL` set. Without it, the database tests are skipped and everything else still runs.

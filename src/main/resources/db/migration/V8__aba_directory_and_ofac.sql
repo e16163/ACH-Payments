@@ -10,7 +10,7 @@ CREATE TABLE ABADirectory (
 
 INSERT INTO ABADirectory (routingNo, bankName) VALUES
 ('123456780', 'Demo Credit Union'),
-('051000033', 'Sample Bank (from Ba''s design samples)'),
+('051000033', 'Sample Bank (from the design samples)'),
 ('021000021', 'JPMorgan Chase Bank, N.A.'),
 ('026009593', 'Bank of America, N.A.'),
 ('121000248', 'Wells Fargo Bank, N.A.'),
