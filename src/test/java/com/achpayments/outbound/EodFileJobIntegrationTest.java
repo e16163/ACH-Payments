@@ -71,7 +71,7 @@ class EodFileJobIntegrationTest {
         jdbc.update("DELETE FROM AppLog WHERE logMesg LIKE '%FILE\\_%'"); // fileIDs repeat from one test to the next
         jdbc.update("DELETE FROM OfacSdnName WHERE sdnName = 'LATER LISTED PERSON'");
         jdbc.update("DELETE t FROM " + orig + ".ACHOrigTransaction t JOIN " + orig + ".ACHOrigFile f ON f.fileID = t.fileID WHERE f.processID LIKE 'EOD-%'");
-        // The audit trail refuses DELETE, by design. TRUNCATE doesn't fire triggers; put Ba's sample row back.
+        // The audit trail refuses DELETE, by design. TRUNCATE doesn't fire triggers; put the sample row back.
         jdbc.execute("TRUNCATE TABLE " + orig + ".ACHOrigFedAction");
         jdbc.update("INSERT INTO " + orig + ".ACHOrigFedAction (fileID, processID, actionID, actionTm, lastModBy) "
                 + "VALUES ('FILE_20261102_01', 'PROC_FED_01', 401, '2026-11-02 08:30:00', 'FED_BATCH_SYS')");

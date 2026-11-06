@@ -40,7 +40,7 @@ public class ReceivingController {
     public record Page(List<Overview> items, long total, int page, int limit) {
     }
 
-    /** Ba's 24 ACHRecvTransaction columns. */
+    /** The design's 24 ACHRecvTransaction columns. */
     public record Detail(long tranID, String transferSerNo, int transferVersion, String fileID, String batchID, int creditFlag,
             String tranCode, String companyName, String companyID, String companyDiscData, String stdEntryCode, String companyEntryDesc,
             LocalDate descriptiveDt, LocalDate effectiveDt, LocalDate settlementDt, String originatorID, BigDecimal amount, String recvAcctID,
@@ -62,7 +62,7 @@ public class ReceivingController {
         this.recv = recv;
     }
 
-    /** Newest first. The counts come from the entries, which also covers Ba's sample file, whose totals are 0. */
+    /** Newest first. The counts come from the entries, which also covers the sample file, whose totals are 0. */
     @GetMapping("/files")
     public List<FileRow> files() {
         return jdbc.query("SELECT f.fileID, f.fileName, f.fileHeaderDt, f.fileHeaderTm, f.fedStatus, f.processStatus, "
@@ -84,7 +84,7 @@ public class ReceivingController {
         return engine.ingestAll();
     }
 
-    /** Steps 4-5, from Ba's SQL. It filters by file, so the page's file comes as fileID; without one, every file is listed. */
+    /** Steps 4-5, from the design's SQL. It filters by file, so the page's file comes as fileID; without one, every file is listed. */
     @GetMapping("/transactions")
     public Page transactions(@RequestParam(required = false) String fileID, @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int limit, @RequestParam(defaultValue = "traceNo") String sortBy,

@@ -84,7 +84,7 @@ class TransferServiceIntegrationTest {
 
     @Test
     void exactlyAtTheDailyLimitPassesOneCentOverIsRejectedWithBasMessage() {
-        // Ba's DAILY_CHECKING_DEBIT_CAP: CHECKING, 1 day, $25,000
+        // The design's DAILY_CHECKING_DEBIT_CAP: CHECKING, 1 day, $25,000
         assertEquals(new BigDecimal("25000.00"), service.preview(MEMBER, request("25000.00")).amount());
         TransferRejected e = assertThrows(TransferRejected.class, () -> service.preview(MEMBER, request("25000.01")));
         assertEquals(Kind.LIMIT, e.kind());
@@ -199,7 +199,7 @@ class TransferServiceIntegrationTest {
                 + orig + ".ACHOriginatorTransfer WHERE transferSerNo = ?", receipt.transferSerNo());
         assertEquals(true, row.get("recurringFlag"));
         assertEquals("MONTHLY", row.get("pmtFrequency"));
-        assertEquals(1, row.get("transferReqNo")); // Ba: the position in the series
+        assertEquals(1, row.get("transferReqNo")); // Design: the position in the series
         assertEquals(5, row.get("transferReqRemaining"));
         assertEquals(6, receipt.transferCount());
     }

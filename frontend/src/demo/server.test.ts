@@ -77,7 +77,7 @@ describe('demo transfer (UC-ACH-ORG-01)', () => {
     expect((await error(demoApi('/routing/051000031'))).message).toBe('Invalid routing number. Please check the 9-digit ABA number.')
   })
 
-  it("shows Ba's EX-02 limit message over $25,000 from checking", async () => {
+  it("shows the design's EX-02 limit message over $25,000 from checking", async () => {
     const e = await error(post('/transfers/preview', await transfer({ amount: '25000.01' })))
     expect(e.kind).toBe('LIMIT')
     expect(e.message).toBe('This transfer exceeds your daily external limit of $25,000. Please reduce the amount or contact support.')
@@ -143,7 +143,7 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
   const files = () => demoApi<File[]>(`${BASE}/files`)
   const page = (fileID: string, n = 1) => demoApi<Page>(`${BASE}/transactions?fileID=${fileID}&page=${n}&limit=10&sortBy=traceNo&sortDir=ASC`)
 
-  it("starts with Ba's sample file for operators and admins, and keeps members out", async () => {
+  it("starts with the sample file for operators and admins, and keeps members out", async () => {
     await asOperator()
     expect(await files()).toEqual([expect.objectContaining({ fileID: 'ACHFILE-88392', processStatus: 'PROCESSED', entryCount: 1, totalCreditAmt: 3450.5 })])
     await demoLogin('admin', 'admin123')

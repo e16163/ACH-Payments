@@ -8,7 +8,7 @@ describe('routing check digit (EX-01)', () => {
   it('accepts valid numbers and rejects bad ones', () => {
     expect(isValidRouting('021000021')).toBe(true)
     expect(isValidRouting('051000033')).toBe(true)
-    expect(isValidRouting('051000031')).toBe(false) // Ba's sample: bad check digit
+    expect(isValidRouting('051000031')).toBe(false) // The sample: bad check digit
     expect(isValidRouting('02100002')).toBe(false)
     expect(isValidRouting('02100002A')).toBe(false)
   })

@@ -24,7 +24,7 @@ import com.achpayments.nacha.NachaDates;
 public class ReceivingFileStore {
 
     private static final String SOURCE_ID = "FED_ACH_INBOUND";
-    private static final String SYSTEM_SETTLED = "SETTLED"; // UC-ACH-RCV-02 step 2 and Ba's sample row
+    private static final String SYSTEM_SETTLED = "SETTLED"; // UC-ACH-RCV-02 step 2 and the sample row
     private static final DateTimeFormatter DAY = DateTimeFormatter.BASIC_ISO_DATE;
 
     private final JdbcTemplate jdbc;
@@ -49,7 +49,7 @@ public class ReceivingFileStore {
         return fileID;
     }
 
-    /** EX-03: Ba's key is the File Creation Date, File Creation Time and File ID Modifier. */
+    /** EX-03: The design's key is the File Creation Date, File Creation Time and File ID Modifier. */
     public boolean isDuplicate(String fileID, FileHeader h) {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM " + recv + ".ACHRecvFile WHERE fileHeaderDt = ? AND fileHeaderTm = ? "
                 + "AND fileIDModifier = ? AND fileID <> ?", Integer.class, NachaDates.date(h.fileCreationDate()),

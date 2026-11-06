@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class FedInboundSimulator {
 
-    /** Ba's sample files, rebuilt as valid files (docs/DB-MODEL.md), and the two that show his exceptions. */
+    /** The sample files, rebuilt as valid files (docs/DB-MODEL.md), and the two that show the exceptions. */
     public enum Sample {
         PAYROLL("sample1-payroll.ach"),
         RETAIL("sample2-retail.ach"),

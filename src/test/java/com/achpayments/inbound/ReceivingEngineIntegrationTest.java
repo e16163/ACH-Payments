@@ -125,7 +125,7 @@ class ReceivingEngineIntegrationTest {
     }
 
     @Test
-    void sampleOneIsSavedToBasThreeTables() throws IOException {
+    void sampleOneIsSavedToTheThreeTables() throws IOException {
         Result r = receive(Sample.PAYROLL);
         assertEquals(ReceivingEngine.VALIDATED, r.processStatus());
         assertEquals(5, count("ACHRecvBatch", r.fileID()));
@@ -163,7 +163,7 @@ class ReceivingEngineIntegrationTest {
     }
 
     @Test
-    void mapsAnEntryAsInBasFieldList() throws IOException {
+    void mapsAnEntryAsInTheFieldList() throws IOException {
         Result r = receive(Sample.PAYROLL);
         Page page = controller.transactions(r.fileID(), 1, 10, "traceNo", "ASC");
         Detail d = controller.transaction(page.items().get(0).tranID());
@@ -390,7 +390,7 @@ class ReceivingEngineIntegrationTest {
     }
 
     @Test
-    void theFileListStillShowsBasSampleFile() {
+    void theFileListStillShowsTheDesignSampleFile() {
         FileRow sample = controller.files().stream().filter(f -> f.fileID().equals("ACHFILE-88392")).findFirst().orElseThrow();
         assertEquals("PROCESSED", sample.processStatus());
         assertEquals(1, sample.entryCount());

@@ -1,9 +1,9 @@
--- Receiving database (Ba's "ACH Receiving Processing Engine" tables), in ${recv} (ach_receiving).
--- Part 1: Ba's CREATE TABLEs, copied unchanged from his design doc (only the database prefix added).
--- Part 2: additions approved in docs/DB-MODEL.md section 0. Nothing Ba defined is changed.
+-- Receiving database (the design's "ACH Receiving Processing Engine" tables), in ${recv} (ach_receiving).
+-- Part 1: The design's CREATE TABLEs, copied unchanged from the design doc (only the database prefix added).
+-- Part 2: additions approved in docs/DB-MODEL.md section 0. Nothing the designer defined is changed.
 
 
--- Ba: ACHRecvAccount
+-- Design: ACHRecvAccount
 CREATE TABLE ${recv}.ACHRecvAccount (
     recvAcctSerNo VARCHAR(30) NOT NULL,
     recvAcctVersion INT NOT NULL DEFAULT 1,
@@ -29,7 +29,7 @@ CREATE TABLE ${recv}.ACHRecvAccount (
     INDEX IX_ACHRecvAccount_Status (acctStatus)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHRecvFile
+-- Design: ACHRecvFile
 CREATE TABLE ${recv}.ACHRecvFile (
     fileID VARCHAR(30) NOT NULL,
     processID VARCHAR(30) NULL,
@@ -51,7 +51,7 @@ CREATE TABLE ${recv}.ACHRecvFile (
     INDEX IX_ACHRecvFile_FedStatus (fedStatus)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHRecvBatch
+-- Design: ACHRecvBatch
 CREATE TABLE ${recv}.ACHRecvBatch (
     batchID VARCHAR(30) NOT NULL,
     fileID VARCHAR(30) NOT NULL,
@@ -78,7 +78,7 @@ CREATE TABLE ${recv}.ACHRecvBatch (
     INDEX IX_ACHRecvBatch_EffectiveDt (effectiveDt)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHRecvTransaction
+-- Design: ACHRecvTransaction
 CREATE TABLE ${recv}.ACHRecvTransaction (
     tranID BIGINT AUTO_INCREMENT NOT NULL,
     transferSerNo VARCHAR(30) NULL,
@@ -115,7 +115,7 @@ CREATE TABLE ${recv}.ACHRecvTransaction (
     INDEX IX_ACHRecvTransaction_FedStatus (fedStatus)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHRecvReturn
+-- Design: ACHRecvReturn
 CREATE TABLE ${recv}.ACHRecvReturn (
     returnID BIGINT AUTO_INCREMENT NOT NULL,
     tranID BIGINT NULL,
@@ -142,7 +142,7 @@ CREATE TABLE ${recv}.ACHRecvReturn (
     INDEX IX_ACHRecvReturn_ReturnDt (returnDt)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHRecvNOC
+-- Design: ACHRecvNOC
 CREATE TABLE ${recv}.ACHRecvNOC (
     nocID BIGINT AUTO_INCREMENT NOT NULL,
     tranID BIGINT NULL,
@@ -158,7 +158,7 @@ CREATE TABLE ${recv}.ACHRecvNOC (
     INDEX IX_ACHRecvNOC_NocCode (nocCode)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHRecvAcctSubs
+-- Design: ACHRecvAcctSubs
 CREATE TABLE ${recv}.ACHRecvAcctSubs (
     acctSubsID BIGINT AUTO_INCREMENT NOT NULL,
     nocAcctNo VARCHAR(34) NOT NULL,
@@ -178,7 +178,7 @@ CREATE TABLE ${recv}.ACHRecvAcctSubs (
     INDEX IX_ACHRecvAcctSubs_NocAcct (nocAcctNo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Ba: ACHRecvTransCodeSubs
+-- Design: ACHRecvTransCodeSubs
 CREATE TABLE ${recv}.ACHRecvTransCodeSubs (
     nocID BIGINT NOT NULL,
     nocAcctNo VARCHAR(34) NOT NULL,
@@ -235,7 +235,7 @@ ALTER TABLE ${recv}.ACHRecvAcctSubs
 ALTER TABLE ${recv}.ACHRecvTransCodeSubs
     ADD CONSTRAINT FK_ACHRecvTransCodeSubs_ACHRecvNOC FOREIGN KEY (nocID) REFERENCES ${recv}.ACHRecvNOC(nocID);
 
--- M1: Receiving UI actions (accept, correct, intercept, recall), same shape as Ba's action tables
+-- M1: Receiving UI actions (accept, correct, intercept, recall), same shape as the design's action tables
 CREATE TABLE ${recv}.ACHRecvAction (
     tranID BIGINT NOT NULL,
     processID VARCHAR(30) NOT NULL,

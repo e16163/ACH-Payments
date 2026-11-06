@@ -49,7 +49,7 @@ class MemberAccessTest {
     }
 
     private static final String MEMBER = "member"; // the login name
-    private static final String MEMBER_NO = "M10982347"; // Ba's sample member, from app.member-number
+    private static final String MEMBER_NO = "M10982347"; // The sample member, from app.member-number
 
     @Autowired
     MockMvc mvc;

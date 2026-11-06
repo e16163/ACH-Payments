@@ -15,7 +15,7 @@ import org.springframework.test.context.ActiveProfiles;
 
 import com.achpayments.nacha.AchFileValidator;
 
-/** D6: Ba's sample rows are loaded (V7) with his values. Needs TEST_JDBC_URL (README section 7). */
+/** D6: the sample rows are loaded (V7) with the values. Needs TEST_JDBC_URL (README section 7). */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "TEST_JDBC_URL", matches = ".+")
 @ActiveProfiles("dbtest")

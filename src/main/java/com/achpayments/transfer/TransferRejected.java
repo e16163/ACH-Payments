@@ -1,6 +1,6 @@
 package com.achpayments.transfer;
 
-/** A transfer that can't go ahead. {@code kind} tells the UI how to show it (e.g. LIMIT is Ba's EX-02 modal). */
+/** A transfer that can't go ahead. {@code kind} tells the UI how to show it (e.g. LIMIT is the design's EX-02 modal). */
 public class TransferRejected extends RuntimeException {
 
     public enum Kind { INVALID, LIMIT, NOT_VERIFIED, FUNDS }

@@ -1,18 +1,18 @@
-# Database Model: Review of Ba's Design and Plan
+# Database Model: Review of the design's Design and Plan
 
-Source: Ba's [ACH Payments System Design](design/ACH-Payments-System-Design.docx) ("Database Model" section) and the [architecture diagram](design/architecture-diagram.png).
+Source: The design's [ACH Payments System Design](design/ACH-Payments-System-Design.docx) ("Database Model" section) and the [architecture diagram](design/architecture-diagram.png).
 
-Ba's design replaces the first-pass model in [PLAN.md section 4](PLAN.md#4-database-design-first-pass). **Ba's table and column names are the standard from now on**, e.g. `ACHOrigTransaction`, `traceNo`, `lastModBy`. This file covers four things:
-1. How Ba's tables map to the system's components.
+the design replaces the first-pass model in [PLAN.md section 4](PLAN.md#4-database-design-first-pass). **The design's table and column names are the standard from now on**, e.g. `ACHOrigTransaction`, `traceNo`, `lastModBy`. This file covers four things:
+1. How the design's tables map to the system's components.
 2. What was tested.
 3. What needs fixing or adding.
-4. The questions Ba needs to answer before we write the real schema.
+4. The questions the designer needs to answer before we write the real schema.
 
 ---
 
-## 0. Decisions (2026-11-03): follow Ba's design
+## 0. Decisions (2026-11-03): follow the design
 
-**Rule: Ba's design wins.** His table names, column names, types and keys stay exactly as he wrote them. We only **add** what's missing: columns, foreign keys, indexes and tables needed by a spec'd screen or a Nacha rule. Any fix in section 3 that would *change* something Ba defined is **dropped**, and its problem is handled in code instead.
+**Rule: the design wins.** The table names, column names, types and keys stay exactly as written. We only **add** what's missing: columns, foreign keys, indexes and tables needed by a spec'd screen or a Nacha rule. Any fix in section 3 that would *change* something the designer defined is **dropped**, and its problem is handled in code instead.
 
 ### Answers to section 6
 
@@ -21,19 +21,19 @@ Ba's design replaces the first-pass model in [PLAN.md section 4](PLAN.md#4-datab
 | Q1 | ✅ Yes. `ACHOrigReturn`/`ACHOrigNOC` = ones we **receive** on payments we sent. `ACHRecvReturn`/`ACHRecvNOC` = ones we **send back** on payments we received. |
 | Q2 | ✅ Yes. `ACHRecvAccount` = our members' accounts. `ACHOrigRecvAccount` = outside accounts members pay. |
 | Q3 | ✅ Yes. Each run of an `ACHOriginatorTransfer` creates one `ACHOrigTransaction` (same `transferSerNo`/`transferVersion`). Business payroll batches go straight to `ACHOrigBatch` + `ACHOrigTransaction`. |
-| Q4 | ✅ A reversal or retry is a **new `ACHOrigTransaction` row**, with an added `parentTranID` column pointing to the original. Ba's action tables stay keyed as he wrote them. |
-| Q5 | ✅ All fixes and tables that **add** something are approved. Fixes that **change** Ba's definitions are dropped (table below). |
+| Q4 | ✅ A reversal or retry is a **new `ACHOrigTransaction` row**, with an added `parentTranID` column pointing to the original. The design's action tables stay keyed as written. |
+| Q5 | ✅ All fixes and tables that **add** something are approved. Fixes that **change** The design's definitions are dropped (table below). |
 | Q6 | ✅ Account numbers are plain text in the DB, with only the last 4 digits shown on screens. Encryption is revisited in roadmap step 16. |
-| Q7 | ✅ **Separate databases, as in Ba's diagram.** They live on one MySQL server, so cross-database foreign keys and transactions still work. See the layout below. |
-| Q8 | ✅ Keep `Process` as Ba wrote it. It holds a type label such as `ORIGINATION`, `RETURN` or `REVERSAL`; `processID`/`processName` identify the job run. |
+| Q7 | ✅ **Separate databases, as in the design diagram.** They live on one MySQL server, so cross-database foreign keys and transactions still work. See the layout below. |
+| Q8 | ✅ Keep `Process` as the designer wrote it. It holds a type label such as `ORIGINATION`, `RETURN` or `REVERSAL`; `processID`/`processName` identify the job run. |
 
-### Database layout (Ba's diagram + his doc's sections)
+### Database layout (the design diagram + the doc's sections)
 
 | MySQL database | Tables |
 | --- | --- |
-| `ach_payments` (exists) | Ba's "Application Configuration and Logging": `AppParam`, `AppLog`. Shared and simulated pieces added later: `BankingCalendar`, `SimCoreAccount`, `ACHMemoPost`, `ACHEodPostingFile`, `OfacSdnName`, `ABADirectory`, `AppUser`/`AppRole`. |
-| `ach_receiving` | Ba's "ACH Receiving" tables (`ACHRecv*`) + `ACHRecvAction`, `ACHRecvReturnRequest`, `ACHRecvAddenda` |
-| `ach_origination` | Ba's "ACH Origination" and "Back Office" tables: `ACHOrig*`, `ACHOriginator`, `ACHOriginatorTransfer`, `Company`, `Contact`, `Source`, `ACHOperator`, `Action`, the action tables, + `ACHOrigAddenda` |
+| `ach_payments` (exists) | The design's "Application Configuration and Logging": `AppParam`, `AppLog`. Shared and simulated pieces added later: `BankingCalendar`, `SimCoreAccount`, `ACHMemoPost`, `ACHEodPostingFile`, `OfacSdnName`, `ABADirectory`, `AppUser`/`AppRole`. |
+| `ach_receiving` | The design's "ACH Receiving" tables (`ACHRecv*`) + `ACHRecvAction`, `ACHRecvReturnRequest`, `ACHRecvAddenda` |
+| `ach_origination` | The design's "ACH Origination" and "Back Office" tables: `ACHOrig*`, `ACHOriginator`, `ACHOriginatorTransfer`, `Company`, `Contact`, `Source`, `ACHOperator`, `Action`, the action tables, + `ACHOrigAddenda` |
 
 Flyway manages all three (`spring.flyway.schemas`), and `ach_app` gets privileges on each.
 
@@ -41,66 +41,66 @@ Flyway manages all three (`spring.flyway.schemas`), and `ach_app` gets privilege
 
 | Fix | Kept? | Note |
 | --- | --- | --- |
-| F1 `descriptiveDt` → text | ❌ Changes Ba's type | Keep `DATE`. Inbound values that aren't a date (e.g. `NOV 26`) are stored as `NULL`, which Ba's column allows, so the file still loads. |
+| F1 `descriptiveDt` → text | ❌ Changes the design's type | Keep `DATE`. Inbound values that aren't a date (e.g. `NOV 26`) are stored as `NULL`, which the design's column allows, so the file still loads. |
 | F2 `recvRtn` | ✅ Adds | |
-| F3 `individualID`, `addendaInd` | ✅ Adds | Ba's `transactionDiscData` stays as he defined it |
+| F3 `individualID`, `addendaInd` | ✅ Adds | The design's `transactionDiscData` stays as defined |
 | F4 `serviceClassCode` | ✅ Adds | |
 | F5 foreign keys | ✅ Adds | |
-| F6 cascade → restrict | ❌ Changes Ba's FK | Keep `ON DELETE CASCADE`. The app never deletes files. |
-| F7 unique `traceNo` | ❌ Changes Ba's index | Keep Ba's index. The trace number generator guarantees uniqueness in code, with a test. |
-| F8 rebuild `ACHRecvFile` | ❌ Changes Ba's columns | Keep Ba's columns. `fedStatus` holds `RECEIVED`/`VALIDATED`/`PROCESSED`/`REJECTED`, and parse errors go to `AppLog`. |
+| F6 cascade → restrict | ❌ Changes the design's FK | Keep `ON DELETE CASCADE`. The app never deletes files. |
+| F7 unique `traceNo` | ❌ Changes the design's index | Keep the design's index. The trace number generator guarantees uniqueness in code, with a test. |
+| F8 rebuild `ACHRecvFile` | ❌ Changes the design's columns | Keep the design's columns. `fedStatus` holds `RECEIVED`/`VALIDATED`/`PROCESSED`/`REJECTED`, and parse errors go to `AppLog`. |
 | F9 `immedDest`, `immedOrigin` | ✅ Adds | |
-| F10 drop `originatorID`/`transferSerNo` on received entries | ❌ Changes Ba's columns | Keep them. `originatorID` is filled from the batch's Company ID, and `transferSerNo` is `NULL`. *Adding* `recvAcctSerNo`/`recvAcctVersion` is kept ✅. Status uses Ba's `fedStatus`. |
-| F11 action-table key + reason | ❌ Changes Ba's PK | Keep Ba's key. `processID` tells repeated runs apart. |
-| F12 `parentTranID` | ✅ Adds (Q4) | Ba's action tables are unchanged |
-| F13 `ACHOrigReturnAction` | ✅ Follows Ba | DDL written from his field list, in the same shape as his other action tables |
-| S1 extra limit-rule columns | ❌ Not needed | Ba's `ACHOrigLimitRule` is used as he wrote it (account type + days) |
-| S2 `AppParam.effectiveDt` | ❌ Changes Ba's key | |
+| F10 drop `originatorID`/`transferSerNo` on received entries | ❌ Changes the design's columns | Keep them. `originatorID` is filled from the batch's Company ID, and `transferSerNo` is `NULL`. *Adding* `recvAcctSerNo`/`recvAcctVersion` is kept ✅. Status uses the design's `fedStatus`. |
+| F11 action-table key + reason | ❌ Changes the design's PK | Keep the design's key. `processID` tells repeated runs apart. |
+| F12 `parentTranID` | ✅ Adds (Q4) | The design's action tables are unchanged |
+| F13 `ACHOrigReturnAction` | ✅ Follows the design | DDL written from the field list, in the same shape as the other action tables |
+| S1 extra limit-rule columns | ❌ Not needed | The design's `ACHOrigLimitRule` is used as written (account type + days) |
+| S2 `AppParam.effectiveDt` | ❌ Changes the design's key | |
 | S3, S4, S5 NOC/return deadline and status columns | ✅ Adds | Needed for Nacha deadlines (PLAN 5.7, 5.10) |
 | S6 `contactID` on `ACHOriginator` | ✅ Adds | |
-| S7 account number widths | ❌ Changes Ba's types | |
-| S8 rename `thridPartyFlag` | ❌ Changes Ba's name | The spelling stays as Ba wrote it |
-| S9 `Process` | ✅ Follows Ba (Q8) | |
-| S10 `TransCodeSubs` key | ❌ Changes Ba's PK | |
+| S7 account number widths | ❌ Changes the design's types | |
+| S8 rename `thridPartyFlag` | ❌ Changes the design's name | The spelling stays as the designer wrote it |
+| S9 `Process` | ✅ Follows the design (Q8) | |
+| S10 `TransCodeSubs` key | ❌ Changes the design's PK | |
 | M1–M8 new tables | ✅ Adds | Placed per the layout above |
-| D5 finding: `fileID` FK skipped when `batchID` is NULL | ✅ Adds (V6) | A MySQL 26.10 bug: an FK column that leads Ba's `(fileID, batchID)` index isn't checked when the other column is NULL. V6 adds `CHECK (fileID IS NULL OR batchID IS NOT NULL)` on both transaction tables (a NACHA rule anyway: every entry in a file is in a batch), so the FKs always run. Ba's definitions are unchanged. |
+| D5 finding: `fileID` FK skipped when `batchID` is NULL | ✅ Adds (V6) | A MySQL 26.10 bug: an FK column that leads the design's `(fileID, batchID)` index isn't checked when the other column is NULL. V6 adds `CHECK (fileID IS NULL OR batchID IS NOT NULL)` on both transaction tables (a NACHA rule anyway: every entry in a file is in a batch), so the FKs always run. The design's definitions are unchanged. |
 
 ### Changes for UC-ACH-EOD-01 (V11, V12)
 
 | Change | Marked | Why |
 | --- | --- | --- |
 | `ACHOrigTransaction.recvRoutingNo CHAR(9) NULL` | Adds | A Type 6 record needs the receiving bank's routing number, and the table had none. |
-| `ofacStatus` `CLEARED` → `OFAC_PASSED`, `processStatus` `PENDING` → `PENDING_BATCH` | Ba's new names | From his UC-ACH-EOD-01. His sample row is updated. A flagged transfer stays `PENDING`. A transfer in a file is `PROCESSED`. |
-| `transferReqNo` = position in the series, `transferReqRemaining` = what's left | FIX | The app stored the total in both. Ba's sample row (1 and 0) was already right. |
+| `ofacStatus` `CLEARED` → `OFAC_PASSED`, `processStatus` `PENDING` → `PENDING_BATCH` | The design's new names | From the UC-ACH-EOD-01. The sample row is updated. A flagged transfer stays `PENDING`. A transfer in a file is `PROCESSED`. |
+| `transferReqNo` = position in the series, `transferReqRemaining` = what's left | FIX | The app stored the total in both. the sample row (1 and 0) was already right. |
 | `AppParam`: `FED_IMMEDIATE_DEST`, `ORIG_COMPANY_NAME`, `FED_SIM_FAIL_ATTEMPTS` | Adds | Values for the file and the Fed simulator. |
-| `Action`: 402 `FILE_QUEUED`, 403 `FED_SEND_FAILED`, 404 `FILE_ERROR` | Adds | Next to Ba's 401 `FED_SEND`. |
-| Triggers `TR_ACHOrigFedAction_NoUpdate`, `_NoDelete` (V12) | Adds | Ba: "an unalterable audit trail". Needs the root setting in README section 4. |
+| `Action`: 402 `FILE_QUEUED`, 403 `FED_SEND_FAILED`, 404 `FILE_ERROR` | Adds | Next to the design's 401 `FED_SEND`. |
+| Triggers `TR_ACHOrigFedAction_NoUpdate`, `_NoDelete` (V12) | Adds | Design: "an unalterable audit trail". Needs the root setting in README section 4. |
 
 ### Changes for UC-ACH-RCV-01 and UC-ACH-RCV-02 (V13)
 
 | Change | Marked | Why |
 | --- | --- | --- |
-| `ACHRecvFile.processStatus VARCHAR(20)` | Adds | Ba's use case uses it, and `REJECTED_SIG_FAIL` doesn't fit in `fedStatus VARCHAR(15)`. This replaces the "F8" note above: `fedStatus` is now `RECEIVED`. |
+| `ACHRecvFile.processStatus VARCHAR(20)` | Adds | the use case uses it, and `REJECTED_SIG_FAIL` doesn't fit in `fedStatus VARCHAR(15)`. This replaces the "F8" note above: `fedStatus` is now `RECEIVED`. |
 | `ACHRecvTransaction.processStatus VARCHAR(15)` | Adds | RCV-01 marks entries `UNPROCESSED`, RCV-02 sets `fedStatus` to `SETTLED`. Two columns keep both. |
 | `ACHRecvFile` index on date, time and modifier | Adds | EX-03. Not unique: a duplicate is recorded too. |
-| `Source`: `FED_ACH_INBOUND`; `AppParam`: `FED_RECV_FILE_TIME`, `RDFI_ROUTING_NO` | Adds | Values Ba's use cases need. |
-| `transferSerNo` on received entries is `TRF-yyyyMMdd-nnnn` | Ba's new rule | RCV-02 generates it; this replaces `NULL` in "F10" above. |
+| `Source`: `FED_ACH_INBOUND`; `AppParam`: `FED_RECV_FILE_TIME`, `RDFI_ROUTING_NO` | Adds | Values the use cases need. |
+| `transferSerNo` on received entries is `TRF-yyyyMMdd-nnnn` | The design's new rule | RCV-02 generates it; this replaces `NULL` in "F10" above. |
 
-**Ba's two sample files (`src/main/resources/fed-samples`), rebuilt, each change a FIX:**
-- Word collapsed the spaces, so no record was 94 characters. Rebuilt by field position; all 100 entries keep his account, amount, ID and name.
+**The design's two sample files (`src/main/resources/fed-samples`), rebuilt, each change a FIX:**
+- Word collapsed the spaces, so no record was 94 characters. Rebuilt by field position; all 100 entries keep the account, amount, ID and name.
 - Destination and entry routing `021000021` and `031000030` (which fails its check digit) → our `123456780`.
-- Batch and File Control records rebuilt from the entries. His stated totals didn't match: Sample 1 batch 3 ($26,750 vs $26,700), Sample 2 batches 1, 4 and 5 ($895 vs $945, $1,625 vs $1,670, $2,675 vs $2,670).
-- Trace numbers → the batch's 8-digit ODFI + a 7-digit sequence. Each account is the first 12 digits of his run; the zeros after it belong to the amount.
-- `sample3-out-of-balance.ach` is Sample 1 with his wrong $26,750 kept and modifier `C`, to show EX-02.
-- Ba's spec lists Immediate Destination at 03-12 and Amount at 30-41. Nacha's are 04-13 and 30-39, which the code uses.
+- Batch and File Control records rebuilt from the entries. The stated totals didn't match: Sample 1 batch 3 ($26,750 vs $26,700), Sample 2 batches 1, 4 and 5 ($895 vs $945, $1,625 vs $1,670, $2,675 vs $2,670).
+- Trace numbers → the batch's 8-digit ODFI + a 7-digit sequence. Each account is the first 12 digits of the digit run; the zeros after it belong to the amount.
+- `sample3-out-of-balance.ach` is Sample 1 with the wrong $26,750 kept and modifier `C`, to show EX-02.
+- the design's spec lists Immediate Destination at 03-12 and Amount at 30-41. Nacha's are 04-13 and 30-39, which the code uses.
 
 ---
 
-## 1. Ba's tables by component
+## 1. The design's tables by component
 
-Ba defines 31 tables. 30 come with `CREATE TABLE` SQL. `ACHOrigReturnAction` has a field list but no SQL.
+The designer defines 31 tables. 30 come with `CREATE TABLE` SQL. `ACHOrigReturnAction` has a field list but no SQL.
 
-| Component (spec / diagram) | Ba's tables |
+| Component (spec / diagram) | The design's tables |
 | --- | --- |
 | **Origination Engine & UI** | `ACHOrigTransaction`, `ACHOriginatorTransfer`, `ACHOrigRecvAccount`, `ACHOriginator`, `Company`, `Contact`, `ACHOrigLimitRule`, `ACHOrigFile`, `ACHOrigBatch`, `Source`, `ACHOperator` |
 | **Origination Back Office** (Return, Reversal, Resubmission and NOC engines and UIs) | `Action`, `ACHOrigReturn`, `ACHOrigNOC`, `ACHOrigAcctSubs`, `ACHOrigTransCodeSubs`, `ACHOrigReturnAction`, `ACHOrigResubAction`, `ACHOrigNOCAction`, `ACHOrigReversalAction`, `ACHOrigFedAction` |
@@ -108,7 +108,7 @@ Ba defines 31 tables. 30 come with `CREATE TABLE` SQL. `ACHOrigReturnAction` has
 | **Configuration & logging** | `AppParam`, `AppLog` |
 | Memo Posting, EOD Posting, Screening/Fraud | *No tables yet* (see 4) |
 
-**How we read Ba's design.** Each point below needs Ba to confirm it (see Q1–Q3):
+**How we read the design.** Each point below needs the designer to confirm it (see Q1–Q3):
 - **NOCs:**
   - `ACHOrigNOC` holds NOCs we **receive** about entries we originated.
   - `ACHOrigAcctSubs` and `ACHOrigTransCodeSubs` apply those corrections to future entries.
@@ -135,8 +135,8 @@ All 30 `CREATE TABLE` statements and all 13 sample `INSERT`s from the doc were r
 
 | Check | Result |
 | --- | --- |
-| Ba's 30 `CREATE TABLE` statements | ✅ All run with no errors |
-| Ba's 13 sample `INSERT` statements | ✅ All run with no errors |
+| The design's 30 `CREATE TABLE` statements | ✅ All run with no errors |
+| The design's 13 sample `INSERT` statements | ✅ All run with no errors |
 | Foreign keys actually created | ⚠️ Only 3: `ACHOrigBatch→ACHOrigFile`, `ACHRecvBatch→ACHRecvFile`, `Company→ACHOriginator` |
 | Inbound batch whose Company Descriptive Date is `NOV 26` (free text, as real files allow) | ❌ Rejected: `Incorrect date value: 'NOV 26' for column 'descriptiveDt'`. A real inbound file would fail to load. |
 | Two originated entries with the same trace number | ❌ Accepted. Return and NOC matching by trace number would then be ambiguous. |
@@ -147,7 +147,7 @@ The doc contains hidden icon characters pasted from a chat window. They sit in f
 
 ---
 
-## 3. Fixes to Ba's tables
+## 3. Fixes to the design's tables
 
 ### Must fix (would break real processing)
 
@@ -179,17 +179,17 @@ The doc contains hidden icon characters pasted from a chat window. They sit in f
 | S6 | `Contact` | Not linked to anything | Add `contactID` to `ACHOriginator` |
 | S7 | Account columns | `VARCHAR(17)` in transactions but `VARCHAR(34)` in account and substitution tables. Domestic ACH allows at most 17. | Use `VARCHAR(17)` everywhere. Encryption (Q6) may change this. |
 | S8 | `ACHOrigRecvAccount`, `*AcctSubs` | `thridPartyFlag` is misspelled | Rename it to `thirdPartyFlag` now, before any code uses it |
-| S9 | `ACHOrigBatch`, `ACHRecvBatch` | `Process`, `processID` and `processName` overlap, and `Process` is capitalized unlike the rest | Ask Ba what `Process` holds |
+| S9 | `ACHOrigBatch`, `ACHRecvBatch` | `Process`, `processID` and `processName` overlap, and `Process` is capitalized unlike the rest | Ask the designer what `Process` holds |
 | S10 | `*TransCodeSubs` | The primary key `(nocID, nocAcctNo, nocRtn)` is unique on `nocID` alone. Lookups will be by account, routing number and company. | Primary key `nocID`, plus an index on `(nocAcctNo, nocRtn, companyID)` |
 
-**Accepted from Ba:**
+**Accepted from Design:**
 - **`DECIMAL(13,2)` for money.** It's exact like integer cents, so PLAN.md assumption A7 is updated to match.
 - **The PascalCase/camelCase naming.**
 - **Separate `Orig`/`Recv` tables.**
 
 ---
 
-## 4. Tables the spec needs that aren't in Ba's model yet
+## 4. Tables the spec needs that aren't in the design's model yet
 
 | # | Needed by | Proposed table |
 | --- | --- | --- |
@@ -202,7 +202,7 @@ The doc contains hidden icon characters pasted from a chat window. They sit in f
 | M7 | Screening/fraud (OFAC, AML, limits) | `ofacStatus` is only on `ACHOriginatorTransfer`, so add `screenStatus` to both transaction tables. Fraud alert tables come later (PLAN.md section 6). |
 | M8 | Login, roles, dual control | `AppUser`, `AppRole`, planned for hardening (roadmap step 16) |
 
-Same Day windows and cutoffs fit in `AppParam`, which Ba's sample already does with `FED_FILE_CUTOFF_TIME`, so they don't need a table.
+Same Day windows and cutoffs fit in `AppParam`, which the sample already does with `FED_FILE_CUTOFF_TIME`, so they don't need a table.
 
 ---
 
@@ -239,7 +239,7 @@ erDiagram
 
 ---
 
-## 6. Questions for Ba (✅ all answered: see section 0)
+## 6. Questions for the designer (✅ all answered: see section 0)
 
 1. **Q1:** Is `ACHOrigNOC` for NOCs we receive and `ACHRecvNOC` for NOCs we send (and the same for returns)?
 2. **Q2:** Is `ACHRecvAccount` our members' own accounts, and `ACHOrigRecvAccount` the external accounts they pay?
@@ -254,11 +254,11 @@ erDiagram
 
 ## 7. Plan
 
-1. Write Ba's tables, plus the agreed fixes, as Flyway migrations in `src/main/resources/db/migration/`. Split them by component. `V1__app_param_and_log.sql` (config and logging, in `ach_payments`) ships first, with the Parameter UI ([USE-CASES.md](USE-CASES.md)). After that: `V2__banking_calendar.sql` (`ach_payments`), `V3__receiving.sql` (`ach_receiving`), `V4__origination.sql` and `V5__back_office.sql` (`ach_origination`). Each migration copies Ba's `CREATE TABLE`s unchanged and lists the additions after them as `ALTER TABLE ... ADD`. `BaDesignConformanceTest` checks Ba's columns, keys, indexes and FKs against his original DDL. Only the fixes kept in section 0 are applied.
+1. Write the design's tables, plus the agreed fixes, as Flyway migrations in `src/main/resources/db/migration/`. Split them by component. `V1__app_param_and_log.sql` (config and logging, in `ach_payments`) ships first, with the Parameter UI ([USE-CASES.md](USE-CASES.md)). After that: `V2__banking_calendar.sql` (`ach_payments`), `V3__receiving.sql` (`ach_receiving`), `V4__origination.sql` and `V5__back_office.sql` (`ach_origination`). Each migration copies the design's `CREATE TABLE`s unchanged and lists the additions after them as `ALTER TABLE ... ADD`. `DesignConformanceTest` checks the design's columns, keys, indexes and FKs against the original DDL. Only the fixes kept in section 0 are applied.
    - Verify: the app starts against an empty `ach_payments` and Flyway applies all of them.
 2. Turn the tests in section 2 into automated integration tests.
    - Verify: a file with a free-text descriptive date loads (stored as `NULL`); orphan returns and orphan transactions are rejected by FKs; the trace number generator never repeats.
-3. Load Ba's 13 sample rows as demo seed data. Fix them where the new constraints require it; for example:
+3. Load the design's 13 sample rows as demo seed data. Fix them where the new constraints require it; for example:
    - the sample transfer points to receiving account `REC-883721`, which doesn't exist;
    - the sample routing number `051000031` fails the ABA check digit (weighted sum 58, not a multiple of 10).
    - Verify: they insert cleanly.

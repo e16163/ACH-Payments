@@ -1,5 +1,5 @@
--- Ba's original DDL, copied unchanged from docs/design/ACH-Payments-System-Design.docx (30 CREATE TABLEs).
--- Used by BaDesignConformanceTest to prove our schema keeps every Ba column, type, default and key.
+-- the original DDL, copied unchanged from docs/design/ACH-Payments-System-Design.docx (30 CREATE TABLEs).
+-- Used by DesignConformanceTest to prove our schema keeps every the designer column, type, default and key.
 
 CREATE TABLE ACHOrigTransaction (
     tranID BIGINT AUTO_INCREMENT NOT NULL,

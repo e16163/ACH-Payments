@@ -1,4 +1,4 @@
--- UC-ACH-RCV-01 and UC-ACH-RCV-02: inbound FedACH files. Additions only; Ba's columns are unchanged.
+-- UC-ACH-RCV-01 and UC-ACH-RCV-02: inbound FedACH files. Additions only; the design's columns are unchanged.
 
 -- UC-ACH-RCV-01 uses ACHRecvFile.processStatus, and REJECTED_SIG_FAIL doesn't fit in fedStatus VARCHAR(15).
 -- INGESTING -> VALIDATED, or REJECTED_SIG_FAIL / OUT_OF_BALANCE / DUPLICATE / REJECTED

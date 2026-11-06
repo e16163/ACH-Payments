@@ -10,7 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.achpayments.param.ParamCache;
 
 /**
- * Ba's "Memo Posting Eligibility Engine" (design doc component C, PLAN 5.4): checks the eligibility rules, then
+ * The design's "Memo Posting Eligibility Engine" (design doc component C, PLAN 5.4): checks the eligibility rules, then
  * holds or posts the amount against the account's available balance in the simulated core. Every attempt is
  * recorded in ACHMemoPost. Runs inside the caller's DB transaction when there is one.
  */

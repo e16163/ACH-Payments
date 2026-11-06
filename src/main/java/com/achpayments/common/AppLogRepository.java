@@ -3,7 +3,7 @@ package com.achpayments.common;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-/** Writes rows to Ba's AppLog table. */
+/** Writes rows to the design's AppLog table. */
 @Repository
 public class AppLogRepository {
 

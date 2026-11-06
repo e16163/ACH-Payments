@@ -33,7 +33,7 @@ public class TransferService {
 
     /** USE-CASES T2: the credit union is the originator for retail members' external transfers. */
     static final String CREDIT_UNION_ORIGINATOR = "9000000001";
-    static final BigDecimal MAX_AMOUNT = new BigDecimal("99999999999.99"); // Ba's DECIMAL(13,2)
+    static final BigDecimal MAX_AMOUNT = new BigDecimal("99999999999.99"); // The design's DECIMAL(13,2)
     static final Set<String> FREQUENCIES = Set.of("ONETIME", "WEEKLY", "BIWEEKLY", "MONTHLY");
     static final String NOT_VERIFIED = "We couldn't verify this account for ACH transfers. Check the details or use a different account.";
 
@@ -205,7 +205,7 @@ public class TransferService {
     }
 
     /**
-     * USE-CASES T4, Ba's ACHOrigLimitRule as he wrote it: each active rule for the source account type (or ALL)
+     * USE-CASES T4, the design's ACHOrigLimitRule as written: each active rule for the source account type (or ALL)
      * adds up the member's transfers from that type within its dayNo days (today counts as day 1), plus this one.
      */
     private void checkLimits(String memberNo, String acctType, BigDecimal amount) {
@@ -257,7 +257,7 @@ public class TransferService {
     }
 
     /**
-     * UC-ACH-EOD-01 E4: the next payment of a recurring series, as its own row linked to the first by Ba's
+     * UC-ACH-EOD-01 E4: the next payment of a recurring series, as its own row linked to the first by the design's
      * pTransferSerNo. Its hold is placed when it comes due. Does nothing when the series has no payments left.
      */
     public void scheduleNextPayment(String transferSerNo) {
@@ -284,7 +284,7 @@ public class TransferService {
                 serNo, firstSerNo, next, next, transferSerNo));
     }
 
-    /** Ba's serial format PREFIX-yyyyMMdd-nnnn; retries if another request took the same number first. */
+    /** The design's serial format PREFIX-yyyyMMdd-nnnn; retries if another request took the same number first. */
     private String insertWithNextSerial(String prefix, String table, String column, java.util.function.Consumer<String> insert) {
         String day = prefix + "-" + LocalDate.now(clock).format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
         for (int attempt = 0; attempt < 5; attempt++) {

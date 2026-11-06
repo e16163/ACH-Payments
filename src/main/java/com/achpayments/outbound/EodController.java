@@ -76,7 +76,7 @@ public class EodController {
                 pending, java.util.stream.Stream.concat(flagged.stream(), rejected.stream()).toList(), files);
     }
 
-    /** Run now. Ba's step 2 allows a "scheduled business date", which is what lets a demo send a future-dated transfer. */
+    /** Run now. Design step 2 allows a "scheduled business date", which is what lets a demo send a future-dated transfer. */
     @PostMapping("/api/eod/run")
     public EodFileJob.RunResult run(@RequestBody RunRequest body) {
         if (body.businessDate() == null) {

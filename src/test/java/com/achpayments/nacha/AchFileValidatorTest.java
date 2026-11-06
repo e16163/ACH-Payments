@@ -28,7 +28,7 @@ class AchFileValidatorTest {
     void routingCheckDigit() {
         assertTrue(AchFileValidator.isValidRouting("256074974"));
         assertTrue(AchFileValidator.isValidRouting("021000021"));
-        assertFalse(AchFileValidator.isValidRouting("051000031")); // Ba's sample routing number (USE-CASES T9)
+        assertFalse(AchFileValidator.isValidRouting("051000031")); // The sample routing number (USE-CASES T9)
         assertFalse(AchFileValidator.isValidRouting("25607497"));
         assertFalse(AchFileValidator.isValidRouting("25607497X"));
     }
