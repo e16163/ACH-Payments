@@ -76,6 +76,10 @@ Flyway manages all three (`spring.flyway.schemas`), and `ach_app` gets privilege
 | `Action`: 402 `FILE_QUEUED`, 403 `FED_SEND_FAILED`, 404 `FILE_ERROR` | Adds | Next to the design's 401 `FED_SEND`. |
 | Triggers `TR_ACHOrigFedAction_NoUpdate`, `_NoDelete` (V12) | Adds | Design: "an unalterable audit trail". Needs the root setting in README section 4. |
 
+### Sample rows for the back-office screens (V14)
+
+V14 adds made-up rows only, with no table or column changes: returns, NOCs, substitutions, a return request, a `601 RETURN_PROCESS` action, and a reversal batch and entry in file `ACHFILE-88392`. None of them come from the design's samples.
+
 ### Changes for UC-ACH-RCV-01 and UC-ACH-RCV-02 (V13)
 
 | Change | Marked | Why |

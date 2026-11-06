@@ -15,6 +15,9 @@ public final class ParamApps {
         APPS.put("ACH_ORIG_RESUB", "ACH Origination Resubmission UI");
         APPS.put("ACH_ORIG_NOC", "ACH Origination NOC UI");
         APPS.put("ACH_RCV", "ACH Receiving UI");
+        APPS.put("ACH_RCV_RETURN", "ACH Receiving Return UI");
+        APPS.put("ACH_RCV_REVERSAL", "ACH Receiving Reversal UI");
+        APPS.put("ACH_RCV_NOC", "ACH Receiving NOC UI");
     }
 
     private ParamApps() {

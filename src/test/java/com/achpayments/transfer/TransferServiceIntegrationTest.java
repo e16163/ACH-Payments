@@ -192,7 +192,7 @@ class TransferServiceIntegrationTest {
     }
 
     @Test
-    void recurringTransfersStoreBasFrequencyFields() {
+    void recurringTransfersStoreTheDesignFrequencyFields() {
         TransferService.Receipt receipt = service.submit(MEMBER, with("10.00", r -> new TransferRequest(r.origAcctNo(),
                 r.recvName(), r.routingNo(), r.acctNo(), r.acctType(), r.amount(), r.effectiveDt(), "MONTHLY", 6, r.memo())));
         var row = jdbc.queryForMap("SELECT recurringFlag, pmtFrequency, transferReqNo, transferReqRemaining, nextPmtDt FROM "

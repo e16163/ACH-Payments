@@ -35,7 +35,7 @@ class DemoSeedIntegrationTest {
     }
 
     @Test
-    void allOfBasSampleRowsAreLoaded() {
+    void allDesignSampleRowsAreLoaded() {
         assertEquals(1, count("SELECT COUNT(*) FROM " + orig + ".ACHOrigTransaction WHERE traceNo = '051000031234567' "
                 + "AND amount = 3450.50 AND recvName = 'JOHN DOE' AND fedStatus = 'SETTLED'"));
         assertEquals(1, count("SELECT COUNT(*) FROM " + orig + ".ACHOrigRecvAccount WHERE recvAcctSerNo = 'REC-SRV-20261102-01'"));

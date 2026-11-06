@@ -30,8 +30,9 @@ export default function LoginPage({ onSignedIn }: { onSignedIn: () => void }) {
         <p className="notice">
           Demo logins: <strong className="code">member</strong> / <strong className="code">member123</strong> for online
           banking, <strong className="code">admin</strong> / <strong className="code">admin123</strong> for System
-          Configuration, or <strong className="code">ACHOperator</strong> / <strong className="code">operator123</strong> for
-          ACH Receiving.
+          Configuration, <strong className="code">achorig</strong> / <strong className="code">achorig123</strong> for the ACH
+          Origination back office, or <strong className="code">achrecv</strong> / <strong className="code">achrecv123</strong> for
+          the ACH Receiving back office.
         </p>
       )}
       <label className="field">

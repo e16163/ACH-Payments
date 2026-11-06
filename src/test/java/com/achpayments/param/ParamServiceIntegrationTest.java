@@ -44,7 +44,7 @@ class ParamServiceIntegrationTest {
     }
 
     @Test
-    void migrationLoadsBasSampleParameters() {
+    void migrationLoadsTheDesignSampleParameters() {
         assertEquals("17:00:00", repo.find("ACH_ORIG", "FED_FILE_CUTOFF_TIME").orElseThrow().paramRawValue());
         assertEquals("TRUE", repo.find("ACH_RCV", "MEMO_POST_IMMEDIATE").orElseThrow().paramRawValue());
     }

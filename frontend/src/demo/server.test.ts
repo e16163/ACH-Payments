@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ApiError } from '../api'
+import { SCREENS } from '../backoffice/screens'
 import { demoApi, demoLogin, demoLogout } from './server'
 
 // Vitest runs in Node, which has no sessionStorage.
@@ -65,7 +66,7 @@ describe('demo sign-in', () => {
   it('keeps admins out of member screens', async () => {
     await demoLogin('admin', 'admin123')
     expect((await error(demoApi('/transfers/dates'))).status).toBe(403)
-    expect(await demoApi<unknown[]>('/params/systems')).toHaveLength(6)
+    expect(await demoApi<unknown[]>('/params/systems')).toHaveLength(9)
   })
 })
 
@@ -138,26 +139,53 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
   type File = { fileID: string; processStatus: string; entryCount: number; totalCreditAmt: number; totalDebitAmt: number }
   type Page = { items: { traceNo: string; tranID: number }[]; total: number }
   const BASE = '/v1/ach/receiving'
-  const asOperator = () => demoLogin('ACHOperator', 'operator123')
+  const asOperator = () => demoLogin('achrecv', 'achrecv123')
   const receive = async (sample: string) => (await post(`${BASE}/files/receive`, { sample }) as { fileID: string; processStatus: string; message: string }[])[0]
   const files = () => demoApi<File[]>(`${BASE}/files`)
   const page = (fileID: string, n = 1) => demoApi<Page>(`${BASE}/transactions?fileID=${fileID}&page=${n}&limit=10&sortBy=traceNo&sortDir=ASC`)
 
   it("starts with the sample file for operators and admins, and keeps members out", async () => {
     await asOperator()
-    expect(await files()).toEqual([expect.objectContaining({ fileID: 'ACHFILE-88392', processStatus: 'PROCESSED', entryCount: 1, totalCreditAmt: 3450.5 })])
+    expect(await files()).toEqual([expect.objectContaining({ fileID: 'ACHFILE-88392', processStatus: 'PROCESSED', entryCount: 2, totalCreditAmt: 3450.5, totalDebitAmt: 3450.5 })])
     await demoLogin('admin', 'admin123')
     expect(await files()).toHaveLength(1)
     await memberWithMfa()
     expect((await error(files())).status).toBe(403)
   })
 
-  it('keeps the ACHOperator out of the other screens', async () => {
+  it('keeps achrecv out of the other screens', async () => {
     await asOperator()
-    expect(await demoApi('/me')).toMatchObject({ username: 'ACHOperator', roles: ['ACH_OPS'] })
+    expect(await demoApi('/me')).toMatchObject({ username: 'achrecv', roles: ['ACH_RECV_OPS'] })
     expect((await error(demoApi('/params/systems'))).status).toBe(403)
     expect((await error(demoApi('/eod/status'))).status).toBe(403)
     expect((await error(demoApi('/transfers/dates'))).status).toBe(403)
+  })
+
+  it('keeps achorig out of the receiving screens and lets it use the origination file', async () => {
+    await demoLogin('achorig', 'achorig123')
+    expect(await demoApi('/me')).toMatchObject({ username: 'achorig', roles: ['ACH_ORIG_OPS'] })
+    expect(await demoApi('/eod/status')).toHaveProperty('pending')
+    expect((await error(files())).status).toBe(403)
+    expect((await error(demoApi('/params/systems'))).status).toBe(403)
+  })
+
+  it('has no ACHOperator login any more', async () => {
+    expect((await error(demoLogin('ACHOperator', 'operator123'))).status).toBe(401)
+  })
+
+  it('serves every back-office list to its own login only', async () => {
+    for (const screen of SCREENS) {
+      await demoLogin(screen.role === 'ACH_ORIG_OPS' ? 'achorig' : 'achrecv', screen.role === 'ACH_ORIG_OPS' ? 'achorig123' : 'achrecv123')
+      for (const section of screen.sections) {
+        const rows = await demoApi<Record<string, unknown>[]>(section.path)
+        expect(rows.length).toBeGreaterThan(0)
+        for (const column of section.columns) expect(rows[0]).toHaveProperty(column)
+      }
+      await demoLogin('admin', 'admin123')
+      expect((await error(demoApi(screen.sections[0].path))).status).toBe(403)
+      await demoLogin(screen.role === 'ACH_ORIG_OPS' ? 'achrecv' : 'achorig', screen.role === 'ACH_ORIG_OPS' ? 'achrecv123' : 'achorig123')
+      expect((await error(demoApi(screen.sections[0].path))).status).toBe(403)
+    }
   })
 
   it('saves sample 1 with the same totals as the Java engine', async () => {

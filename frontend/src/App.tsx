@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError, DEMO, logout } from './api'
+import BackOfficePage from './backoffice/BackOfficePage'
+import { SCREENS } from './backoffice/screens'
 import AchOriginationFilePage from './files/AchOriginationFilePage'
 import AchReceivingFilePage from './files/AchReceivingFilePage'
 import AchReceivingTransactionPage from './files/AchReceivingTransactionPage'
@@ -73,19 +75,23 @@ export default function App() {
   useEffect(() => setMenuOpen(false), [hash])
 
   const isAdmin = me?.roles.includes('SYS_ADMIN')
-  const isOperator = me?.roles.includes('ACH_OPS')
+  const isOrigOps = me?.roles.includes('ACH_ORIG_OPS')
+  const isRecvOps = me?.roles.includes('ACH_RECV_OPS')
   const isMember = me?.roles.includes('MEMBER')
   const memberReady = isMember && me?.mfaVerified
 
   const onTransactions = hash.startsWith(ROUTES.receivingTransactions)
   const adminElsewhere = hash === ROUTES.originationFile || hash === ROUTES.receivingFile || onTransactions
+  const myScreens = SCREENS.filter((s) => me?.roles.includes(s.role))
+  const screen = myScreens.find((s) => s.route === hash)
 
   let page = null
   if (signedOut) page = <LoginPage onSignedIn={loadMe} />
-  else if (isAdmin && hash === ROUTES.originationFile) page = <AchOriginationFilePage />
-  else if ((isAdmin || isOperator) && onTransactions) {
+  else if (screen) page = <BackOfficePage key={screen.route} screen={screen} />
+  else if (isOrigOps || (isAdmin && hash === ROUTES.originationFile)) page = <AchOriginationFilePage />
+  else if ((isAdmin || isRecvOps) && onTransactions) {
     page = <AchReceivingTransactionPage route={ROUTES.receivingTransactions} fileID={decodeURIComponent(hash.slice(ROUTES.receivingTransactions.length + 1))} />
-  } else if (isOperator || (isAdmin && hash === ROUTES.receivingFile)) {
+  } else if (isRecvOps || (isAdmin && hash === ROUTES.receivingFile)) {
     page = <AchReceivingFilePage transactionsRoute={ROUTES.receivingTransactions} />
   } else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
@@ -114,18 +120,19 @@ export default function App() {
       </header>
       {me && (
         <nav className="mainnav" aria-label="Main">
-          {isAdmin && (
-            <>
-              <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
-              <a className={hash === ROUTES.originationFile ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
-            </>
+          {isAdmin && <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>}
+          {(isAdmin || isOrigOps) && (
+            <a className={(isAdmin ? hash === ROUTES.originationFile : !screen) ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
           )}
-          {(isAdmin || isOperator) && (
+          {(isAdmin || isRecvOps) && (
             <>
-              <a className={(isAdmin ? hash === ROUTES.receivingFile : !onTransactions) ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>
+              <a className={(isAdmin ? hash === ROUTES.receivingFile : !onTransactions && !screen) ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>
               <a className={onTransactions ? 'active' : ''} href={ROUTES.receivingTransactions}>ACH Receiving Transactions</a>
             </>
           )}
+          {myScreens.map((s) => (
+            <a key={s.route} className={s === screen ? 'active' : ''} href={s.route}>{s.title}</a>
+          ))}
           {memberReady && (
             <>
               <a className={hash !== ROUTES.external ? 'active' : ''} href={ROUTES.accounts}>Accounts</a>

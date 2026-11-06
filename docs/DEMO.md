@@ -11,7 +11,8 @@ A walk-through of what's built from your documents, and what isn't yet.
 | Saved? | No. Resets when you close the tab | Yes, in the `ach_payments` / `ach_origination` / `ach_receiving` databases |
 | Member login | `member` / `member123` | `member` / `member123` |
 | Admin login | `admin` / `admin123` | the local admin login |
-| ACH operator login | `ACHOperator` / `operator123` | `ACHOperator` with the local password |
+| ACH origination login | `achorig` / `achorig123` | `achorig` with the local password |
+| ACH receiving login | `achrecv` / `achrecv123` | `achrecv` with the local password |
 | ACH files | Kept in the browser tab | Written to `~/dev/fed/outbound`, the simulated Fed |
 
 Use the online demo to click through. Use the full app to see the rows land in your tables (the last section).
@@ -105,7 +106,7 @@ To see a recurring series, make a Weekly transfer with 3 payments in Part 2. Eac
 
 The engine picks up the Fed's file by itself at 6 AM Eastern on banking days. **Receive file** simulates a delivery, so you needn't wait.
 
-1. Sign out and sign in as **ACHOperator**. You see only **ACH Receiving File** and **ACH Receiving Transactions**.
+1. Sign out and sign in as **achrecv**. **ACH Receiving File** opens.
 2. In **Simulate a file from the Fed**, choose **Sample 1: payroll (valid)** and click **Receive file**: **VALIDATED**, 50 entries, $129,450.00. Do the same with **Sample 2: retail (valid)**: 50 entries, $71,840.00 credits and $1,144.90 debits.
 3. Click **View transactions** on Sample 1. The **ACH Inbound Overview** shows your 9 columns, 10 rows a page, sorted by trace number. Click **Next**.
 4. Click **Select** on a row to see all 24 fields.
@@ -115,6 +116,20 @@ The engine picks up the Fed's file by itself at 6 AM Eastern on banking days. **
    - **EX-01:** choose **Sample 1 changed in transit**: **REJECTED_SIG_FAIL**, nothing saved, and a Security Operations alert. **View transactions** on it shows "No receiving transactions found in this file batch."
 
 Received entries stay `UNPROCESSED`. They aren't OFAC screened (they were screened at origination), and memo posting waits for your use case.
+
+## Part 3C: Back-office screens (UC-ACH-BO)
+
+These are read-only for now. They're guessed from your table design until your use cases arrive, and the rows are made-up samples. Click **Select** on any row to see all its fields.
+
+1. Sign in as **achorig**. It opens on **ACH Origination File**, which works as in Part 3, with four more tabs:
+   - **ACH Origination Return:** returns on entries we sent, and their actions
+   - **ACH Origination Reversal** and **ACH Origination Resubmission:** the action rows, with the file each belongs to
+   - **ACH Origination NOC:** NOCs we received, their actions, and the account and transaction code substitutions
+2. Sign in as **achrecv**. It has the receiving screens from Part 3B, with three more tabs:
+   - **ACH Receiving Return:** returns we sent, and return requests from other banks
+   - **ACH Receiving Reversal:** received entries with `REVERSAL` as the Company Entry Description
+   - **ACH Receiving NOC:** NOCs we sent, and the substitutions
+3. **admin** keeps System Configuration, ACH Origination File, ACH Receiving File and ACH Receiving Transactions, and doesn't get these back-office screens.
 
 ## Part 4: System Design (in the full app)
 
@@ -164,7 +179,7 @@ What's in the database today:
 The transfer now reaches the (simulated) Fed. The rest of the back office from your System Design isn't built yet:
 - Same Day windows
 - memo posting of received entries
-- returns, NOCs, reversals and resubmissions
+- the engines and actions behind returns, NOCs, reversals and resubmissions (their screens are read-only)
 - fraud rules and the review queue
 - end-of-day posting
 

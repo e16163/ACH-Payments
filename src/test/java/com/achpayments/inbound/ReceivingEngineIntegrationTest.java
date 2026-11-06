@@ -393,7 +393,7 @@ class ReceivingEngineIntegrationTest {
     void theFileListStillShowsTheDesignSampleFile() {
         FileRow sample = controller.files().stream().filter(f -> f.fileID().equals("ACHFILE-88392")).findFirst().orElseThrow();
         assertEquals("PROCESSED", sample.processStatus());
-        assertEquals(1, sample.entryCount());
+        assertEquals(2, sample.entryCount());
         assertEquals(0, new BigDecimal("3450.50").compareTo(sample.totalCreditAmt()));
     }
 

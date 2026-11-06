@@ -27,6 +27,11 @@ import com.achpayments.inbound.ReceivingController;
 import com.achpayments.inbound.ReceivingEngine;
 import com.achpayments.param.ParamController;
 import com.achpayments.param.ParamRepository;
+import com.achpayments.backoffice.BackOfficeController;
+import com.achpayments.outbound.EodController;
+import com.achpayments.outbound.EodFileJob;
+import com.achpayments.outbound.EodFileStore;
+import com.achpayments.param.ParamCache;
 import com.achpayments.param.ParamService;
 import com.achpayments.transfer.TransferController;
 import com.achpayments.transfer.TransferDates;
@@ -34,9 +39,10 @@ import com.achpayments.transfer.TransferDates;
 import tools.jackson.databind.json.JsonMapper;
 
 /** USE-CASES T7: members must pass MFA before the transfer APIs; admins and members stay in their own areas. */
-@WebMvcTest({MeController.class, TransferController.class, ParamController.class, ReceivingController.class})
+@WebMvcTest({MeController.class, TransferController.class, ParamController.class, ReceivingController.class,
+        BackOfficeController.class, EodController.class})
 @Import({SecurityConfig.class, MfaService.class, MemberAccessTest.Clocks.class})
-@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.operator-password=operator-pw",
+@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.orig-password=orig-pw", "app.recv-password=recv-pw",
         "app.member-password=member-pw"})
 class MemberAccessTest {
 
@@ -59,6 +65,15 @@ class MemberAccessTest {
 
     @MockitoBean
     ReceivingEngine receivingEngine;
+
+    @MockitoBean
+    EodFileJob eodFileJob;
+
+    @MockitoBean
+    EodFileStore eodFileStore;
+
+    @MockitoBean
+    ParamCache paramCache;
 
     @MockitoBean
     FedInboundSimulator fedInbound;
@@ -152,31 +167,66 @@ class MemberAccessTest {
     }
 
     @Test
-    void onlyAdminsCanSeeReceivingFiles() throws Exception {
+    void onlyAdminsAndAchrecvCanSeeReceivingFiles() throws Exception {
         mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isOk());
         mvc.perform(get("/api/v1/ach/receiving/files")).andExpect(status().isUnauthorized());
         mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic(MEMBER, "member-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}"))
                 .andExpect(status().isForbidden());
-        mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("ACHOperator", "operator-pw")).with(csrf())
+        mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("achrecv", "recv-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}"))
                 .andExpect(status().isOk());
     }
 
     @Test
-    void theAchOperatorSeesOnlyTheReceivingScreens() throws Exception {
-        mvc.perform(get("/api/params/systems").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/eod/status").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/transfers/dates").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/me").with(httpBasic("ACHOperator", "operator-pw")))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.roles[0]").value("ACH_OPS"));
+    void theRemovedOperatorLoginCannotSignIn() throws Exception {
+        mvc.perform(get("/api/me").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isUnauthorized());
     }
 
     @Test
-    void onlyAdminsCanRunTheEodFile() throws Exception {
+    void achorigSeesOnlyTheOriginationScreens() throws Exception {
+        mvc.perform(get("/api/eod/status").with(httpBasic("achorig", "orig-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/ach/back-office/origination/returns").with(httpBasic("achorig", "orig-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/ach/back-office/receiving/returns").with(httpBasic("achorig", "orig-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic("achorig", "orig-pw"))).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("achorig", "orig-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/api/params/systems").with(httpBasic("achorig", "orig-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/transfers/dates").with(httpBasic("achorig", "orig-pw"))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void adminsKeepTheirScreensButNotTheBackOfficeOnes() throws Exception {
+        mvc.perform(get("/api/eod/status").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/ach/back-office/origination/returns").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/ach/back-office/receiving/returns").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anUnknownBackOfficeListIsNotFound() throws Exception {
+        mvc.perform(get("/api/v1/ach/back-office/receiving/nope").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/ach/back-office/receiving/returns")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/ach/back-office/receiving/returns").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
+    }
+
+    @Test
+    void achrecvSeesOnlyTheReceivingScreens() throws Exception {
+        mvc.perform(get("/api/v1/ach/back-office/receiving/returns").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/ach/back-office/origination/returns").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/params/systems").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/eod/status").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/transfers/dates").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/me").with(httpBasic("achrecv", "recv-pw")))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.roles[0]").value("ACH_RECV_OPS"));
+    }
+
+    @Test
+    void onlyAdminsAndAchorigCanRunTheEodFile() throws Exception {
         mvc.perform(get("/api/eod/status").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
-        mvc.perform(get("/api/eod/status").with(httpBasic("ACHOperator", "operator-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/eod/status").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
         mvc.perform(post("/api/eod/run").with(httpBasic(MEMBER, "member-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"businessDate\":\"2026-11-05\"}"))
                 .andExpect(status().isForbidden());

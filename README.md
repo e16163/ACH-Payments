@@ -5,7 +5,7 @@ This repo will hold two systems:
 1. **Same Day ACH Payments**: originates and processes Same Day ACH entries.
 2. **ACH Fraud Monitoring & Prevention**: risk-based detection of fraudulent entries, as the 2026 Nacha rules require.
 
-**Try the demo:** https://e16163.github.io/ACH-Payments/ (sign in as `member` / `member123`, `admin` / `admin123` or `ACHOperator` / `operator123`). It's the real screens running on made-up data in your browser. GitHub Pages can't run the Java server or MySQL, so nothing is saved, and the demo resets when you close the tab. It's rebuilt from `main` on every push (`.github/workflows/pages.yml`, `npm run build:demo`).
+**Try the demo:** https://e16163.github.io/ACH-Payments/ (sign in as `member` / `member123`, `admin` / `admin123`, `achorig` / `achorig123` or `achrecv` / `achrecv123`). It's the real screens running on made-up data in your browser. GitHub Pages can't run the Java server or MySQL, so nothing is saved, and the demo resets when you close the tab. It's rebuilt from `main` on every push (`.github/workflows/pages.yml`, `npm run build:demo`).
 
 Step-by-step demo script: [docs/DEMO.md](docs/DEMO.md).
 
@@ -96,7 +96,7 @@ JDBC URL: `jdbc:mysql://localhost:3306/ach_payments`
 
 The app reads its secrets from the environment:
 - `JDBC_URL`, `DB_USER` and `DB_PASSWORD` go in `~/dev/mysql-credentials.txt`.
-- `APP_ADMIN_PASSWORD`, `APP_OPERATOR_PASSWORD` and `APP_MEMBER_PASSWORD` go in `~/dev/app-credentials.txt` (optionally `APP_ADMIN_USERNAME`, `APP_OPERATOR_USERNAME` and `APP_MEMBER_USERNAME`). These are the demo logins (see below).
+- `APP_ADMIN_PASSWORD`, `APP_ORIG_PASSWORD`, `APP_RECV_PASSWORD` and `APP_MEMBER_PASSWORD` go in `~/dev/app-credentials.txt` (optionally `APP_ADMIN_USERNAME`, `APP_ORIG_USERNAME`, `APP_RECV_USERNAME` and `APP_MEMBER_USERNAME`). These are the demo logins (see below).
 
 Write them as `KEY=value` lines, then create `~/dev/tomcat/bin/setenv.sh` so Tomcat loads them:
 
@@ -130,12 +130,13 @@ Then open http://localhost:5173/ach/.
 
 ### 6. Demo logins
 
-The app opens on a **Sign in** page, and **Sign out** is at the top right. These are demo users only; real logins come in roadmap step 16. A local demo can use simple passwords, e.g. `member123` and `operator123`.
+The app opens on a **Sign in** page, and **Sign out** is at the top right. These are demo users only; real logins come in roadmap step 16. A local demo can use simple passwords, e.g. `member123` and `achrecv123`.
 
 | User | Role | Can use |
 | --- | --- | --- |
 | `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, ACH Origination File, ACH Receiving File, ACH Receiving Transactions |
-| `ACHOperator` (or `APP_OPERATOR_USERNAME`) | ACH operations (`ACH_OPS`) | ACH Receiving File, ACH Receiving Transactions |
+| `achorig` (or `APP_ORIG_USERNAME`) | ACH origination back office (`ACH_ORIG_OPS`) | ACH Origination File, Return, Reversal, Resubmission, NOC |
+| `achrecv` (or `APP_RECV_USERNAME`) | ACH receiving back office (`ACH_RECV_OPS`) | ACH Receiving File, ACH Receiving Transactions, Return, Reversal, NOC |
 | `member` | Member: the sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay. After the password, enter the 6-digit code shown on screen (simulated MFA). |
 
 Scripts and tests can still send HTTP Basic credentials, but a browser never gets the Basic login popup.
@@ -171,10 +172,11 @@ mvn test
 - [x] Step 1: NACHA file parser
 - [x] Parameter UI (UC-SYS-PARAM-01): designers add/edit parameters per app
 - [x] Design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
-- [x] Database schema: all 30 designed tables exactly as written, plus approved additions (V1–V13), with the sample data
+- [x] Database schema: all 30 designed tables exactly as written, plus approved additions (V1–V14), with the sample data
 - [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
 - [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, admin ACH Origination File page
 - [x] Inbound FedACH ingestion (UC-ACH-RCV-01): the 6 AM pickup, signature, control totals, EX-01 to EX-03, audit trail
 - [x] ACH Receiving Transaction UI (UC-ACH-RCV-02): files by day, 10 per page by trace number, all 24 fields
+- [x] Back-office screens (UC-ACH-BO): read-only Return, Reversal, Resubmission and NOC screens, guessed from the table design
 - [ ] Same Day ACH payments service
 - [ ] Fraud monitoring service

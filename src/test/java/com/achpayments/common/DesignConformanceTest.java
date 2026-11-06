@@ -65,7 +65,7 @@ class DesignConformanceTest {
     String password;
 
     @BeforeAll
-    void loadBasDdlIntoTheReferenceDatabase() throws IOException {
+    void loadTheDesignDdlIntoTheReferenceDatabase() throws IOException {
         String url = System.getenv("TEST_JDBC_URL").replaceFirst("/[^/?]+(\\?|$)", "/" + REFERENCE_DB + "$1");
         // One connection, so SET FOREIGN_KEY_CHECKS applies to the DROPs that follow.
         JdbcTemplate ref = new JdbcTemplate(new SingleConnectionDataSource(url, user, password, true));
@@ -83,18 +83,18 @@ class DesignConformanceTest {
     }
 
     @Test
-    void referenceDatabaseHasAllOfBasTables() {
+    void referenceDatabaseHasAllDesignTables() {
         assertEquals(30, tablesIn(REFERENCE_DB).size());
     }
 
     @Test
-    void requiredBaTablesExist() {
+    void requiredDesignTablesExist() {
         List<String> missing = REQUIRED.stream().filter(t -> !tablesIn(schemaFor(t)).contains(t)).sorted().toList();
         assertEquals(List.of(), missing, "the design's tables not built yet");
     }
 
     @Test
-    void everyBaTableWeBuiltKeepsHisDefinitionExactly() {
+    void everyDesignTableWeBuiltKeepsItsDefinitionExactly() {
         List<String> differences = new ArrayList<>();
         int checked = 0;
         for (String table : tablesIn(REFERENCE_DB)) {

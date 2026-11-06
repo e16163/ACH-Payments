@@ -1,0 +1,271 @@
+{
+ "origination/returns": [
+  {
+   "returnID": 70001,
+   "tranID": 1,
+   "typeID": "RETURN",
+   "sourceID": null,
+   "recvTraceNo": "051000031234567",
+   "returnTraceNo": "051000030000101",
+   "amount": 3450.5,
+   "acctName": "JOHN DOE",
+   "returnStatus": "RECEIVED",
+   "returnCode": "R03",
+   "companyName": "ACME CORP",
+   "companyID": "1234567890",
+   "discretionaryData": "DIRECT DEP",
+   "returnAcctNo": "987654321012",
+   "returnRtn": "051000033",
+   "returnDt": "2026-11-04",
+   "settlementDt": "2026-11-05",
+   "lastModTm": "2026-11-05T23:49:02",
+   "lastModBy": "SYS_USER_02"
+  }
+ ],
+ "origination/return-actions": [
+  {
+   "returnID": 70001,
+   "processID": "PROC_RET_01",
+   "actionName": "RETURN_PROCESS",
+   "actionTm": "2026-11-04T08:10:00",
+   "lastModBy": "SYS_USER_02"
+  }
+ ],
+ "origination/reversals": [
+  {
+   "fileID": "FILE_20261102_02",
+   "processID": "PROC_REV_01",
+   "actionName": "REVERSAL",
+   "actionTm": "2026-11-02T08:35:00",
+   "lastModBy": "SYS_ADMIN",
+   "fileHeaderDt": "2026-11-02",
+   "fedStatus": "PENDING",
+   "totalDebitAmt": 0.0,
+   "totalCreditAmt": 0.0
+  }
+ ],
+ "origination/resubmissions": [
+  {
+   "fileID": "FILE_20261102_01",
+   "processID": "PROC_RESUB_02",
+   "actionName": "RESUBMIT",
+   "actionTm": "2026-11-02T08:20:00",
+   "lastModBy": "SYS_USER_01",
+   "fileHeaderDt": "2026-11-02",
+   "fedStatus": "PENDING",
+   "totalDebitAmt": 0.0,
+   "totalCreditAmt": 0.0
+  }
+ ],
+ "origination/nocs": [
+  {
+   "nocID": 50913,
+   "tranID": 1,
+   "sourceID": null,
+   "nocCode": "C05",
+   "correctedData": "32",
+   "nocTraceNo": "051000030000002",
+   "origTraceNo": "051000031234567",
+   "createTm": "2026-11-05T23:49:02",
+   "lastModBy": "SYS_USER_02",
+   "notifyByDt": "2026-11-06",
+   "applyByDt": "2026-11-13",
+   "appliedTm": null,
+   "refusedCode": null
+  },
+  {
+   "nocID": 50912,
+   "tranID": 1,
+   "sourceID": null,
+   "nocCode": "C01",
+   "correctedData": "987654321013",
+   "nocTraceNo": "051000030000001",
+   "origTraceNo": "051000031234567",
+   "createTm": "2026-11-03T21:10:17",
+   "lastModBy": "SYS_USER_02",
+   "notifyByDt": null,
+   "applyByDt": null,
+   "appliedTm": null,
+   "refusedCode": null
+  }
+ ],
+ "origination/noc-actions": [
+  {
+   "nocID": 50913,
+   "processID": "PROC_NOC_02",
+   "actionName": "NOC_PROCESS",
+   "actionTm": "2026-11-04T08:25:00",
+   "lastModBy": "SYS_USER_02"
+  },
+  {
+   "nocID": 50912,
+   "processID": "PROC_NOC_01",
+   "actionName": "NOC_PROCESS",
+   "actionTm": "2026-11-02T08:25:00",
+   "lastModBy": "SYS_USER_02"
+  }
+ ],
+ "origination/account-subs": [
+  {
+   "acctSubsID": 1,
+   "nocAcctNo": "987654321012",
+   "nocRoutingNo": "051000033",
+   "subsAcctNo": "987654321013",
+   "subsRoutingNo": "051000033",
+   "acctType": "CHECKING",
+   "acctOwner": "JOHN DOE",
+   "acctStatus": "ACTIVE",
+   "sourceID": null,
+   "thridPartyFlag": false,
+   "creditFlag": true,
+   "debitFlag": true,
+   "preNocID": 50912,
+   "createTm": "2026-11-05T23:49:02"
+  }
+ ],
+ "origination/trancode-subs": [
+  {
+   "nocID": 50913,
+   "nocAcctNo": "987654321012",
+   "nocRtn": "051000033",
+   "nocTranCode": "22",
+   "subsTranCode": "32",
+   "companyID": "1234567890",
+   "lastModTm": "2026-11-05T23:49:02",
+   "lastModBy": "SYS_USER_02"
+  }
+ ],
+ "receiving/returns": [
+  {
+   "returnID": 80001,
+   "tranID": 1,
+   "typeID": "RETURN",
+   "sourceID": null,
+   "recvTraceNo": "051000031234567",
+   "returnTraceNo": "123456780000101",
+   "amount": 3450.5,
+   "acctName": "JOHN DOE",
+   "returnStatus": "SENT",
+   "returnCode": "R02",
+   "companyName": "ACME CORP",
+   "companyID": "1234567890",
+   "discretionaryData": "DIRECT DEP",
+   "returnAcctNo": "987654321012",
+   "returnRtn": "051000033",
+   "returnDt": "2026-11-04",
+   "settlementDt": "2026-11-05",
+   "lastModTm": "2026-11-05T23:49:02",
+   "lastModBy": "SYS_USER_02",
+   "dueDt": "2026-11-05",
+   "wsudFlag": false
+  }
+ ],
+ "receiving/return-requests": [
+  {
+   "requestID": 1,
+   "tranID": 1,
+   "requestingRtn": "051000033",
+   "requestReason": "Originator sent the payment in error",
+   "receivedDt": "2026-11-04",
+   "dueDt": "2026-11-18",
+   "decision": null,
+   "decisionTm": null,
+   "lastModTm": "2026-11-05T23:49:02",
+   "lastModBy": "SYS_USER_02"
+  }
+ ],
+ "receiving/reversals": [
+  {
+   "tranID": 302,
+   "transferSerNo": null,
+   "transferVersion": 1,
+   "fileID": "ACHFILE-88392",
+   "batchID": "BATCH-002",
+   "creditFlag": false,
+   "tranCode": "27",
+   "companyName": "ACME CORP",
+   "companyID": "1234567890",
+   "companyDiscData": "DIRECT DEP",
+   "stdEntryCode": "PPD",
+   "companyEntryDesc": "REVERSAL",
+   "descriptiveDt": "2026-11-04",
+   "effectiveDt": "2026-11-05",
+   "settlementDt": "2026-11-05",
+   "originatorID": "9000123456",
+   "amount": 3450.5,
+   "recvAcctID": "987654321012",
+   "recvName": "JOHN DOE",
+   "transactionDiscData": "S",
+   "traceNo": "051000031234568",
+   "fedStatus": "SETTLED",
+   "sourceID": "PAYROLL_SYS",
+   "createTm": "2026-11-05T23:49:02",
+   "recvRtn": null,
+   "individualID": null,
+   "addendaInd": null,
+   "recvAcctSerNo": null,
+   "recvAcctVersion": null,
+   "processStatus": "UNPROCESSED"
+  }
+ ],
+ "receiving/nocs": [
+  {
+   "nocID": 90002,
+   "tranID": 1,
+   "sourceID": null,
+   "nocCode": "C05",
+   "correctedData": "32",
+   "nocTraceNo": "123456780000202",
+   "origTraceNo": "051000031234567",
+   "createTm": "2026-11-05T23:49:02",
+   "lastModBy": "SYS_USER_02",
+   "nocStatus": "SENT",
+   "approvedBy": "SYS_USER_01",
+   "dueDt": "2026-11-05"
+  },
+  {
+   "nocID": 90001,
+   "tranID": 1,
+   "sourceID": null,
+   "nocCode": "C01",
+   "correctedData": "987654321013",
+   "nocTraceNo": "123456780000201",
+   "origTraceNo": "051000031234567",
+   "createTm": "2026-11-05T23:49:02",
+   "lastModBy": "SYS_USER_02",
+   "nocStatus": "DRAFT",
+   "approvedBy": null,
+   "dueDt": "2026-11-05"
+  }
+ ],
+ "receiving/account-subs": [
+  {
+   "acctSubsID": 1,
+   "nocAcctNo": "987654321012",
+   "nocRoutingNo": "123456780",
+   "subsAcctNo": "987654321013",
+   "subsRoutingNo": "123456780",
+   "acctType": "CHECKING",
+   "acctOwner": "JOHN DOE",
+   "acctStatus": "ACTIVE",
+   "sourceID": null,
+   "thridPartyFlag": false,
+   "creditFlag": true,
+   "debitFlag": true,
+   "preNocID": 90001,
+   "createTm": "2026-11-05T23:49:02"
+  }
+ ],
+ "receiving/trancode-subs": [
+  {
+   "nocID": 90002,
+   "nocAcctNo": "987654321012",
+   "nocRtn": "123456780",
+   "nocTranCode": "22",
+   "subsTranCode": "32",
+   "companyID": "1234567890",
+   "lastModTm": "2026-11-05T23:49:02",
+   "lastModBy": "SYS_USER_02"
+  }
+ ]
+}

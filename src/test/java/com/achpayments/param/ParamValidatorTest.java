@@ -56,7 +56,7 @@ class ParamValidatorTest {
     }
 
     @Test
-    void acceptsEveryAppFromBasList() {
+    void acceptsEveryAppFromTheDesignList() {
         for (String app : ParamApps.APPS.keySet()) {
             assertNull(ParamValidator.validate(app, "credit_limit", null, "DECIMAL", "5000.00"), app);
         }

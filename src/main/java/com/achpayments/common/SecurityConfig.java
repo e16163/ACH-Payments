@@ -24,7 +24,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Demo login (docs/USE-CASES.md P1, T7): the app's own sign-in page (POST /api/login, POST /api/logout) for an
- * admin, the ACHOperator (ROLE_ACH_OPS) and a member, whose passwords come from environment variables. HTTP Basic still works for
+ * admin, the two back-office logins (ROLE_ACH_ORIG_OPS, ROLE_ACH_RECV_OPS) and a member, whose passwords come from environment variables. HTTP Basic still works for
  * scripts and tests, but a 401 never sends the browser's login popup. Members also pass a simulated MFA step.
  * Real users come in step 16.
  */
@@ -36,10 +36,13 @@ public class SecurityConfig {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
-                        .requestMatchers("/api/params/**", "/api/eod/**").hasRole("SYS_ADMIN")
-                        // UC-ACH-RCV-02: ACH_OPS or SUPPORT. Only operations receive files; admins keep this screen too.
-                        .requestMatchers(HttpMethod.POST, "/api/v1/ach/receiving/**").hasAnyRole("ACH_OPS", "SYS_ADMIN")
-                        .requestMatchers("/api/v1/ach/receiving/**").hasAnyRole("ACH_OPS", "SUPPORT", "SYS_ADMIN")
+                        .requestMatchers("/api/params/**").hasRole("SYS_ADMIN")
+                        .requestMatchers("/api/eod/**").hasAnyRole("ACH_ORIG_OPS", "SYS_ADMIN")
+                        .requestMatchers("/api/v1/ach/back-office/origination/**").hasRole("ACH_ORIG_OPS")
+                        .requestMatchers("/api/v1/ach/back-office/receiving/**").hasRole("ACH_RECV_OPS")
+                        // UC-ACH-RCV-02: ACH_RECV_OPS or SUPPORT. Only operations receive files; admins keep this screen too.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ach/receiving/**").hasAnyRole("ACH_RECV_OPS", "SYS_ADMIN")
+                        .requestMatchers("/api/v1/ach/receiving/**").hasAnyRole("ACH_RECV_OPS", "SUPPORT", "SYS_ADMIN")
                         .requestMatchers("/api/member/mfa/**").hasRole("MEMBER")
                         // UC-ACH-ORG-01 precondition: the member is logged in AND has passed MFA
                         .requestMatchers("/api/member/**", "/api/transfers/**", "/api/routing/**").access(MEMBER_WITH_MFA)
@@ -87,14 +90,17 @@ public class SecurityConfig {
     @Bean
     UserDetailsService users(@Value("${app.admin-username}") String adminUsername,
             @Value("${app.admin-password}") String adminPassword,
-            @Value("${app.operator-username}") String operatorUsername,
-            @Value("${app.operator-password}") String operatorPassword,
+            @Value("${app.orig-username}") String origUsername,
+            @Value("${app.orig-password}") String origPassword,
+            @Value("${app.recv-username}") String recvUsername,
+            @Value("${app.recv-password}") String recvPassword,
             @Value("${app.member-username}") String memberUsername,
             @Value("${app.member-password}") String memberPassword) {
         PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
         return new InMemoryUserDetailsManager(
                 User.withUsername(adminUsername).password(encoder.encode(adminPassword)).roles("SYS_ADMIN").build(),
-                User.withUsername(operatorUsername).password(encoder.encode(operatorPassword)).roles("ACH_OPS").build(),
+                User.withUsername(origUsername).password(encoder.encode(origPassword)).roles("ACH_ORIG_OPS").build(),
+                User.withUsername(recvUsername).password(encoder.encode(recvPassword)).roles("ACH_RECV_OPS").build(),
                 User.withUsername(memberUsername).password(encoder.encode(memberPassword)).roles("MEMBER").build());
     }
 

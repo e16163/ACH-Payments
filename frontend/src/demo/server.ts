@@ -2,6 +2,7 @@
 // It follows the server's rules and messages (TransferService, ParamValidator, MfaService, SecurityConfig, EodFileStore, EodFileJob)
 // on made-up data, and keeps its state in sessionStorage, so closing the tab resets it.
 import { ApiError } from '../api'
+import BACK_OFFICE from './backOffice.json'
 import { buildNachaFile, type NachaBatch, type NachaEntry } from './nacha'
 import { ingest, type RecvEntry } from './receive'
 import payrollSample from '../../../src/main/resources/fed-samples/sample1-payroll.ach?raw'
@@ -10,11 +11,12 @@ import outOfBalanceSample from '../../../src/main/resources/fed-samples/sample3-
 import { validateDesc, validateName, validateValue, PARAM_TYPES } from '../params/validation'
 import { isValidRouting } from '../member/rules'
 
-type Role = 'MEMBER' | 'SYS_ADMIN' | 'ACH_OPS'
+type Role = 'MEMBER' | 'SYS_ADMIN' | 'ACH_ORIG_OPS' | 'ACH_RECV_OPS'
 const USERS: Record<string, { password: string; role: Role }> = {
   member: { password: 'member123', role: 'MEMBER' },
   admin: { password: 'admin123', role: 'SYS_ADMIN' },
-  ACHOperator: { password: 'operator123', role: 'ACH_OPS' },
+  achorig: { password: 'achorig123', role: 'ACH_ORIG_OPS' },
+  achrecv: { password: 'achrecv123', role: 'ACH_RECV_OPS' },
 }
 
 const APPS: [string, string][] = [
@@ -24,6 +26,9 @@ const APPS: [string, string][] = [
   ['ACH_ORIG_RESUB', 'ACH Origination Resubmission UI'],
   ['ACH_ORIG_NOC', 'ACH Origination NOC UI'],
   ['ACH_RCV', 'ACH Receiving UI'],
+  ['ACH_RCV_RETURN', 'ACH Receiving Return UI'],
+  ['ACH_RCV_REVERSAL', 'ACH Receiving Reversal UI'],
+  ['ACH_RCV_NOC', 'ACH Receiving NOC UI'],
 ]
 
 // The ABADirectory, OfacSdnName, BankingCalendar and ACHOrigLimitRule seed rows (V7, V8, V10, V3).
@@ -111,6 +116,12 @@ function freshState(): State {
       companyName: 'ACME CORP', companyID: '1234567890', companyDiscData: 'DIRECT DEP', stdEntryCode: 'PPD', companyEntryDesc: 'PAYROLL', descriptiveDt: '2026-11-01',
       effectiveDt: '2026-11-03', settlementDt: '2026-11-03', originatorID: '9000123456', amount: 3450.5, recvAcctID: '987654321012', recvName: 'JOHN DOE',
       transactionDiscData: 'S', traceNo: '051000031234567', fedStatus: 'SETTLED', sourceID: 'PAYROLL_SYS', createTm: '2026-11-01T16:00:00', batchNo: 1,
+    }, {
+      // The sample reversal (V14)
+      tranID: 2, transferSerNo: '', transferVersion: 1, fileID: 'ACHFILE-88392', batchID: 'BATCH-002', creditFlag: 0, tranCode: '27',
+      companyName: 'ACME CORP', companyID: '1234567890', companyDiscData: 'DIRECT DEP', stdEntryCode: 'PPD', companyEntryDesc: 'REVERSAL', descriptiveDt: '2026-11-04',
+      effectiveDt: '2026-11-05', settlementDt: '2026-11-05', originatorID: '9000123456', amount: 3450.5, recvAcctID: '987654321012', recvName: 'JOHN DOE',
+      transactionDiscData: 'S', traceNo: '051000031234568', fedStatus: 'SETTLED', sourceID: 'PAYROLL_SYS', createTm: '2026-11-01T16:00:00', batchNo: 2,
     }],
   }
 }
@@ -228,12 +239,17 @@ function route(s: State, method: string, path: string, body: Body): unknown {
     return params(s, method, path, body)
   }
   if (path.startsWith('/eod')) {
-    if (role !== 'SYS_ADMIN') denied()
+    if (role !== 'SYS_ADMIN' && role !== 'ACH_ORIG_OPS') denied()
     return eod(s, method, path, body)
   }
   if (path.startsWith('/v1/ach/receiving')) {
-    if (role !== 'SYS_ADMIN' && role !== 'ACH_OPS') denied()
+    if (role !== 'SYS_ADMIN' && role !== 'ACH_RECV_OPS') denied()
     return receiving(s, method, path.slice('/v1/ach/receiving'.length), body)
+  }
+  if (path.startsWith('/v1/ach/back-office/')) {
+    const key = path.slice('/v1/ach/back-office/'.length)
+    if (role !== (key.startsWith('origination/') ? 'ACH_ORIG_OPS' : 'ACH_RECV_OPS')) denied()
+    return BACK_OFFICE[key as keyof typeof BACK_OFFICE]
   }
   if (role !== 'MEMBER') denied()
   if (path === '/member/mfa/send' && method === 'POST') {

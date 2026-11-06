@@ -29,7 +29,7 @@ import com.achpayments.common.SecurityConfig;
 /** UC-SYS-PARAM-01 preconditions and EX-02, with the database mocked out. */
 @WebMvcTest(ParamController.class)
 @Import(SecurityConfig.class)
-@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.operator-password=operator-pw",
+@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.orig-password=orig-pw", "app.recv-password=recv-pw",
         "app.member-password=member-pw"})
 class ParamSecurityTest {
 
@@ -56,16 +56,16 @@ class ParamSecurityTest {
 
     @Test
     void nonAdminGets403AndASecurityWarningInAppLog() throws Exception {
-        mvc.perform(get("/api/params/systems").with(httpBasic("ACHOperator", "operator-pw")))
+        mvc.perform(get("/api/params/systems").with(httpBasic("achrecv", "recv-pw")))
                 .andExpect(status().isForbidden());
 
-        verify(appLog).log(eq("WARN"), startsWith("Access denied: user 'ACHOperator' attempted GET /api/params/systems"),
+        verify(appLog).log(eq("WARN"), startsWith("Access denied: user 'achrecv' attempted GET /api/params/systems"),
                 isNull());
     }
 
     @Test
     void nonAdminCannotSaveThroughTheApi() throws Exception {
-        mvc.perform(put("/api/params/ACH_ORIG/FED_FILE_CUTOFF_TIME").with(httpBasic("ACHOperator", "operator-pw"))
+        mvc.perform(put("/api/params/ACH_ORIG/FED_FILE_CUTOFF_TIME").with(httpBasic("achrecv", "recv-pw"))
                 .with(csrf()).contentType(MediaType.APPLICATION_JSON).content(BODY))
                 .andExpect(status().isForbidden());
 
@@ -73,10 +73,10 @@ class ParamSecurityTest {
     }
 
     @Test
-    void adminGetsBasAppList() throws Exception {
+    void adminGetsTheDesignAppList() throws Exception {
         mvc.perform(get("/api/params/systems").with(httpBasic("admin", "admin-pw")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(6))
+                .andExpect(jsonPath("$.length()").value(9))
                 .andExpect(jsonPath("$[0].systemName").value("ACH_ORIG"))
                 .andExpect(jsonPath("$[0].appName").value("ACH Origination UI"));
     }

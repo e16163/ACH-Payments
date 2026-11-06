@@ -52,7 +52,7 @@ class NachaFileAssemblerTest {
     }
 
     @Test
-    void theFilePassesTheValidatorAndHasBasRecordsAndPadding() throws IOException {
+    void theFilePassesTheValidatorAndHasTheDesignRecordsAndPadding() throws IOException {
         String text = AchFileWriter.write(fromFixture());
         assertEquals(List.of(), AchFileValidator.validate(AchFileParser.parse(text)));
         String[] lines = text.split("\n");

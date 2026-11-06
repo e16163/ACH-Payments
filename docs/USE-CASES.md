@@ -45,6 +45,9 @@ Spec: [Use-Case-Parameter-UI.docx](design/Use-Case-Parameter-UI.docx). Table: `A
   | `ACH_ORIG_RESUB` | ACH Origination Resubmission UI |
   | `ACH_ORIG_NOC` | ACH Origination NOC UI |
   | `ACH_RCV` | ACH Receiving UI |
+  | `ACH_RCV_RETURN` | ACH Receiving Return UI |
+  | `ACH_RCV_REVERSAL` | ACH Receiving Reversal UI |
+  | `ACH_RCV_NOC` | ACH Receiving NOC UI |
 
   the design's two sample parameters already use `ACH_ORIG` and `ACH_RCV`.
 - **P4. Parameter names are saved as typed.** The design's example is lowercase (`credit_limit`) and the samples are uppercase, so the UI doesn't force either. The table's collation ignores case, so `credit_limit` and `CREDIT_LIMIT` count as the same parameter and can't both exist.
@@ -254,7 +257,33 @@ Decisions:
 - **R6. Blank settlement date.** Means the effective date.
 - **R7. Duplicates, as the designer wrote it.** A file with the same date, time and modifier as any recorded file is `DUPLICATE`, even if the earlier one was rejected, so a corrected resend needs a new modifier.
 - **R8. Streaming limit.** One batch is held in memory at a time, so a single huge batch is still all in memory.
-- **R9. Roles.** `ROLE_SUPPORT` can read, but no support user exists yet. `ACHOperator` and admins can receive.
+- **R9. Roles.** `ROLE_SUPPORT` can read, but no support user exists yet. `achrecv` and admins can receive.
+
+## UC-ACH-BO: Back-office logins and screens
+
+The designer's instruction: `achorig` sees the ACH origination back office, `achrecv` sees the ACH receiving back office, and the `ACHOperator` login is removed. The screens are guessed from the table design until the use cases arrive.
+
+| Login | Role | Screens |
+| --- | --- | --- |
+| `admin` | `SYS_ADMIN` | System Configuration, ACH Origination File, ACH Receiving File, ACH Receiving Transactions |
+| `achorig` | `ACH_ORIG_OPS` | ACH Origination File, Return, Reversal, Resubmission, NOC |
+| `achrecv` | `ACH_RECV_OPS` | ACH Receiving File, ACH Receiving Transactions, Return, Reversal, NOC |
+
+| Screen | Tables shown |
+| --- | --- |
+| ACH Origination Return | `ACHOrigReturn`, `ACHOrigReturnAction` |
+| ACH Origination Reversal | `ACHOrigReversalAction`, with `ACHOrigFile` and `Action` |
+| ACH Origination Resubmission | `ACHOrigResubAction`, with `ACHOrigFile` and `Action` |
+| ACH Origination NOC | `ACHOrigNOC`, `ACHOrigNOCAction`, `ACHOrigAcctSubs`, `ACHOrigTransCodeSubs` |
+| ACH Receiving Return | `ACHRecvReturn`, `ACHRecvReturnRequest` |
+| ACH Receiving Reversal | `ACHRecvTransaction` rows with `companyEntryDesc = 'REVERSAL'` |
+| ACH Receiving NOC | `ACHRecvNOC`, `ACHRecvAcctSubs`, `ACHRecvTransCodeSubs` |
+
+Assumptions, to replace when the use cases arrive:
+- **B1. Read-only.** The screens list rows, up to 100 per list, and show every field of a row. Nothing here changes data, because the engines and rules behind each action aren't specified yet.
+- **B2. Admin.** Admin keeps its screens but not these seven.
+- **B3. Receiving Reversal.** There's no receiving reversal table, so the screen shows received entries that Nacha marks as reversals.
+- **B4. Sample rows.** V14 adds made-up rows so the screens aren't empty.
 
 ## Build order
 
