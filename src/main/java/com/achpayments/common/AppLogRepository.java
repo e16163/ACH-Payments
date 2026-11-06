@@ -14,6 +14,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * The one way to write to AppLog (UC-SYS-LOG-01). Call this instead of writing the INSERT yourself. Inside a transaction, the row
@@ -52,11 +54,25 @@ public class AppLogRepository {
                     systemID, level, mesg, details);
         } catch (DataAccessException e) {
             LOG.warn("AppLog insert failed, writing to {}", fallbackFile, e);
-            writeToFile(systemID, level, mesg, details); // EX-01
+            fallBack(systemID, level, mesg, details);
         }
     }
 
-    /** EX-01: never calls log(), so a database failure can't recurse. */
+    /** EX-01. Inside a transaction it waits for the outcome, so the file can't pass off a failed action as a success. */
+    private void fallBack(String systemID, String level, String mesg, String details) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            writeToFile(systemID, level, mesg, details);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                writeToFile(systemID, level, status == STATUS_COMMITTED ? mesg : mesg + " [NOT COMMITTED]", details);
+            }
+        });
+    }
+
+    /** Never calls log(), so a database failure can't recurse. */
     private synchronized void writeToFile(String systemID, String level, String mesg, String details) {
         String entry = "%s %s %s %s%n".formatted(LocalDateTime.now(), level, systemID, mesg) + (details == null ? "" : details);
         try {

@@ -50,7 +50,7 @@ class DemoSeedIntegrationTest {
         assertEquals(1, count("SELECT COUNT(*) FROM " + recv + ".ACHRecvTransaction WHERE traceNo = '051000031234567'"));
         assertEquals(1, count("SELECT COUNT(*) FROM " + recv + ".ACHRecvAccount WHERE recvAcctSerNo = 'REC-SRV-20261102-01'"));
         assertEquals(2, count("SELECT COUNT(*) FROM AppParam WHERE paramName IN ('MEMO_POST_IMMEDIATE', 'FED_FILE_CUTOFF_TIME')"));
-        assertEquals(1, count("SELECT COUNT(*) FROM AppLog WHERE logMesg LIKE 'Failed to parse incoming ACH file HEADER%'"));
+        assertEquals(1, count("SELECT COUNT(*) FROM AppLog WHERE logMesg LIKE 'Failed to parse incoming ACH file HEADER%' AND systemID = 'ACH_RCV'"));
     }
 
     @Test

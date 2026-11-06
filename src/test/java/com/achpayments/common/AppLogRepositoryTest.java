@@ -23,6 +23,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
+import org.springframework.transaction.support.TransactionTemplate;
 
 class AppLogRepositoryTest {
 
@@ -81,6 +85,49 @@ class AppLogRepositoryTest {
         assertTrue(file.contains("java.lang.IllegalStateException: boom"));
         assertTrue(file.contains("INFO ACH_ORIG second"));
         verify(jdbc, times(2)).update(startsWith("INSERT INTO AppLog"), any(), any(), any(), any()); // no retry, so no recursion
+    }
+
+    /** Runs the log call in a transaction that commits or rolls back. */
+    private void logInTransaction(boolean commit) {
+        when(jdbc.update(anyString(), any(), any(), any(), any())).thenThrow(new DataAccessResourceFailureException("down"));
+        new TransactionTemplate(new AbstractPlatformTransactionManager() {
+            @Override
+            protected Object doGetTransaction() {
+                return new Object();
+            }
+
+            @Override
+            protected void doBegin(Object transaction, TransactionDefinition definition) {
+            }
+
+            @Override
+            protected void doCommit(DefaultTransactionStatus status) {
+            }
+
+            @Override
+            protected void doRollback(DefaultTransactionStatus status) {
+            }
+        }).executeWithoutResult(status -> {
+            repo().log("ACH_ORIG", "INFO", "Member submitted transfer");
+            assertFalse(Files.exists(dir.resolve("logs/app-error.log")), "the file must wait for the outcome");
+            if (!commit) {
+                status.setRollbackOnly();
+            }
+        });
+    }
+
+    @Test
+    void ex01MarksAnEntryWhoseTransactionFailed() throws IOException {
+        logInTransaction(false);
+        assertTrue(Files.readString(dir.resolve("logs/app-error.log")).contains("Member submitted transfer [NOT COMMITTED]"));
+    }
+
+    @Test
+    void ex01LeavesAnEntryWhoseTransactionCommittedUnmarked() throws IOException {
+        logInTransaction(true);
+        String file = Files.readString(dir.resolve("logs/app-error.log"));
+        assertTrue(file.contains("Member submitted transfer"));
+        assertFalse(file.contains("NOT COMMITTED"));
     }
 
     @Test

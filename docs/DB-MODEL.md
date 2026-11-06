@@ -82,6 +82,7 @@ Flyway manages all three (`spring.flyway.schemas`), and `ach_app` gets privilege
 | --- | --- | --- |
 | `AppLog.systemID VARCHAR(30) NULL` | Adds | Which application wrote the row. |
 | `AppLog.logTm DATETIME(3)` | FIX | The use case shows milliseconds. The design has whole seconds. |
+| V16 fills `systemID` on older rows, from each message | Data | The screen would show them blank otherwise. |
 
 ### Sample rows for the back-office screens (V14)
 

@@ -1,6 +1,7 @@
 package com.achpayments.common;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -35,7 +36,7 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http, AccessDeniedHandler deniedHandler, AppLogRepository appLog,
-            InMemoryUserDetailsManager users) throws Exception {
+            InMemoryUserDetailsManager users, FailedSignInLog failedSignIns) throws Exception {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
@@ -60,8 +61,7 @@ public class SecurityConfig {
                         .failureHandler((request, response, e) -> {
                             // Only a real login name: someone may have typed their password in that box
                             String name = request.getParameter("username");
-                            appLog.log(AppLogRepository.ACH_SYS, "WARN", "Failed sign-in for user '%s'"
-                                    .formatted(name != null && users.userExists(name) ? name : "(unknown)"));
+                            failedSignIns.record(name != null && users.userExists(name) ? name : "(unknown)");
                             json(response, 401, "Incorrect username or password.");
                         }))
                 .logout(logout -> logout.logoutUrl("/api/logout")
@@ -109,6 +109,11 @@ public class SecurityConfig {
         response.setStatus(status);
         response.setContentType("application/json");
         response.getWriter().write("{\"error\":\"" + error + "\"}");
+    }
+
+    @Bean
+    FailedSignInLog failedSignInLog(AppLogRepository appLog) {
+        return new FailedSignInLog(appLog, Clock.systemUTC());
     }
 
     @Bean

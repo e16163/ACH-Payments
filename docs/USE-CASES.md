@@ -310,15 +310,17 @@ We log one row per business action, not one per SQL statement. OWASP's logging g
 
 ### Decisions and assumptions
 
-- **L1. `systemID`.** An added nullable column. The design's table has no system field. Older rows stay `NULL`.
+- **L1. `systemID`.** An added nullable column. The design's table has no system field.
 - **L2. `logTm`.** `DATETIME(3)`, marked FIX, because the use case shows milliseconds.
-- **L3. Transactions.** A row written inside a transaction commits or rolls back with its action, so a failed action can't leave a success row in `AppLog`. The file in L5 isn't part of the transaction, so if the database drops mid-action it can hold a success entry for an action that then failed.
+- **L3. Transactions.** A row written inside a transaction commits or rolls back with its action, so a failed action can't leave a success row in `AppLog`.
 - **L4. Safety.** Messages lose control characters and stop at 1,000 characters, and a failed sign-in logs the name only if it's a real login, because someone may type a password in that box. Stack traces stop at 60,000 characters. Rows never hold passwords, MFA codes or full account numbers.
-- **L5. EX-01.** If the insert fails, the entry goes to `~/dev/logs/app-error.log` (`APP_LOG_FALLBACK_FILE`), with no retry.
+- **L5. EX-01.** If the insert fails, the entry goes to `~/dev/logs/app-error.log` (`APP_LOG_FALLBACK_FILE`), with no retry. Inside a transaction it waits for the outcome, and an action that failed is marked `[NOT COMMITTED]`. A write waits at most 5 seconds for a database connection.
 - **L6. Filters.** Level, keyword in `logMesg`, and From and To dates. The dates are whole days, both included.
 - **L7. Button name.** The use case says both "Inspect" and "View Details". The screen uses **View Details**, from its implementation section.
 - **L8. Role.** The use case names `ROLE_ADMIN` or `ROLE_SYS_OPS`. We use `SYS_ADMIN`.
 - **L9. Grid.** A System ID column is added to the use case's columns.
+- **L11. Failed sign-ins.** At most 30 rows a minute, then one row saying the rest aren't logged, so a script can't fill the table. Sign-in attempts themselves aren't limited.
+- **L12. Older rows.** V16 fills in `systemID` from each message.
 - **L10. Not logged.** HTTP Basic calls from scripts, which send credentials on every request, and sessions that simply expire.
 
 ## Build order

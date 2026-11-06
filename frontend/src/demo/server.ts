@@ -96,7 +96,7 @@ function freshState(): State {
     user: null,
     // The design's sample AppLog row (V7)
     logs: [{
-      logAppId: 1, systemID: null, logLevel: 'ERROR', logMesg: 'Failed to parse incoming ACH file HEADER record for file ID FILE_20261103_09',
+      logAppId: 1, systemID: 'ACH_RCV', logLevel: 'ERROR', logMesg: 'Failed to parse incoming ACH file HEADER record for file ID FILE_20261103_09',
       logExceptionData: 'java.lang.IllegalArgumentException: Invalid routing number length at line 1 char 23\n\tat com.ach.engine.FileParser.parseHeader(FileParser.java:42)',
       logTm: '2026-11-03T15:10:00',
     }],
