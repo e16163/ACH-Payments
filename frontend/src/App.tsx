@@ -7,6 +7,7 @@ import AchReceivingFilePage from './files/AchReceivingFilePage'
 import AchReceivingTransactionPage from './files/AchReceivingTransactionPage'
 import LoginPage from './LoginPage'
 import AccountsPage from './member/AccountsPage'
+import ExternalAccountsPage from './member/ExternalAccountsPage'
 import ExternalTransferPage from './member/ExternalTransferPage'
 import MfaPage from './member/MfaPage'
 import AppLogPage from './logs/AppLogPage'
@@ -19,7 +20,7 @@ const ApiSpecPage = lazy(() => import('./apidocs/ApiSpecPage').catch(() => ({
 })))
 
 type Health = { db: string; error?: string }
-type Me = { username: string; roles: string[]; mfaVerified: boolean }
+type Me = { username: string; roles: string[]; mfaVerified: boolean; memberNo: string | null }
 
 const ROUTES = {
   params: '#/system-configuration',
@@ -31,6 +32,7 @@ const ROUTES = {
   receivingTransactions: '#/ach-receiving-transactions',
   accounts: '#/accounts',
   external: '#/transfer-pay/external-ach',
+  externalAccounts: '#/transfer-pay/external-accounts',
 }
 
 function useHash() {
@@ -88,6 +90,7 @@ export default function App() {
   const isRecvOps = me?.roles.includes('ACH_RECV_OPS')
   const isMember = me?.roles.includes('MEMBER')
   const memberReady = isMember && me?.mfaVerified
+  const onTransferPay = hash === ROUTES.external || hash === ROUTES.externalAccounts
 
   const onTransactions = hash.startsWith(ROUTES.receivingTransactions)
   const adminElsewhere = hash === ROUTES.appLogs || hash === ROUTES.coreApi || hash === ROUTES.achApi
@@ -107,7 +110,9 @@ export default function App() {
     page = <AchReceivingFilePage transactionsRoute={ROUTES.receivingTransactions} />
   } else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
-  else if (memberReady) page = hash === ROUTES.external ? <ExternalTransferPage /> : <AccountsPage />
+  else if (memberReady && hash === ROUTES.external) page = <ExternalTransferPage />
+  else if (memberReady && hash === ROUTES.externalAccounts) page = <ExternalAccountsPage memberNo={me.memberNo ?? ''} />
+  else if (memberReady) page = <AccountsPage />
   else if (me) page = <p className="card narrow">There are no screens for your role yet.</p>
 
   return (
@@ -154,10 +159,10 @@ export default function App() {
           ))}
           {memberReady && (
             <>
-              <a className={hash !== ROUTES.external ? 'active' : ''} href={ROUTES.accounts}>Accounts</a>
+              <a className={!onTransferPay ? 'active' : ''} href={ROUTES.accounts}>Accounts</a>
               <div className="menu">
                 <button
-                  className={`menu-button${hash === ROUTES.external ? ' active' : ''}`}
+                  className={`menu-button${onTransferPay ? ' active' : ''}`}
                   aria-expanded={menuOpen}
                   onClick={() => setMenuOpen((o) => !o)}
                 >
@@ -165,7 +170,8 @@ export default function App() {
                 </button>
                 {menuOpen && (
                   <div className="menu-list" role="menu">
-                    <a role="menuitem" href={ROUTES.external}>External ACH Transfer (Other Bank)</a>
+                    <a role="menuitem" href={ROUTES.external}>Add ACH Transfer</a>
+                    <a role="menuitem" href={ROUTES.externalAccounts}>External Bank Accounts</a>
                   </div>
                 )}
               </div>

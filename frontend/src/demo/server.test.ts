@@ -51,7 +51,7 @@ describe('demo sign-in', () => {
   it('needs a sign-in, then shows who is signed in, and signs out', async () => {
     expect((await error(demoApi('/me'))).status).toBe(401)
     await demoLogin('member', 'member123')
-    expect(await demoApi('/me')).toEqual({ username: 'member', roles: ['MEMBER'], mfaVerified: false })
+    expect(await demoApi('/me')).toEqual({ username: 'member', roles: ['MEMBER'], mfaVerified: false, memberNo: 'M10982347' })
     await demoLogout()
     expect((await error(demoApi('/me'))).status).toBe(401)
   })
@@ -190,6 +190,15 @@ describe('demo AppLog (UC-SYS-LOG-01)', () => {
     expect((await logs('to=2026-11-02')).total).toBe(0)
     expect((await error(logs('from=2026-11-04&to=2026-11-03'))).status).toBe(400)
     expect((await logs()).items[0].logMesg).toBe("User 'admin' signed in")
+  })
+
+  it('filters by app: the 9 apps and the system itself', async () => {
+    await error(demoLogin('achrecv', 'wrong-secret'))
+    await demoLogin('admin', 'admin123')
+    expect((await logs('systemID=ACH_RCV')).items.map((l) => l.logAppId)).toEqual([1])
+    expect((await logs('systemID=ACH_SYS')).items.map((l) => l.logMesg)).toEqual(["User 'admin' signed in", "Failed sign-in for user 'achrecv'"])
+    expect((await logs('systemID=ACH_RCV_NOC')).total).toBe(0)
+    expect((await error(logs('systemID=NOPE'))).status).toBe(400)
   })
 
   it('returns the stack trace for one entry', async () => {
@@ -417,5 +426,54 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   it('builds no file on a day that is not a banking day', async () => {
     await asOrigOps()
     expect((await run('2030-01-05')).message).toBe("2030-01-05 isn't a banking day, so no file was built.")
+  })
+})
+
+describe("demo External Bank Accounts (Ba's ach-origination-system.yaml)", () => {
+  type Ext = { externalAccountId: string; bankName: string | null; maskedAccountNumber: string; accountType: string; status: string }
+  const PATH = '/v1/holders/M10982347/external-accounts'
+  const list = () => demoApi<Ext[]>(PATH)
+  const add = (overrides: Record<string, unknown> = {}) => post(PATH, {
+    bankName: 'JPMorgan Chase Bank, N.A.', routingNumber: '021000021', accountNumber: '55501234', accountType: 'SAVINGS', accountHolderName: 'Jane Smith', ...overrides,
+  }) as Promise<{ externalAccountId: string; status: string }>
+
+  it('starts with the sample account and puts a new one first, pending micro-deposits', async () => {
+    await memberWithMfa()
+    expect(await list()).toEqual([{ externalAccountId: 'REC-SRV-20261102-01', bankName: 'Sample Bank (from the design samples)', maskedAccountNumber: '••••1012', accountType: 'CHECKING', status: 'ACTIVE' }])
+    const added = await add()
+    expect(added.status).toBe('ACTIVE_PENDING_MICRO_DEPOSIT')
+    expect((await list())[0]).toEqual({ externalAccountId: added.externalAccountId, bankName: 'JPMorgan Chase Bank, N.A.', maskedAccountNumber: '••••1234', accountType: 'SAVINGS', status: 'ACTIVE_PENDING_MICRO_DEPOSIT' })
+    expect((await list())).toHaveLength(2)
+  })
+
+  it('checks the details like the server, and adds an account only once', async () => {
+    await memberWithMfa()
+    await add()
+    expect((await error(add())).message).toBe('This account is already in your external bank accounts.')
+    expect((await error(add({ routingNumber: '021000022' }))).message).toBe('Invalid routing number. Please check the 9-digit ABA number.')
+    expect((await error(add({ accountNumber: '123' }))).message).toBe('Enter the account number: 4 to 17 digits.')
+    expect((await error(add({ accountType: 'MONEY_MARKET', accountNumber: '9999' }))).message).toBe('Choose Checking or Savings.')
+    expect((await error(add({ bankName: ' ', accountNumber: '9999' }))).message).toBe('Enter the bank name.')
+    expect((await error(add({ accountHolderName: '<script>', accountNumber: '9999' }))).message).toBe("Enter the account holder's name: up to 22 letters, numbers and spaces.")
+    expect(await list()).toHaveLength(2)
+  })
+
+  it('makes a pending account active when a transfer goes to it, instead of adding it again', async () => {
+    await memberWithMfa()
+    await add({ routingNumber: '021000021', accountNumber: '123456789', accountType: 'CHECKING', accountHolderName: 'Jane Smith' })
+    await post('/transfers', await transfer())
+    expect((await list()).filter((a) => a.maskedAccountNumber === '••••6789')).toEqual([expect.objectContaining({ status: 'ACTIVE' })])
+  })
+
+  it("saves a transfer's recipient as an active account once, and keeps other holders and staff out", async () => {
+    await memberWithMfa()
+    await post('/transfers', await transfer())
+    await post('/transfers', await transfer({ amount: '10.00' }))
+    expect((await list()).filter((a) => a.maskedAccountNumber === '••••6789')).toEqual([expect.objectContaining({ status: 'ACTIVE', accountType: 'CHECKING' })])
+    expect((await error(demoApi('/v1/holders/SOMEONE-ELSE/external-accounts'))).status).toBe(403)
+    await demoLogin('admin', 'admin123')
+    expect((await error(list())).status).toBe(403)
+    await demoLogin('member', 'member123')
+    expect((await error(list())).status).toBe(403) // MFA not passed yet
   })
 })

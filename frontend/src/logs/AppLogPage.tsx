@@ -4,11 +4,14 @@ import { api } from '../api'
 type Row = { logAppId: number; systemID: string | null; logLevel: string; logMesg: string; logTm: string }
 type Detail = Row & { logExceptionData: string | null }
 type Page = { items: Row[]; total: number; page: number; limit: number }
+type App = { systemName: string; appName: string }
 
 const LIMIT = 20
 const LEVELS = ['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL']
 const SUMMARY_LENGTH = 100
 const SEARCH_DELAY_MS = 250
+// Sign-ins, failed sign-ins and access-denied rows belong to no single app
+const SYSTEM_APP: App = { systemName: 'ACH_SYS', appName: 'ACH Payments System' }
 
 /** YYYY-MM-DD HH:mm:ss.SSS. The server drops trailing zeros from the milliseconds. */
 export function logTime(s: string): string {
@@ -26,6 +29,8 @@ function LevelBadge({ level }: { level: string }) {
 
 /** UC-SYS-LOG-01 phase 2: System Audit & App Logs. */
 export default function AppLogPage() {
+  const [apps, setApps] = useState<App[]>([])
+  const [systemID, setSystemID] = useState('')
   const [level, setLevel] = useState('ALL')
   const [searchBox, setSearchBox] = useState('')
   const [search, setSearch] = useState('')
@@ -43,6 +48,16 @@ export default function AppLogPage() {
     setPage(1)
   }
 
+  // The app list, as in System Configuration, plus the system's own logs
+  useEffect(() => {
+    api<App[]>('/params/systems')
+      .then((list) => {
+        setApps([...list, SYSTEM_APP])
+        setSystemID(list[0]?.systemName ?? SYSTEM_APP.systemName)
+      })
+      .catch((e) => setError(String(e.message ?? e)))
+  }, [])
+
   // Only typing waits, so each keystroke doesn't send a query.
   useEffect(() => {
     const timer = setTimeout(() => filter(setSearch)(searchBox), SEARCH_DELAY_MS)
@@ -50,7 +65,8 @@ export default function AppLogPage() {
   }, [searchBox])
 
   useEffect(() => {
-    const query = new URLSearchParams({ page: String(page), limit: String(LIMIT), level })
+    if (!systemID) return
+    const query = new URLSearchParams({ page: String(page), limit: String(LIMIT), level, systemID })
     if (search.trim()) query.set('search', search.trim())
     if (from) query.set('from', from)
     if (to) query.set('to', to)
@@ -71,7 +87,7 @@ export default function AppLogPage() {
     return () => {
       current = false
     }
-  }, [page, level, search, from, to])
+  }, [page, systemID, level, search, from, to])
 
   async function inspect(logAppId: number) {
     try {
@@ -97,7 +113,17 @@ export default function AppLogPage() {
   return (
     <>
       <h2>System Audit &amp; App Logs</h2>
-      <div className="toolbar">
+      <div className="toolbar log-toolbar">
+        <label>
+          App
+          <select value={systemID} onChange={(e) => filter(setSystemID)(e.target.value)}>
+            {apps.map((a) => (
+              <option key={a.systemName} value={a.systemName}>
+                {a.appName} ({a.systemName})
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           Level
           <select value={level} onChange={(e) => filter(setLevel)(e.target.value)}>

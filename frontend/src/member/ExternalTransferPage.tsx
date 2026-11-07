@@ -11,7 +11,7 @@ import type { Account, Preview, Receipt } from './types'
 type DateRules = { earliest: string; holidays: string[] }
 type Bank = { state: 'idle' | 'checking' | 'ok' | 'error'; name?: string }
 
-/** UC-ACH-ORG-01 External ACH Transfer (Other Bank): enter details, review, confirm, receipt. */
+/** UC-ACH-ORG-01 External ACH Transfer, named "Add ACH Transfer" on screen (Ba, 2026-11-07): enter details, review, confirm, receipt. */
 export default function ExternalTransferPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [dateRules, setDateRules] = useState<DateRules | null>(null)
@@ -157,8 +157,8 @@ export default function ExternalTransferPage() {
 
   return (
     <section>
-      <p className="breadcrumb">Transfer &amp; Pay › External ACH Transfer (Other Bank)</p>
-      <h2>External ACH Transfer (Other Bank)</h2>
+      <p className="breadcrumb">Transfer &amp; Pay › Add ACH Transfer</p>
+      <h2>Add ACH Transfer</h2>
       {banner && <p className="page-error" role="alert">{banner}</p>}
 
       {step === 'form' && (

@@ -225,4 +225,64 @@ class TransferServiceIntegrationTest {
         assertTrue(service.receipt(MEMBER, serNo).isPresent());
         assertTrue(service.receipt("SOMEONE-ELSE", serNo).isEmpty());
     }
+
+    // ---- External Bank Accounts (Ba's ach-origination-system.yaml) ----
+
+    private TransferService.NewExternalAccount account(String acctNo) {
+        return new TransferService.NewExternalAccount("JPMorgan Chase", "021000021", acctNo, "SAVINGS", "Jane  Smith");
+    }
+
+    private String invalidAdd(TransferService.NewExternalAccount r) {
+        TransferRejected e = assertThrows(TransferRejected.class, () -> service.addExternalAccount(MEMBER, r));
+        assertEquals(Kind.INVALID, e.kind());
+        return e.getMessage();
+    }
+
+    @Test
+    void aNewExternalAccountIsPendingMicroDepositsAndShowsFirstInTheList() {
+        service.submit(MEMBER, request("10.00")); // a transfer saves its recipient as an ACTIVE external account
+        TransferService.AddedExternalAccount added = service.addExternalAccount(MEMBER, account("55501234"));
+        assertEquals("ACTIVE_PENDING_MICRO_DEPOSIT", added.status());
+
+        String bank = jdbc.queryForObject("SELECT bankName FROM ABADirectory WHERE routingNo = '021000021'", String.class);
+        var list = service.externalAccounts(MEMBER);
+        assertEquals(2, list.size());
+        assertEquals(new TransferService.ExternalAccount(added.externalAccountId(), bank, "••••1234", "SAVINGS",
+                "ACTIVE_PENDING_MICRO_DEPOSIT"), list.get(0));
+        assertEquals("ACTIVE", list.get(1).status());
+        assertEquals("••••6789", list.get(1).maskedAccountNumber());
+        assertTrue(service.externalAccounts("SOMEONE-ELSE").stream().noneMatch(a -> a.externalAccountId().equals(added.externalAccountId())));
+
+        var row = jdbc.queryForMap("SELECT acctStatus, acctOwner, memberNo, lastModBy, sourceID FROM " + orig
+                + ".ACHOrigRecvAccount WHERE recvAcctSerNo = ?", added.externalAccountId());
+        assertEquals(java.util.Map.of("acctStatus", "PENDING_MICRO_DEP", "acctOwner", "JANE SMITH", "memberNo", MEMBER,
+                "lastModBy", MEMBER, "sourceID", "ONLINE_BANKING"), row);
+        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM AppLog WHERE systemID = 'ACH_ORIG' AND logMesg = ?", Integer.class,
+                "Member " + MEMBER + " added external account " + added.externalAccountId() + " ending 1234, pending micro-deposit verification"));
+    }
+
+    @Test
+    void aTransferToAPendingAccountUsesItAndMakesItActive() {
+        String serNo = service.addExternalAccount(MEMBER,
+                new TransferService.NewExternalAccount("JPMorgan Chase", "021000021", "123456789", "CHECKING", "Jane Smith")).externalAccountId();
+        service.submit(MEMBER, request("10.00")); // the same recipient: Jane Smith, 021000021, 123456789, Checking
+        var list = service.externalAccounts(MEMBER);
+        assertEquals(1, list.size());
+        assertEquals(serNo, list.get(0).externalAccountId());
+        assertEquals("ACTIVE", list.get(0).status());
+    }
+
+    @Test
+    void anExternalAccountIsCheckedLikeATransferRecipientAndOnlyAddedOnce() {
+        service.addExternalAccount(MEMBER, account("55501234"));
+        assertEquals("This account is already in your external bank accounts.", invalidAdd(account("55501234")));
+        assertEquals(RoutingService.INVALID, invalidAdd(new TransferService.NewExternalAccount("Bank", "021000022", "55501234", "SAVINGS", "Jane")));
+        assertEquals("Enter the account number: 4 to 17 digits.", invalidAdd(account("123")));
+        assertEquals("Choose Checking or Savings.", invalidAdd(new TransferService.NewExternalAccount("Bank", "021000021", "55509999", "MONEY_MARKET", "Jane")));
+        assertEquals("Enter the bank name.", invalidAdd(new TransferService.NewExternalAccount(" ", "021000021", "55509999", "SAVINGS", "Jane")));
+        assertEquals("Enter the account holder's name: up to 22 letters, numbers and spaces.",
+                invalidAdd(new TransferService.NewExternalAccount("Bank", "021000021", "55509999", "SAVINGS", "<script>")));
+        assertEquals("Fill in the account details.", invalidAdd(null));
+        assertEquals(1, service.externalAccounts(MEMBER).size());
+    }
 }

@@ -105,7 +105,7 @@ Spec: [Use-Case-ACH-Origination-Transfer-UI.docx](design/Use-Case-ACH-Originatio
 
 | Step | Backend | UI |
 | --- | --- | --- |
-| 1–2 | `GET /api/member/accounts` returns the logged-in member's active accounts and available balances | **Transfer & Pay** menu → **External ACH Transfer (Other Bank)**; source account picker that shows the balance |
+| 1–2 | `GET /api/member/accounts` returns the logged-in member's active accounts and available balances | **Transfer & Pay** menu → **Add ACH Transfer** (named "External ACH Transfer (Other Bank)" until 2026-11-07); source account picker that shows the balance |
 | 3 | `GET /api/routing/{rtn}` runs the 3-7-1 check digit and the directory lookup, then returns the bank name | Inline bank name once 9 digits are typed. On failure, EX-01 shows "Invalid routing number. Please check the 9-digit ABA number." and Submit stays disabled. |
 | 4 | — | Amount input with commas and a max guardrail. The date picker blocks weekends and holidays. Frequency fields; memo (max 10 characters → `companyEntryDesc`). |
 | 5 | `POST /api/transfers/preview` checks limits (sum of the member's pending and sent transfers within `dayNo` days, plus this one), the OFAC name check, and the **Plaid account check** (T3) | EX-02 modal: "This transfer exceeds your daily external limit of $X…" |
@@ -153,7 +153,7 @@ The Transfer UI is finished when all of these hold:
   - the weekend/holiday date rules;
   - the server rejects a payload that skips UI validation;
   - `lastModBy` can't be spoofed.
-- The screens use the design's wording: the "Transfer & Pay" menu, "External ACH Transfer (Other Bank)", "Confirm Transfer", tracking details and a receipt download.
+- The screens use the design's wording: the "Transfer & Pay" menu, "External ACH Transfer (Other Bank)", "Confirm Transfer", tracking details and a receipt download. Since 2026-11-07 the menu item, page title and breadcrumb say **Add ACH Transfer**, as Ba asked.
 
 ---
 
@@ -285,6 +285,25 @@ Assumptions, to replace when the use cases arrive:
 - **B3. Receiving Reversal.** There's no receiving reversal table, so the screen shows received entries that Nacha marks as reversals.
 - **B4. Sample rows.** V14 adds made-up rows so the screens aren't empty.
 
+## External Bank Accounts (Ba, 2026-11-07)
+
+Ba asked for an **External Bank Accounts** link in the member's ACH Origination UI: a list of the member's registered external accounts, and an **Add New External Bank Account** button whose new account then shows in the list. The API is Ba's `ach-origination-system.yaml`.
+
+| Piece | Built |
+| --- | --- |
+| Menu | **Transfer & Pay ▾**: **Add ACH Transfer**, **External Bank Accounts** |
+| List | `GET /api/v1/holders/{holderId}/external-accounts`: bank (from `ABADirectory`), masked account number, type, status. Newest first. |
+| Add | `POST /api/v1/holders/{holderId}/external-accounts` with Ba's fields `bankName`, `routingNumber`, `accountNumber`, `accountType`, `accountHolderName`; returns `201` with `externalAccountId` and `status` |
+| Table | `ACHOrigRecvAccount`, the table transfers already save recipients in. `externalAccountId` is `recvAcctSerNo` (`REC-yyyyMMdd-nnnn`). |
+| Log | `ACH_ORIG INFO Member … added external account … ending 1234, pending micro-deposit verification` |
+
+Decisions:
+- **EA1. Status. ✅ Ba's `ACTIVE_PENDING_MICRO_DEPOSIT`.** Credit unions verify a new external account with two trial deposits under $1 and keep it pending until the member confirms the amounts (1–5 business days), and Nacha requires account validation before an account number is first used for WEB debits. The value is 28 characters but `acctStatus` is `VARCHAR(20)`, so, keeping the design's column, it's stored as `PENDING_MICRO_DEP` and the API returns Ba's value.
+- **EA2. The list.** Ba's list returns "active" accounts, and a new account must show in it, so it returns `ACTIVE` and `ACTIVE_PENDING_MICRO_DEPOSIT` accounts. Recipients saved by earlier transfers appear as `ACTIVE`. A transfer to a saved account that is still pending reuses it and makes it `ACTIVE`, because the transfer's own account check (EX-03) has just verified it, so the list never shows the same account twice that way.
+- **EA3. `holderId`** is the member number, and must be the signed-in member's own (403 otherwise). `/api/me` now returns `memberNo` so the screen can build the path.
+- **EA4. Checks.** The same as a transfer's recipient: name up to 22 characters, a valid routing number in the directory, 4–17 digit account number, Checking or Savings. `bankName` is required, as in Ba's spec; the list shows the directory's name for the routing number. The same routing number, account number and type can't be added twice.
+- **EA5. Not built yet.** Sending the micro-deposits and the member confirming them, removing an account, and picking a saved account on Add ACH Transfer.
+
 ## UC-SYS-LOG-01: App Log capture and System Audit & App Logs UI
 
 Spec: [Use-Case-AppLog-UI.docx](design/Use-Case-AppLog-UI.docx). Every row goes through one function, `AppLogRepository.log(...)`, which is the only code that inserts into `AppLog`.
@@ -315,7 +334,7 @@ We log one row per business action, not one per SQL statement. OWASP's logging g
 - **L3. Transactions.** A row written inside a transaction commits or rolls back with its action, so a failed action can't leave a success row in `AppLog`.
 - **L4. Safety.** Messages lose control characters and stop at 1,000 characters, and a failed sign-in logs the name only if it's a real login, because someone may type a password in that box. Stack traces stop at 60,000 characters. Rows never hold passwords, MFA codes or full account numbers.
 - **L5. EX-01.** If the insert fails, the entry goes to `~/dev/logs/app-error.log` (`APP_LOG_FALLBACK_FILE`), with no retry. Inside a transaction it waits for the outcome, and an action that failed is marked `[NOT COMMITTED]`. A write waits at most 5 seconds for a database connection.
-- **L6. Filters.** Level, keyword in `logMesg`, and From and To dates. The dates are whole days, both included.
+- **L6. Filters.** App, level, keyword in `logMesg`, and From and To dates. The dates are whole days, both included. **App** (Ba, 2026-11-07) lists the 9 apps from System Configuration plus **ACH Payments System (`ACH_SYS`)**, which holds sign-ins, failed sign-ins and access-denied rows; the first app is selected, as in System Configuration. Today rows are written only as `ACH_ORIG`, `ACH_RCV` or `ACH_SYS`: the seven back-office apps are read-only screens that log nothing yet, so their lists are empty.
 - **L7. Button name.** The use case says both "Inspect" and "View Details". The screen uses **View Details**, from its implementation section.
 - **L8. Role.** The use case names `ROLE_ADMIN` or `ROLE_SYS_OPS`. We use `SYS_ADMIN`.
 - **L9. Grid.** A System ID column is added to the use case's columns.

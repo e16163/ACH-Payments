@@ -19,6 +19,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.achpayments.param.ParamApps;
+
 /** UC-SYS-LOG-01 phase 2, read-only. Who gets here is set in SecurityConfig. */
 @RestController
 @RequestMapping("/api/v1/admin/logs")
@@ -44,7 +46,8 @@ public class AppLogController {
     /** Steps 4-6. {@code from} and {@code to} are whole days, both included. */
     @GetMapping
     public Page logs(@RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int limit,
-            @RequestParam(defaultValue = "ALL") String level, @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "ALL") String level, @RequestParam(required = false) String systemID,
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
         if (page < 1 || limit < 1 || limit > 100 || !(level.equals("ALL") || LEVELS.contains(level))) {
@@ -53,8 +56,16 @@ public class AppLogController {
         if (from != null && to != null && from.isAfter(to)) {
             throw new IllegalArgumentException("The From date can't be after the To date.");
         }
+        // The app list: the 9 apps (as in System Configuration) plus ACH_SYS, which holds sign-in and security rows
+        if (systemID != null && !ParamApps.APPS.containsKey(systemID) && !systemID.equals(AppLogRepository.ACH_SYS)) {
+            throw new IllegalArgumentException("Unknown app.");
+        }
         List<String> conditions = new ArrayList<>();
         List<Object> values = new ArrayList<>();
+        if (systemID != null) {
+            conditions.add("systemID = ?");
+            values.add(systemID);
+        }
         if (!level.equals("ALL")) {
             conditions.add("logLevel = ?");
             values.add(level);

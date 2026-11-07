@@ -44,7 +44,7 @@ class AppLogIntegrationTest {
     }
 
     private AppLogController.Page search(String level, String term) {
-        return controller.logs(1, 20, level, term, null, null);
+        return controller.logs(1, 20, level, null, term, null, null);
     }
 
     private long id(String message) {
@@ -79,7 +79,7 @@ class AppLogIntegrationTest {
         assertEquals(21, first.total());
         assertEquals(20, first.items().size());
         assertEquals(TAG + "row 21", first.items().getFirst().logMesg());
-        assertEquals(List.of(TAG + "row 1"), controller.logs(2, 20, "ALL", TAG, null, null).items().stream()
+        assertEquals(List.of(TAG + "row 1"), controller.logs(2, 20, "ALL", null, TAG, null, null).items().stream()
                 .map(AppLogController.Row::logMesg).toList());
     }
 
@@ -90,6 +90,19 @@ class AppLogIntegrationTest {
         appLog.log("ACH_ORIG", "ERROR", TAG + "beta");
         assertEquals(1, search("ERROR", TAG + "ALPHA").total()); // the keyword ignores case
         assertEquals(2, search("ALL", TAG + "alpha").total());
+    }
+
+    @Test
+    void filtersByApp() {
+        appLog.log("ACH_ORIG", "INFO", TAG + "orig");
+        appLog.log("ACH_RCV", "INFO", TAG + "rcv");
+        appLog.log("ACH_SYS", "WARN", TAG + "sys");
+        assertEquals(List.of(TAG + "rcv"), controller.logs(1, 20, "ALL", "ACH_RCV", TAG, null, null).items().stream()
+                .map(AppLogController.Row::logMesg).toList());
+        assertEquals(1, controller.logs(1, 20, "ALL", "ACH_SYS", TAG, null, null).total());
+        assertEquals(0, controller.logs(1, 20, "ALL", "ACH_RCV_NOC", TAG, null, null).total());
+        assertEquals(3, search("ALL", TAG).total());
+        assertThrows(IllegalArgumentException.class, () -> controller.logs(1, 20, "ALL", "NOPE", null, null, null));
     }
 
     @Test
@@ -109,11 +122,11 @@ class AppLogIntegrationTest {
         jdbc.update("UPDATE AppLog SET logTm = '2020-03-02 00:00:00.000' WHERE logMesg = ?", TAG + "second");
         LocalDate first = LocalDate.of(2020, 3, 1);
         LocalDate second = LocalDate.of(2020, 3, 2);
-        assertEquals(1, controller.logs(1, 20, "ALL", TAG, first, first).total());
-        assertEquals(1, controller.logs(1, 20, "ALL", TAG, second, second).total());
-        assertEquals(2, controller.logs(1, 20, "ALL", TAG, first, second).total());
-        assertEquals(1, controller.logs(1, 20, "ALL", TAG, second, null).total());
-        assertEquals(1, controller.logs(1, 20, "ALL", TAG, null, first).total());
+        assertEquals(1, controller.logs(1, 20, "ALL", null, TAG, first, first).total());
+        assertEquals(1, controller.logs(1, 20, "ALL", null, TAG, second, second).total());
+        assertEquals(2, controller.logs(1, 20, "ALL", null, TAG, first, second).total());
+        assertEquals(1, controller.logs(1, 20, "ALL", null, TAG, second, null).total());
+        assertEquals(1, controller.logs(1, 20, "ALL", null, TAG, null, first).total());
     }
 
     @Test

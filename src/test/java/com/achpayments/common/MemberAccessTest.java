@@ -34,6 +34,7 @@ import com.achpayments.outbound.EodFileJob;
 import com.achpayments.outbound.EodFileStore;
 import com.achpayments.param.ParamCache;
 import com.achpayments.param.ParamService;
+import com.achpayments.transfer.ExternalAccountController;
 import com.achpayments.transfer.TransferController;
 import com.achpayments.transfer.TransferDates;
 
@@ -41,7 +42,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** USE-CASES T7: members must pass MFA before the transfer APIs; admins and members stay in their own areas. */
 @WebMvcTest({MeController.class, TransferController.class, ParamController.class, ReceivingController.class,
-        BackOfficeController.class, EodController.class, AppLogController.class})
+        BackOfficeController.class, EodController.class, AppLogController.class, ExternalAccountController.class})
 @Import({SecurityConfig.class, MfaService.class, UnhandledErrorLogger.class, MemberAccessTest.Clocks.class})
 @TestPropertySource(properties = {"app.admin-password=admin-pw", "app.orig-password=orig-pw", "app.recv-password=recv-pw",
         "app.member-password=member-pw"})
@@ -124,7 +125,32 @@ class MemberAccessTest {
                 .andExpect(jsonPath("$.username").value(MEMBER))
                 .andExpect(jsonPath("$.roles.length()").value(1))
                 .andExpect(jsonPath("$.roles[0]").value("MEMBER"))
-                .andExpect(jsonPath("$.mfaVerified").value(true));
+                .andExpect(jsonPath("$.mfaVerified").value(true))
+                .andExpect(jsonPath("$.memberNo").value(MEMBER_NO));
+    }
+
+    @Test
+    void externalAccountsNeedMfaAndTheMembersOwnHolderId() throws Exception {
+        String own = "/api/v1/holders/" + MEMBER_NO + "/external-accounts";
+        String body = "{\"bankName\":\"Bank\",\"routingNumber\":\"021000021\",\"accountNumber\":\"12345678\","
+                + "\"accountType\":\"CHECKING\",\"accountHolderName\":\"Jane Smith\"}";
+        MockHttpSession session = new MockHttpSession();
+        mvc.perform(get(own).session(session).with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden()); // no MFA yet
+        verify(session, sendCode(session)).andExpect(status().isOk());
+
+        mvc.perform(get(own).session(session).with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isOk());
+        org.mockito.Mockito.verify(transfers).externalAccounts(MEMBER_NO);
+        mvc.perform(post(own).session(session).with(httpBasic(MEMBER, "member-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        org.mockito.Mockito.verify(transfers).addExternalAccount(org.mockito.ArgumentMatchers.eq(MEMBER_NO), org.mockito.ArgumentMatchers.any());
+
+        String other = "/api/v1/holders/SOMEONE-ELSE/external-accounts";
+        mvc.perform(get(other).session(session).with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
+        mvc.perform(post(other).session(session).with(httpBasic(MEMBER, "member-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        org.mockito.Mockito.verify(transfers, org.mockito.Mockito.never()).externalAccounts("SOMEONE-ELSE");
+        mvc.perform(get(own).with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get(own).with(httpBasic("achorig", "orig-pw"))).andExpect(status().isForbidden());
     }
 
     @Test
@@ -368,7 +394,8 @@ class MemberAccessTest {
         mvc.perform(get("/api/eod/status").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/transfers/dates").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/me").with(httpBasic("achrecv", "recv-pw")))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.roles[0]").value("ACH_RECV_OPS"));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.roles[0]").value("ACH_RECV_OPS"))
+                .andExpect(jsonPath("$.memberNo").doesNotExist());
     }
 
     @Test

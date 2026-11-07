@@ -74,6 +74,7 @@ type RecvFile = {
   fileID: string; fileName: string; fileHeaderDt: string; fileHeaderTm: string; fedStatus: string; processStatus: string; modifier: string
 }
 type RecvRow = RecvEntry & { tranID: number; transferSerNo: string; transferVersion: number; fileID: string; batchID: string; fedStatus: string; sourceID: string; createTm: string }
+type ExternalAccount = { recvAcctSerNo: string; routingNo: string; acctNo: string; acctType: string; acctOwner: string; acctStatus: string }
 type LogRow = { logAppId: number; systemID: string | null; logLevel: string; logMesg: string; logExceptionData: string | null; logTm: string }
 type State = {
   user: string | null
@@ -87,9 +88,12 @@ type State = {
   nextTrace: number
   receivedFiles: RecvFile[]
   receivedEntries: RecvRow[]
+  externalAccounts: ExternalAccount[] // newest last
 }
 
-const KEY = 'ach-demo-state-4' // new name: state saved by an older demo has no logs
+const KEY = 'ach-demo-state-5' // new name: state saved by an older demo has no logs or external accounts
+const MEMBER_NO = 'M10982347'
+const PENDING_MICRO_DEPOSIT = 'ACTIVE_PENDING_MICRO_DEPOSIT' // TransferService: stored as PENDING_MICRO_DEP
 
 function freshState(): State {
   return {
@@ -131,6 +135,8 @@ function freshState(): State {
       effectiveDt: '2026-11-05', settlementDt: '2026-11-05', originatorID: '9000123456', amount: 3450.5, recvAcctID: '987654321012', recvName: 'JOHN DOE',
       transactionDiscData: 'S', traceNo: '051000031234568', fedStatus: 'SETTLED', sourceID: 'PAYROLL_SYS', createTm: '2026-11-01T16:00:00', batchNo: 2,
     }],
+    // The sample ACHOrigRecvAccount row (V7)
+    externalAccounts: [{ recvAcctSerNo: 'REC-SRV-20261102-01', routingNo: '051000033', acctNo: '987654321012', acctType: 'CHECKING', acctOwner: 'JOHN DOE', acctStatus: 'ACTIVE' }],
   }
 }
 
@@ -268,12 +274,14 @@ function logs(s: State, path: string) {
   const page = Number(q.get('page') ?? 1)
   const limit = Number(q.get('limit') ?? 20)
   const level = q.get('level') ?? 'ALL'
+  const systemID = q.get('systemID')
+  if (systemID && systemID !== 'ACH_SYS' && !APPS.some(([name]) => name === systemID)) fail(400, 'Unknown app.')
   const search = (q.get('search') ?? '').toLowerCase()
   const from = q.get('from')
   const to = q.get('to')
   if (from && to && from > to) fail(400, "The From date can't be after the To date.")
   const rows = s.logs
-    .filter((l) => (level === 'ALL' || l.logLevel === level) && l.logMesg.toLowerCase().includes(search)
+    .filter((l) => (!systemID || l.systemID === systemID) && (level === 'ALL' || l.logLevel === level) && l.logMesg.toLowerCase().includes(search)
       && (!from || l.logTm.slice(0, 10) >= from) && (!to || l.logTm.slice(0, 10) <= to))
     .sort((a, b) => b.logTm.localeCompare(a.logTm) || b.logAppId - a.logAppId)
   return { items: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit }
@@ -284,7 +292,7 @@ function route(s: State, method: string, path: string, body: Body): unknown {
   const role = USERS[s.user].role
   const denied = () => fail(403, "You don't have permission to do this.")
 
-  if (path === '/me') return { username: s.user, roles: [role], mfaVerified: s.mfaVerified }
+  if (path === '/me') return { username: s.user, roles: [role], mfaVerified: s.mfaVerified, memberNo: role === 'MEMBER' ? MEMBER_NO : null }
 
   if (path.startsWith('/v1/admin/logs')) {
     if (role !== 'SYS_ADMIN') denied()
@@ -318,6 +326,11 @@ function route(s: State, method: string, path: string, body: Body): unknown {
 
   if (path === '/transfers/dates') return { earliest: earliest(), holidays: HOLIDAYS }
   if (path === '/member/accounts') return accounts(s)
+  const holder = /^\/v1\/holders\/([^/]+)\/external-accounts$/.exec(path)
+  if (holder) {
+    if (decodeURIComponent(holder[1]) !== MEMBER_NO) denied()
+    return method === 'POST' ? addExternalAccount(s, body) : externalAccounts(s)
+  }
   const routing = /^\/routing\/(.*)$/.exec(path)
   if (routing) {
     const routingNo = decodeURIComponent(routing[1])
@@ -473,8 +486,49 @@ function submit(s: State, body: Body) {
     effectiveDt: c.effectiveDt, frequency: c.frequency, memo: c.memo, submitted: isoDateTime(new Date()),
   }
   s.transfers.push(t)
+  // TransferService.recvAccount: the recipient is saved as an ACTIVE external account, unless the same one is already there.
+  // A saved one still pending micro-deposits becomes ACTIVE, because the transfer's account check has just verified it.
+  const saved = s.externalAccounts.filter((a) => a.routingNo === c.routingNo && a.acctNo === c.acctNo && a.acctType === c.acctType && a.acctOwner === c.recvName)
+  const reuse = saved.find((a) => a.acctStatus === 'ACTIVE') ?? saved.find((a) => a.acctStatus === PENDING_MICRO_DEPOSIT)
+  if (reuse) reuse.acctStatus = 'ACTIVE'
+  else {
+    s.externalAccounts.push({ recvAcctSerNo: nextRecvSerNo(s), routingNo: c.routingNo, acctNo: c.acctNo, acctType: c.acctType, acctOwner: c.recvName, acctStatus: 'ACTIVE' })
+  }
   log(s, 'ACH_ORIG', 'INFO', `Member M10982347 submitted transfer ${t.transferSerNo} for ${((c.amount + c.fee) / 100).toFixed(2)}, memo status ${memoStatus}`)
   return receipt(t)
+}
+
+function nextRecvSerNo(s: State): string {
+  const prefix = `REC-${isoDate(new Date()).replace(/-/g, '')}-`
+  return prefix + pad(s.externalAccounts.filter((a) => a.recvAcctSerNo.startsWith(prefix)).length + 1, 4)
+}
+
+/** TransferService.externalAccounts: newest first, active and pending ones. */
+function externalAccounts(s: State) {
+  return [...s.externalAccounts].reverse().map((a) => ({
+    externalAccountId: a.recvAcctSerNo, bankName: bankName(a.routingNo), maskedAccountNumber: `••••${last4(a.acctNo)}`,
+    accountType: a.acctType, status: a.acctStatus,
+  }))
+}
+
+/** TransferService.addExternalAccount */
+function addExternalAccount(s: State, r: Body) {
+  const owner = String(r.accountHolderName ?? '').trim().replace(/\s+/g, ' ')
+  if (!/^[A-Za-z0-9 .,'&-]{1,22}$/.test(owner)) fail(400, "Enter the account holder's name: up to 22 letters, numbers and spaces.")
+  if (!String(r.bankName ?? '').trim()) fail(400, 'Enter the bank name.')
+  const routingNo = String(r.routingNumber ?? '')
+  if (!bankName(routingNo)) fail(400, 'Invalid routing number. Please check the 9-digit ABA number.')
+  const acctNo = String(r.accountNumber ?? '')
+  if (!/^\d{4,17}$/.test(acctNo)) fail(400, 'Enter the account number: 4 to 17 digits.')
+  const acctType = String(r.accountType ?? '')
+  if (acctType !== 'CHECKING' && acctType !== 'SAVINGS') fail(400, 'Choose Checking or Savings.')
+  if (s.externalAccounts.some((a) => a.routingNo === routingNo && a.acctNo === acctNo && a.acctType === acctType)) {
+    fail(400, 'This account is already in your external bank accounts.')
+  }
+  const added = { recvAcctSerNo: nextRecvSerNo(s), routingNo, acctNo, acctType, acctOwner: owner.toUpperCase(), acctStatus: PENDING_MICRO_DEPOSIT }
+  s.externalAccounts.push(added)
+  log(s, 'ACH_ORIG', 'INFO', `Member ${MEMBER_NO} added external account ${added.recvAcctSerNo} ending ${last4(acctNo)}, pending micro-deposit verification`)
+  return { externalAccountId: added.recvAcctSerNo, status: PENDING_MICRO_DEPOSIT }
 }
 
 function receipt(t: Transfer) {

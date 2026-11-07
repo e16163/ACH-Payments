@@ -49,7 +49,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/v1/ach/receiving/**").hasAnyRole("ACH_RECV_OPS", "SUPPORT")
                         .requestMatchers("/api/member/mfa/**").hasRole("MEMBER")
                         // UC-ACH-ORG-01 precondition: the member is logged in AND has passed MFA
-                        .requestMatchers("/api/member/**", "/api/transfers/**", "/api/routing/**").access(MEMBER_WITH_MFA)
+                        .requestMatchers("/api/member/**", "/api/transfers/**", "/api/routing/**", "/api/v1/holders/**").access(MEMBER_WITH_MFA)
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll()) // the React app's static files
                 .httpBasic(Customizer.withDefaults())

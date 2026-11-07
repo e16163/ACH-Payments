@@ -41,7 +41,7 @@ Keep the $2.50 fee; Part 2 uses it.
 2. Click **Send verification code**. The demo shows the code on screen; a real credit union would text it.
 3. Type the code and click **Verify**. **Accounts** opens, with balances and account numbers masked to the last 4.
 
-**Navigate:** **Transfer & Pay ▾ → External ACH Transfer (Other Bank)**.
+**Navigate:** **Transfer & Pay ▾ → Add ACH Transfer**.
 
 **Step 2 (source account):** **Primary Checking ••••1920** is picked, with "Available balance: $8,500.00".
 
@@ -80,6 +80,13 @@ Keep the $2.50 fee; Part 2 uses it.
 3. Click **Done**, then **Accounts**. Checking now shows **$6,997.50**: $1,502.50 is on memo hold.
 
 **OFAC screening:** start another transfer with recipient name `Blocked Test Person`. Keep it; Part 3 uses it. That's a made-up name on the simulated SDN list. The review page says "This transfer will be reviewed by our compliance team before it's sent." The result is **Transfer under review**, and no money is held.
+
+## Part 2B: External Bank Accounts
+
+1. Still signed in as **member**, click **Transfer & Pay ▾ → External Bank Accounts**. The list shows the sample account, **Sample Bank ••••1012**, Checking, **Active**, plus the recipient accounts of your Part 2 transfers (••••6789), because a transfer saves its recipient as an active external account.
+2. Click **Add New External Bank Account**. Enter `Jane Smith`, routing `021000021` (the bank name appears), account `55501234`, and **Savings**. Click **Add Account**.
+3. The new account is first in the list, with status **Pending micro-deposit verification**, as credit unions do before an external account can be used.
+4. Add the same account again: "This account is already in your external bank accounts."
 
 ---
 
@@ -134,10 +141,10 @@ These are read-only for now. They're guessed from your table design until your u
 ## Part 3D: System Audit & App Logs (UC-SYS-LOG-01)
 
 1. Do a few things first: sign in and out as **achorig** and **achrecv**, and type a wrong password once.
-2. Sign in as **admin** and click **System Audit & App Logs**. You see 20 rows a page, newest first, with milliseconds and a colored level badge.
-3. **Filter:** set **Level** to `WARN` to find the failed sign-in. Then try **Search**, **From** and **To**.
+2. Sign in as **admin** and click **System Audit & App Logs**. **App** at the top lists the 9 apps, as in System Configuration, plus **ACH Payments System (ACH_SYS)**. **ACH Origination UI** opens first, with 20 rows a page, newest first, with milliseconds and a colored level badge.
+3. **Filter:** pick **ACH Payments System (ACH_SYS)** and set **Level** to `WARN` to find the failed sign-in. Then try **Search**, **From** and **To**.
 4. **EX-02:** search for `zzz`: "No system logs found matching the selected criteria."
-5. Set **Level** to `ALL`, clear the search, and click **View Details** on the sample `ERROR` row, `Failed to parse incoming ACH file HEADER record`. The stack trace opens in a code viewer, with **Copy stack trace**.
+5. Pick **ACH Receiving UI (ACH_RCV)**, set **Level** to `ALL`, clear the search, and click **View Details** on the sample `ERROR` row, `Failed to parse incoming ACH file HEADER record`. The stack trace opens in a code viewer, with **Copy stack trace**.
 
 **EX-01** only happens when the database is down, so the entry goes to `~/dev/logs/app-error.log` in the full app. The online demo has no database.
 

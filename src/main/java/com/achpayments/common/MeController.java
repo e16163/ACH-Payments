@@ -4,6 +4,7 @@ import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,23 +18,29 @@ import jakarta.servlet.http.HttpServletRequest;
 @RestController
 public class MeController {
 
-    public record Me(String username, List<String> roles, boolean mfaVerified) {
+    /** {@code memberNo} is the member's number (the holderId in Ba's APIs), or null for staff logins. */
+    public record Me(String username, List<String> roles, boolean mfaVerified, String memberNo) {
     }
 
     public record Code(String code) {
     }
 
     private final MfaService mfa;
+    private final String memberUsername;
+    private final String memberNumber;
 
-    public MeController(MfaService mfa) {
+    public MeController(MfaService mfa, @Value("${app.member-username}") String memberUsername,
+            @Value("${app.member-number}") String memberNumber) {
         this.mfa = mfa;
+        this.memberUsername = memberUsername;
+        this.memberNumber = memberNumber;
     }
 
     @GetMapping("/api/me")
     public Me me(Authentication auth, HttpServletRequest request) {
         List<String> roles = auth.getAuthorities().stream().map(a -> a.getAuthority())
                 .filter(a -> a.startsWith("ROLE_")).map(a -> a.substring(5)).toList();
-        return new Me(auth.getName(), roles, MfaService.isVerified(request));
+        return new Me(auth.getName(), roles, MfaService.isVerified(request), auth.getName().equals(memberUsername) ? memberNumber : null);
     }
 
     /** Simulated delivery: the code comes back in the response so the demo screen can show it. */

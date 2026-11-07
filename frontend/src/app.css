@@ -843,6 +843,10 @@ a.button {
 }
 
 /* ---- System Audit & App Logs ---- */
+.log-toolbar {
+  flex-wrap: wrap; /* the App list makes the filters wider than the page */
+}
+
 .toolbar input[type='date'] {
   color-scheme: dark;
 }
@@ -941,4 +945,9 @@ a.button {
 .empty-note {
   font-size: 13px;
   color: var(--mute);
+}
+
+/* ---- External Bank Accounts ---- */
+.external-account-form {
+  margin-bottom: 16px;
 }

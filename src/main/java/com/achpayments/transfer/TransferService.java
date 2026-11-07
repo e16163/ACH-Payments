@@ -148,6 +148,70 @@ public class TransferService {
                 }, memberNo, transferSerNo).stream().findFirst();
     }
 
+    // ---- External Bank Accounts (Ba's ach-origination-system.yaml: /v1/holders/{holderId}/external-accounts) ----
+
+    /** Ba's status for a new account. Credit unions verify a new external account with trial deposits first. */
+    static final String PENDING_MICRO_DEPOSIT = "ACTIVE_PENDING_MICRO_DEPOSIT";
+    /** The same status as stored: ACHOrigRecvAccount.acctStatus is VARCHAR(20), too short for Ba's value. */
+    static final String PENDING_MICRO_DEPOSIT_DB = "PENDING_MICRO_DEP";
+
+    public record NewExternalAccount(String bankName, String routingNumber, String accountNumber, String accountType,
+            String accountHolderName) {
+    }
+
+    public record AddedExternalAccount(String externalAccountId, String status) {
+    }
+
+    public record ExternalAccount(String externalAccountId, String bankName, String maskedAccountNumber, String accountType,
+            String status) {
+    }
+
+    /** The member's active external accounts, newest first, including ones still waiting for micro-deposit verification. */
+    public List<ExternalAccount> externalAccounts(String memberNo) {
+        return jdbc.query("SELECT a.recvAcctSerNo, d.bankName, a.acctNo, a.acctType, a.acctStatus FROM " + orig
+                + ".ACHOrigRecvAccount a LEFT JOIN ABADirectory d ON d.routingNo = a.routingNo "
+                + "WHERE a.memberNo = ? AND a.recvAcctVersion = 1 AND a.acctStatus IN ('ACTIVE', ?) "
+                + "ORDER BY a.lastModTm DESC, a.recvAcctSerNo DESC",
+                (rs, i) -> new ExternalAccount(rs.getString(1), rs.getString(2), "••••" + last4(rs.getString(3)),
+                        rs.getString(4), PENDING_MICRO_DEPOSIT_DB.equals(rs.getString(5)) ? PENDING_MICRO_DEPOSIT : rs.getString(5)),
+                memberNo, PENDING_MICRO_DEPOSIT_DB);
+    }
+
+    /** Saves a new external account as pending micro-deposit verification. The checks match a transfer's recipient checks. */
+    public AddedExternalAccount addExternalAccount(String memberNo, NewExternalAccount r) {
+        if (r == null) {
+            throw invalid("Fill in the account details.");
+        }
+        String owner = r.accountHolderName() == null ? "" : r.accountHolderName().trim().replaceAll("\\s+", " ");
+        if (!owner.matches("[A-Za-z0-9 .,'&-]{1,22}")) {
+            throw invalid("Enter the account holder's name: up to 22 letters, numbers and spaces.");
+        }
+        if (r.bankName() == null || r.bankName().isBlank()) {
+            throw invalid("Enter the bank name.");
+        }
+        routing.bankName(r.routingNumber()).orElseThrow(() -> invalid(RoutingService.INVALID));
+        if (r.accountNumber() == null || !r.accountNumber().matches("\\d{4,17}")) {
+            throw invalid("Enter the account number: 4 to 17 digits.");
+        }
+        if (!"CHECKING".equals(r.accountType()) && !"SAVINGS".equals(r.accountType())) {
+            throw invalid("Choose Checking or Savings.");
+        }
+        Integer existing = jdbc.queryForObject("SELECT COUNT(*) FROM " + orig + ".ACHOrigRecvAccount WHERE memberNo = ? "
+                + "AND routingNo = ? AND acctNo = ? AND acctType = ? AND recvAcctVersion = 1 AND acctStatus IN ('ACTIVE', ?)",
+                Integer.class, memberNo, r.routingNumber(), r.accountNumber(), r.accountType(), PENDING_MICRO_DEPOSIT_DB);
+        if (existing != null && existing > 0) {
+            throw invalid("This account is already in your external bank accounts.");
+        }
+        String serNo = insertWithNextSerial("REC", orig + ".ACHOrigRecvAccount", "recvAcctSerNo", s -> jdbc.update(
+                "INSERT INTO " + orig + ".ACHOrigRecvAccount (recvAcctSerNo, recvAcctVersion, memberNo, acctNo, routingNo, "
+                + "acctType, acctOwner, acctStatus, sourceID, lastModBy) VALUES (?, 1, ?, ?, ?, ?, ?, ?, 'ONLINE_BANKING', ?)",
+                s, memberNo, r.accountNumber(), r.routingNumber(), r.accountType(), owner.toUpperCase(Locale.ROOT),
+                PENDING_MICRO_DEPOSIT_DB, memberNo));
+        appLog.log(ACH_ORIG, "INFO", "Member %s added external account %s ending %s, pending micro-deposit verification"
+                .formatted(memberNo, serNo, last4(r.accountNumber())));
+        return new AddedExternalAccount(serNo, PENDING_MICRO_DEPOSIT);
+    }
+
     // ---- checks ----
 
     private Checked check(String memberNo, TransferRequest r) {
@@ -238,9 +302,13 @@ public class TransferService {
     /** Reuses the member's saved recipient account if it's the same one, otherwise saves a new one. */
     private String recvAccount(String memberNo, Checked c) {
         List<String> existing = jdbc.queryForList("SELECT recvAcctSerNo FROM " + orig + ".ACHOrigRecvAccount WHERE "
-                + "memberNo = ? AND routingNo = ? AND acctNo = ? AND acctType = ? AND acctOwner = ? AND acctStatus = 'ACTIVE' "
-                + "AND recvAcctVersion = 1", String.class, memberNo, c.routingNo(), c.acctNo(), c.acctType(), c.recvName());
+                + "memberNo = ? AND routingNo = ? AND acctNo = ? AND acctType = ? AND acctOwner = ? AND acctStatus IN ('ACTIVE', ?) "
+                + "AND recvAcctVersion = 1 ORDER BY acctStatus = 'ACTIVE' DESC", String.class, memberNo, c.routingNo(), c.acctNo(),
+                c.acctType(), c.recvName(), PENDING_MICRO_DEPOSIT_DB);
         if (!existing.isEmpty()) {
+            // A saved account still pending micro-deposits becomes ACTIVE: the transfer's account check has just verified it
+            jdbc.update("UPDATE " + orig + ".ACHOrigRecvAccount SET acctStatus = 'ACTIVE', lastModBy = ? WHERE recvAcctSerNo = ? "
+                    + "AND recvAcctVersion = 1 AND acctStatus = ?", memberNo, existing.get(0), PENDING_MICRO_DEPOSIT_DB);
             return existing.get(0);
         }
         return insertWithNextSerial("REC", orig + ".ACHOrigRecvAccount", "recvAcctSerNo", serNo -> jdbc.update(
