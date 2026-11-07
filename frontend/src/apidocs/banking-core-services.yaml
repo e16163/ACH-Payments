@@ -1,0 +1,219 @@
+openapi: 3.0.3
+info:
+  title: Banking Core Utility & Compliance API
+  version: 1.0.0
+  description: Enterprise REST API specifications for US routing validation, banking calendar operations, and OFAC sanctions screening.
+paths:
+  /v1/routing-numbers/{routingNumber}/validate:
+    get:
+      summary: Validate Routing Transit Number (RTN)
+      description: Validates a 9-digit US routing number using the ABA checksum algorithm (mod-10).
+      parameters:
+        - name: routingNumber
+          in: path
+          required: true
+          description: The 9-digit ABA routing transit number to validate.
+          schema:
+            type: string
+            example: "021000021"
+      responses:
+        '200':
+          description: Validation result evaluated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  routingNumber:
+                    type: string
+                    example: "021000021"
+                  isValid:
+                    type: boolean
+                    example: true
+                  validationMessage:
+                    type: string
+                    example: "Valid ABA routing transit number."
+
+  /v1/routing-numbers/{routingNumber}:
+    get:
+      summary: Get Bank Directory Profile
+      description: Returns the institution name, master routing ID, servicing office address, and operational capabilities for a given routing number.
+      parameters:
+        - name: routingNumber
+          in: path
+          required: true
+          description: 9-digit routing transit number.
+          schema:
+            type: string
+            example: "021000021"
+      responses:
+        '200':
+          description: Bank directory details retrieved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  routingNumber:
+                    type: string
+                    example: "021000021"
+                  bankName:
+                    type: string
+                    example: "JPMORGAN CHASE BANK, N.A."
+                  officeType:
+                    type: string
+                    enum: [MAIN, BRANCH]
+                    example: "MAIN"
+                  address:
+                    type: object
+                    properties:
+                      street:
+                        type: string
+                        example: "270 PARK AVE"
+                      city:
+                        type: string
+                        example: "NEW YORK"
+                      state:
+                        type: string
+                        example: "NY"
+                      postalCode:
+                        type: string
+                        example: "10017"
+                      country:
+                        type: string
+                        example: "US"
+                  wireEligible:
+                    type: boolean
+                    example: true
+                  achEligible:
+                    type: boolean
+                    example: true
+        '404':
+          description: Routing number not found in directory.
+
+  /v1/calendar/holidays/check:
+    get:
+      summary: Check US Federal Holiday Status
+      description: Determines if a specified date falls on an official US Federal Reserve holiday.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Target calendar date (YYYY-MM-DD format).
+          schema:
+            type: string
+            format: date
+            example: "2026-11-26"
+      responses:
+        '200':
+          description: Holiday status check completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    format: date
+                    example: "2026-11-26"
+                  isHoliday:
+                    type: boolean
+                    example: true
+                  holidayName:
+                    type: string
+                    nullable: true
+                    example: "Thanksgiving Day"
+
+  /v1/calendar/business-days/check:
+    get:
+      summary: Check US Banking Business Day Status
+      description: Evaluates if a given date is an active Federal Reserve settlement day (excluding weekends and Federal holidays).
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Target date (YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+            example: "2026-11-27"
+      responses:
+        '200':
+          description: Business day status evaluated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    format: date
+                    example: "2026-11-27"
+                  isBusinessDay:
+                    type: boolean
+                    example: true
+                  reason:
+                    type: string
+                    example: "Standard business operating day."
+
+  /v1/compliance/ofac/screen:
+    post:
+      summary: Screen Individual or Business Entity against OFAC Lists
+      description: Performs fuzzy-match sanctions screening against the Specially Designated Nationals (SDN) and Consolidated Sanctions List.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - entityName
+                - entityType
+              properties:
+                entityName:
+                  type: string
+                  description: Name of individual or corporate entity to screen.
+                  example: "Acme Trading Corporation"
+                entityType:
+                  type: string
+                  enum: [INDIVIDUAL, BUSINESS]
+                  example: "BUSINESS"
+                matchThreshold:
+                  type: integer
+                  description: Similarity match percentage threshold (0-100). Default is 85.
+                  default: 85
+                  example: 85
+      responses:
+        '200':
+          description: Sanctions screening executed successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  screenId:
+                    type: string
+                    example: "SCR-20261107-99482"
+                  isMatch:
+                    type: boolean
+                    example: false
+                  matchScore:
+                    type: integer
+                    example: 12
+                  hits:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sdnEntryId:
+                          type: string
+                          example: "SDN-10492"
+                        matchedName:
+                          type: string
+                          example: "Acme International Ltd"
+                        listType:
+                          type: string
+                          example: "SDN"
+                        score:
+                          type: integer
+                          example: 78

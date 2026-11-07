@@ -1,0 +1,523 @@
+openapi: 3.0.3
+info:
+  title: ACH Origination & Transfer Management API
+  version: 1.0.0
+  description: Enterprise REST API specifications for managing external accounts, validating origination eligibility, executing outbound/inbound transfers, and managing recurring schedules.
+paths:
+  /v1/holders/{holderId}/external-accounts:
+    post:
+      summary: Add External Bank Account
+      description: Registers and securely saves an external bank account for an account holder into the ACH Origination Database.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - bankName
+                - routingNumber
+                - accountNumber
+                - accountType
+                - accountHolderName
+              properties:
+                bankName:
+                  type: string
+                  example: "Bank of America"
+                routingNumber:
+                  type: string
+                  example: "021000021"
+                accountNumber:
+                  type: string
+                  example: "9876543210"
+                accountType:
+                  type: string
+                  enum: [CHECKING, SAVINGS]
+                  example: "CHECKING"
+                accountHolderName:
+                  type: string
+                  example: "John Doe"
+      responses:
+        '201':
+          description: External account successfully added.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  externalAccountId:
+                    type: string
+                    example: "EXT-ACC-99482"
+                  status:
+                    type: string
+                    example: "ACTIVE_PENDING_MICRO_DEPOSIT"
+    get:
+      summary: List Active External Bank Accounts
+      description: Returns all active registered external bank accounts for a bank account holder by their account holder ID.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+      responses:
+        '200':
+          description: List retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    externalAccountId:
+                      type: string
+                      example: "EXT-ACC-99482"
+                    bankName:
+                      type: string
+                      example: "Bank of America"
+                    maskedAccountNumber:
+                      type: string
+                      example: "••••7654"
+                    accountType:
+                      type: string
+                      example: "CHECKING"
+                    status:
+                      type: string
+                      example: "ACTIVE"
+
+  /v1/holders/{holderId}/eligibility/outbound:
+    post:
+      summary: Validate Outbound ACH Origination Eligibility (Checking/Savings)
+      description: Validates if a holder's checking or savings account (identified by account type and grouping name) is eligible to transfer money out to an external bank.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountType
+                - accountGroupingName
+                - internalAccountNumber
+              properties:
+                accountType:
+                  type: string
+                  enum: [CHECKING, SAVINGS]
+                  example: "CHECKING"
+                accountGroupingName:
+                  type: string
+                  description: Nickname or grouping name at the bank (e.g., "Primary Checking").
+                  example: "Primary Checking"
+                internalAccountNumber:
+                  type: string
+                  example: "1002938475"
+      responses:
+        '200':
+          description: Eligibility check completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  isEligible:
+                    type: boolean
+                    example: true
+                  maxTransferLimit:
+                    type: number
+                    format: double
+                    example: 25000.00
+                  reason:
+                    type: string
+                    example: "Account is active and meets all origination criteria."
+
+  /v1/holders/{holderId}/eligibility/inbound-payment:
+    post:
+      summary: Validate Inbound Payment ACH Eligibility (Credit/Mortgage/Loan)
+      description: Validates if a holder's credit card, mortgage, or loan account is eligible to receive payment from an external bank account.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - accountType
+                - accountNumber
+              properties:
+                accountType:
+                  type: string
+                  enum: [CREDIT_CARD, MORTGAGE, LOAN]
+                  example: "MORTGAGE"
+                accountNumber:
+                  type: string
+                  example: "MTG-9938475"
+      responses:
+        '200':
+          description: Eligibility check completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  isEligible:
+                    type: boolean
+                    example: true
+                  currentBalanceDue:
+                    type: number
+                    format: double
+                    example: 1450.00
+                  reason:
+                    type: string
+                    example: "Account is eligible for inbound payment origination."
+
+  /v1/holders/{holderId}/eligible-accounts:
+    get:
+      summary: List All Eligible Internal Accounts
+      description: Returns all ACH Origination eligible internal accounts for a bank account holder by their account holder ID.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+      responses:
+        '200':
+          description: List of eligible accounts.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    accountId:
+                      type: string
+                      example: "ACC-449201"
+                    accountType:
+                      type: string
+                      example: "CHECKING"
+                    accountGroupingName:
+                      type: string
+                      example: "Primary Checking"
+                    maskedAccountNumber:
+                      type: string
+                      example: "••••8475"
+                    originationEligible:
+                      type: boolean
+                      example: true
+
+  /v1/holders/{holderId}/transfers/outbound:
+    post:
+      summary: Create Outbound ACH Transfer (Checking/Savings to External)
+      description: Initiates a one-time or recurring ACH Origination transfer from an eligible internal checking/savings account to a registered external bank account. Immediate (if during business hours) or future-scheduled.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sourceInternalAccountId
+                - externalAccountId
+                - amount
+                - transferType
+              properties:
+                sourceInternalAccountId:
+                  type: string
+                  example: "ACC-449201"
+                externalAccountId:
+                  type: string
+                  example: "EXT-ACC-99482"
+                amount:
+                  type: number
+                  format: double
+                  example: 1250.00
+                transferType:
+                  type: string
+                  enum: [ONE_TIME, RECURRING]
+                  example: "RECURRING"
+                effectiveDate:
+                  type: string
+                  format: date
+                  description: Start date or execution date (YYYY-MM-DD).
+                  example: "2026-11-09"
+                recurrenceDetails:
+                  type: object
+                  nullable: true
+                  required:
+                    - frequency
+                    - totalOccurrences
+                  properties:
+                    frequency:
+                      type: string
+                      enum: [DAILY, WEEKLY, BIWEEKLY, MONTHLY]
+                      example: "MONTHLY"
+                    totalOccurrences:
+                      type: integer
+                      example: 12
+      responses:
+        '201':
+          description: Outbound transfer scheduled or initiated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transferId:
+                    type: string
+                    example: "TRF-OUT-993847"
+                  status:
+                    type: string
+                    enum: [PENDING, SCHEDULED, PROCESSING, COMPLETED]
+                    example: "SCHEDULED"
+                  estimatedSettlementDate:
+                    type: string
+                    format: date
+                    example: "2026-11-10"
+
+  /v1/holders/{holderId}/transfers/inbound-payment:
+    post:
+      summary: Create Inbound Payment ACH Transfer (External to Loan/Mortgage/Credit)
+      description: Initiates a one-time or recurring ACH Origination transfer pulling from a registered external account to pay off a Credit Card, Mortgage, or Loan account at the bank.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - externalAccountId
+                - targetInternalLoanAccountId
+                - amount
+                - transferType
+              properties:
+                externalAccountId:
+                  type: string
+                  example: "EXT-ACC-99482"
+                targetInternalLoanAccountId:
+                  type: string
+                  example: "MTG-9938475"
+                amount:
+                  type: number
+                  format: double
+                  example: 1450.00
+                transferType:
+                  type: string
+                  enum: [ONE_TIME, RECURRING]
+                  example: "ONE_TIME"
+                effectiveDate:
+                  type: string
+                  format: date
+                  example: "2026-11-09"
+                recurrenceDetails:
+                  type: object
+                  nullable: true
+                  properties:
+                    frequency:
+                      type: string
+                      enum: [DAILY, WEEKLY, BIWEEKLY, MONTHLY]
+                    totalOccurrences:
+                      type: integer
+      responses:
+        '201':
+          description: Payment transfer initiated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transferId:
+                    type: string
+                    example: "TRF-IN-554920"
+                  status:
+                    type: string
+                    example: "SCHEDULED"
+
+  /v1/transfers/{transferId}:
+    put:
+      summary: Update Existing Pending ACH Transfer
+      description: Modifies an existing set-up ACH Origination transfer that has not yet been processed (e.g., amount or date change).
+      parameters:
+        - name: transferId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "TRF-OUT-993847"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount:
+                  type: number
+                  format: double
+                  example: 1300.00
+                effectiveDate:
+                  type: string
+                  format: date
+                  example: "2026-11-12"
+      responses:
+        '200':
+          description: Transfer updated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transferId:
+                    type: string
+                    example: "TRF-OUT-993847"
+                  status:
+                    type: string
+                    example: "UPDATED"
+    delete:
+      summary: Cancel Existing Pending ACH Transfer
+      description: Cancels an existing scheduled ACH transfer that has not yet entered batch processing.
+      parameters:
+        - name: transferId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "TRF-OUT-993847"
+      responses:
+        '200':
+          description: Transfer cancelled successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  transferId:
+                    type: string
+                    example: "TRF-OUT-993847"
+                  status:
+                    type: string
+                    example: "CANCELLED"
+
+  /v1/holders/{holderId}/transfers/history:
+    get:
+      summary: List Historical ACH Origination Transfers
+      description: Returns historical ACH origination transfers given a start date and end date for a given account holder ID.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+        - name: startDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-10-01"
+        - name: endDate
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-11-07"
+      responses:
+        '200':
+          description: Historical transfer list retrieved.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    transferId:
+                      type: string
+                      example: "TRF-OUT-11928"
+                    amount:
+                      type: number
+                      format: double
+                      example: 1250.00
+                    status:
+                      type: string
+                      example: "SETTLED"
+                    settlementDate:
+                      type: string
+                      format: date
+                      example: "2026-10-15"
+
+  /v1/holders/{holderId}/transfers/scheduled:
+    get:
+      summary: List Scheduled ACH Origination Transfers
+      description: Returns all upcoming scheduled or pending ACH origination transfers for an account holder ID.
+      parameters:
+        - name: holderId
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "HOLDER-884920"
+      responses:
+        '200':
+          description: Scheduled transfers retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    transferId:
+                      type: string
+                      example: "TRF-OUT-993847"
+                    amount:
+                      type: number
+                      format: double
+                      example: 1250.00
+                    nextExecutionDate:
+                      type: string
+                      format: date
+                      example: "2026-11-10"
+                    frequency:
+                      type: string
+                      example: "MONTHLY"

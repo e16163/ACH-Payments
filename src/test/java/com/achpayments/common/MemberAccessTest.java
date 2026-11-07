@@ -339,9 +339,16 @@ class MemberAccessTest {
     }
 
     @Test
-    void adminsKeepTheirScreensButNotTheBackOfficeOnes() throws Exception {
-        mvc.perform(get("/api/eod/status").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
-        mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
+    void adminsKeepTheirScreensButNotTheAchOnes() throws Exception {
+        mvc.perform(get("/api/params/systems").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/admin/logs").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/eod/status").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
+        mvc.perform(post("/api/eod/run").with(httpBasic("admin", "admin-pw")).with(csrf())).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
+        mvc.perform(get("/api/v1/ach/receiving/transactions").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("admin", "admin-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}"))
+                .andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/ach/back-office/origination/returns").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/ach/back-office/receiving/returns").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
     }

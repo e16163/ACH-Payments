@@ -295,11 +295,11 @@ function route(s: State, method: string, path: string, body: Body): unknown {
     return params(s, method, path, body)
   }
   if (path.startsWith('/eod')) {
-    if (role !== 'SYS_ADMIN' && role !== 'ACH_ORIG_OPS') denied()
+    if (role !== 'ACH_ORIG_OPS') denied()
     return eod(s, method, path, body)
   }
   if (path.startsWith('/v1/ach/receiving')) {
-    if (role !== 'SYS_ADMIN' && role !== 'ACH_RECV_OPS') denied()
+    if (role !== 'ACH_RECV_OPS') denied()
     return receiving(s, method, path.slice('/v1/ach/receiving'.length), body)
   }
   if (path.startsWith('/v1/ach/back-office/')) {

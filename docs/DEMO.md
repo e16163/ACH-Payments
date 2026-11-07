@@ -87,14 +87,14 @@ Keep the $2.50 fee; Part 2 uses it.
 
 The file normally builds by itself after `FED_FILE_CUTOFF_TIME` (5 PM Eastern) on each banking day. **Run now** does the same thing on demand.
 
-1. Sign out, sign in as **admin**, and click **ACH Origination File**.
+1. Sign out, sign in as **achorig**, and click **ACH Origination File**.
 2. You see:
    - **Waiting for a file (1):** Jane Smith's transfer
    - **Left out (1):** Blocked Test Person, reason **OFAC review**
    - a **Compliance alert** (your EX-01)
 3. **Business date** is already set to the date of Jane's transfer. Run now takes a date because a transfer made today is dated the next banking day or later.
-4. **EX-02 (the Fed is down):** in **System Configuration**, edit `FED_SIM_FAIL_ATTEMPTS` and set it to `3`. Back in **ACH Origination File**, click **Run now**. The file ends in **ERROR** with an **Operations alert**. The full app waits 1 second, then 2, between its 3 tries.
-5. Set `FED_SIM_FAIL_ATTEMPTS` back to `0`, and click **Resend** on the file. It's now **SENT**.
+4. **EX-02 (the Fed is down):** sign in as **admin** and, in **System Configuration**, edit `FED_SIM_FAIL_ATTEMPTS` and set it to `3`. Sign back in as **achorig** and, in **ACH Origination File**, click **Run now**. The file ends in **ERROR** with an **Operations alert**. The full app waits 1 second, then 2, between its 3 tries.
+5. As **admin**, set `FED_SIM_FAIL_ATTEMPTS` back to `0`. As **achorig**, click **Resend** on the file. It's now **SENT**.
 6. Click **View** to read the NACHA file: the file header, batch header, Jane's entry line, the batch and file controls, and the rows of 9s that pad it to a multiple of 10 records. **Download** saves the `.ach` file.
 7. Click **Run now** again: "Nothing is due". A rerun can't duplicate anything.
 
@@ -129,7 +129,7 @@ These are read-only for now. They're guessed from your table design until your u
    - **ACH Receiving Return:** returns we sent, and return requests from other banks
    - **ACH Receiving Reversal:** received entries with `REVERSAL` as the Company Entry Description
    - **ACH Receiving NOC:** NOCs we sent, and the substitutions
-3. **admin** keeps System Configuration, ACH Origination File, ACH Receiving File and ACH Receiving Transactions, and doesn't get these back-office screens.
+3. **admin** has System Configuration, System Audit & App Logs, Open Core Banking API and ACH Payments API, and doesn't get these back-office screens.
 
 ## Part 3D: System Audit & App Logs (UC-SYS-LOG-01)
 
@@ -140,6 +140,13 @@ These are read-only for now. They're guessed from your table design until your u
 5. Set **Level** to `ALL`, clear the search, and click **View Details** on the sample `ERROR` row, `Failed to parse incoming ACH file HEADER record`. The stack trace opens in a code viewer, with **Copy stack trace**.
 
 **EX-01** only happens when the database is down, so the entry goes to `~/dev/logs/app-error.log` in the full app. The online demo has no database.
+
+## Part 3E: API pages
+
+1. Sign in as **admin** and click **Open Core Banking API**. Pick an operation from the **Operation** list, for example **Screen Individual or Business Entity against OFAC Lists**. You see its method and path, description, input parameters, request body and responses, with each field's type, whether it's required, its description and example. The fields of `hits` are listed under it.
+2. Click **ACH Payments API**. The **API** list switches between **ACH Origination API** (11 operations) and **ACH Receiving API** (4 operations).
+
+These pages document the designer's specs. They don't call the APIs, which aren't built yet.
 
 ## Part 4: System Design (in the full app)
 

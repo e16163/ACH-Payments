@@ -41,12 +41,12 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
                         .requestMatchers("/api/params/**", "/api/v1/admin/**").hasRole("SYS_ADMIN")
-                        .requestMatchers("/api/eod/**").hasAnyRole("ACH_ORIG_OPS", "SYS_ADMIN")
+                        .requestMatchers("/api/eod/**").hasRole("ACH_ORIG_OPS")
                         .requestMatchers("/api/v1/ach/back-office/origination/**").hasRole("ACH_ORIG_OPS")
                         .requestMatchers("/api/v1/ach/back-office/receiving/**").hasRole("ACH_RECV_OPS")
-                        // UC-ACH-RCV-02: ACH_RECV_OPS or SUPPORT. Only operations receive files; admins keep this screen too.
-                        .requestMatchers(HttpMethod.POST, "/api/v1/ach/receiving/**").hasAnyRole("ACH_RECV_OPS", "SYS_ADMIN")
-                        .requestMatchers("/api/v1/ach/receiving/**").hasAnyRole("ACH_RECV_OPS", "SUPPORT", "SYS_ADMIN")
+                        // UC-ACH-RCV-02: ACH_RECV_OPS or SUPPORT. Only operations receive files.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/ach/receiving/**").hasRole("ACH_RECV_OPS")
+                        .requestMatchers("/api/v1/ach/receiving/**").hasAnyRole("ACH_RECV_OPS", "SUPPORT")
                         .requestMatchers("/api/member/mfa/**").hasRole("MEMBER")
                         // UC-ACH-ORG-01 precondition: the member is logged in AND has passed MFA
                         .requestMatchers("/api/member/**", "/api/transfers/**", "/api/routing/**").access(MEMBER_WITH_MFA)

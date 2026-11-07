@@ -904,3 +904,41 @@ a.button {
   padding: 12px;
   white-space: pre;
 }
+
+/* ---- Open Core Banking API / ACH Payments API ---- */
+.api-toolbar {
+  flex-wrap: wrap;
+}
+
+.api-toolbar label,
+.api-toolbar select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.badge.method {
+  font-family: var(--mono);
+  background: var(--canvas-mid);
+  color: var(--ink);
+}
+
+.api-response {
+  margin-bottom: 20px;
+}
+
+.api-table-scroll {
+  overflow-x: auto;
+  margin-bottom: 8px;
+}
+
+.api-example {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 280px;
+}
+
+.field-note,
+.empty-note {
+  font-size: 13px;
+  color: var(--mute);
+}

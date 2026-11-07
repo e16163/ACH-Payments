@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { api, ApiError, DEMO, logout } from './api'
 import BackOfficePage from './backoffice/BackOfficePage'
 import { SCREENS } from './backoffice/screens'
@@ -13,12 +13,19 @@ import AppLogPage from './logs/AppLogPage'
 import ParameterPage from './params/ParameterPage'
 import './app.css'
 
+// Admin-only, so the YAML parser and specs load only when an API page opens. A failed download (e.g. after a redeploy) shows a message, not a blank app.
+const ApiSpecPage = lazy(() => import('./apidocs/ApiSpecPage').catch(() => ({
+  default: () => <p className="page-error">This page couldn't be loaded. Reload the page to try again.</p>,
+})))
+
 type Health = { db: string; error?: string }
 type Me = { username: string; roles: string[]; mfaVerified: boolean }
 
 const ROUTES = {
   params: '#/system-configuration',
   appLogs: '#/system-audit-app-logs',
+  coreApi: '#/open-core-banking-api',
+  achApi: '#/ach-payments-api',
   originationFile: '#/ach-origination-file',
   receivingFile: '#/ach-receiving-file',
   receivingTransactions: '#/ach-receiving-transactions',
@@ -83,18 +90,20 @@ export default function App() {
   const memberReady = isMember && me?.mfaVerified
 
   const onTransactions = hash.startsWith(ROUTES.receivingTransactions)
-  const adminElsewhere = hash === ROUTES.appLogs || hash === ROUTES.originationFile || hash === ROUTES.receivingFile || onTransactions
+  const adminElsewhere = hash === ROUTES.appLogs || hash === ROUTES.coreApi || hash === ROUTES.achApi
   const myScreens = SCREENS.filter((s) => me?.roles.includes(s.role))
   const screen = myScreens.find((s) => s.route === hash)
 
   let page = null
   if (signedOut) page = <LoginPage onSignedIn={loadMe} />
   else if (isAdmin && hash === ROUTES.appLogs) page = <AppLogPage />
+  else if (isAdmin && hash === ROUTES.coreApi) page = <ApiSpecPage key={hash} page="core" />
+  else if (isAdmin && hash === ROUTES.achApi) page = <ApiSpecPage key={hash} page="ach" />
   else if (screen) page = <BackOfficePage key={screen.route} screen={screen} />
-  else if (isOrigOps || (isAdmin && hash === ROUTES.originationFile)) page = <AchOriginationFilePage />
-  else if ((isAdmin || isRecvOps) && onTransactions) {
+  else if (isOrigOps) page = <AchOriginationFilePage />
+  else if (isRecvOps && onTransactions) {
     page = <AchReceivingTransactionPage route={ROUTES.receivingTransactions} fileID={decodeURIComponent(hash.slice(ROUTES.receivingTransactions.length + 1))} />
-  } else if (isRecvOps || (isAdmin && hash === ROUTES.receivingFile)) {
+  } else if (isRecvOps) {
     page = <AchReceivingFilePage transactionsRoute={ROUTES.receivingTransactions} />
   } else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
@@ -127,14 +136,16 @@ export default function App() {
             <>
               <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
               <a className={hash === ROUTES.appLogs ? 'active' : ''} href={ROUTES.appLogs}>System Audit &amp; App Logs</a>
+              <a className={hash === ROUTES.coreApi ? 'active' : ''} href={ROUTES.coreApi}>Open Core Banking API</a>
+              <a className={hash === ROUTES.achApi ? 'active' : ''} href={ROUTES.achApi}>ACH Payments API</a>
             </>
           )}
-          {(isAdmin || isOrigOps) && (
-            <a className={(isAdmin ? hash === ROUTES.originationFile : !screen) ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
+          {isOrigOps && (
+            <a className={!screen ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
           )}
-          {(isAdmin || isRecvOps) && (
+          {isRecvOps && (
             <>
-              <a className={(isAdmin ? hash === ROUTES.receivingFile : !onTransactions && !screen) ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>
+              <a className={!onTransactions && !screen ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>
               <a className={onTransactions ? 'active' : ''} href={ROUTES.receivingTransactions}>ACH Receiving Transactions</a>
             </>
           )}
@@ -164,7 +175,7 @@ export default function App() {
       )}
       <main>
         {meError && <p className="page-error">{meError}</p>}
-        {page}
+        <Suspense fallback={<p className="empty-note">Loading…</p>}>{page}</Suspense>
       </main>
       <footer className="statusbar">
         {DEMO ? (

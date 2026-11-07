@@ -181,7 +181,7 @@ The Transfer UI is finished when all of these hold:
 
 - **E1. Which transfers go in tonight's file? ✅ Dated today, as the designer wrote.** 5 PM is after the last Same Day deadline, so the entry settles the next banking day. **Estimated arrival becomes `effectiveDt` + 1 banking day**, on the review page, the receipt and the online demo; today it equals `effectiveDt`. Transfers missed on an earlier day (for example, server down) are still picked up, because the query uses `<=` today.
 - **E2. Status names. ✅ the design's new names.** New transfers are saved as `OFAC_PASSED` / `PENDING_BATCH`. The sample row is updated from `CLEARED` by a new migration, because V7 can't change. `FLAGGED` and `REVIEW` stay. This replaces T6's `CLEARED`.
-- **E3. Screen. ✅ Admin "ACH Origination File" page in the real app and the online demo.** Run now, the list of files with status and totals, items left out, view and download the `.ach`, and Resend on an `ERROR` file. The online demo needs the NACHA format in TypeScript too, so a shared expected file (a golden file) is checked by both the Java and the TypeScript tests to stop them drifting.
+- **E3. Screen. ✅ Admin "ACH Origination File" page in the real app and the online demo.** (Since 2026-11-07 it belongs to `achorig` only; see [API-VIEWER-PLAN.md](API-VIEWER-PLAN.md).) Run now, the list of files with status and totals, items left out, view and download the `.ach`, and Resend on an `ERROR` file. The online demo needs the NACHA format in TypeScript too, so a shared expected file (a golden file) is checked by both the Java and the TypeScript tests to stop them drifting.
 - **E4. Recurring transfers. ✅ Follow the design's table design.** `pTransferSerNo` is "Parent Transfer Serial Number (for recurring transfer series)", so each payment is its own row linked to the first.
   - When a payment goes in a file, or is rejected, the next row is created with the next date, `pTransferSerNo` set to the first row, `transferReqNo` + 1 and `transferReqRemaining` - 1.
   - Dates are counted from the first payment's date (+7, +14 or +n months, so Jan 31 → Feb 28 → Mar 31). A non-banking day moves to the next banking day.
@@ -265,7 +265,7 @@ The designer's instruction: `achorig` sees the ACH origination back office, `ach
 
 | Login | Role | Screens |
 | --- | --- | --- |
-| `admin` | `SYS_ADMIN` | System Configuration, ACH Origination File, ACH Receiving File, ACH Receiving Transactions |
+| `admin` | `SYS_ADMIN` | System Configuration, System Audit & App Logs, Open Core Banking API, ACH Payments API |
 | `achorig` | `ACH_ORIG_OPS` | ACH Origination File, Return, Reversal, Resubmission, NOC |
 | `achrecv` | `ACH_RECV_OPS` | ACH Receiving File, ACH Receiving Transactions, Return, Reversal, NOC |
 
@@ -281,7 +281,7 @@ The designer's instruction: `achorig` sees the ACH origination back office, `ach
 
 Assumptions, to replace when the use cases arrive:
 - **B1. Read-only.** The screens list rows, up to 100 per list, and show every field of a row. Nothing here changes data, because the engines and rules behind each action aren't specified yet.
-- **B2. Admin.** Admin keeps its screens but not these seven.
+- **B2. Admin.** Admin keeps its screens but not these seven. Since 2026-11-07 admin also no longer has ACH Origination File, ACH Receiving File or ACH Receiving Transactions, or their APIs ([API-VIEWER-PLAN.md](API-VIEWER-PLAN.md)).
 - **B3. Receiving Reversal.** There's no receiving reversal table, so the screen shows received entries that Nacha marks as reversals.
 - **B4. Sample rows.** V14 adds made-up rows so the screens aren't empty.
 

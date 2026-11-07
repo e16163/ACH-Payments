@@ -208,11 +208,12 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
   const files = () => demoApi<File[]>(`${BASE}/files`)
   const page = (fileID: string, n = 1) => demoApi<Page>(`${BASE}/transactions?fileID=${fileID}&page=${n}&limit=10&sortBy=traceNo&sortDir=ASC`)
 
-  it("starts with the sample file for operators and admins, and keeps members out", async () => {
+  it("starts with the sample file for operators, and keeps admins and members out", async () => {
     await asOperator()
     expect(await files()).toEqual([expect.objectContaining({ fileID: 'ACHFILE-88392', processStatus: 'PROCESSED', entryCount: 2, totalCreditAmt: 3450.5, totalDebitAmt: 3450.5 })])
     await demoLogin('admin', 'admin123')
-    expect(await files()).toHaveLength(1)
+    expect((await error(files())).status).toBe(403)
+    expect((await error(post(`${BASE}/files/receive`, { sample: 'PAYROLL' }))).status).toBe(403)
     await memberWithMfa()
     expect((await error(files())).status).toBe(403)
   })
@@ -312,9 +313,9 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   }
   const status = () => demoApi<Status>('/eod/status')
   const run = (businessDate: string) => post('/eod/run', { businessDate }) as Promise<{ fileID: string | null; fedStatus: string; message: string }>
-  const asAdmin = async () => {
+  const asOrigOps = async () => {
     await demoLogout()
-    await demoLogin('admin', 'admin123')
+    await demoLogin('achorig', 'achorig123')
   }
   const available = async () => (await demoApi<{ acctNo: string; availBal: number }[]>('/member/accounts')).find((a) => a.acctNo === '100049281920')?.availBal
   const setFailures = (n: string) => demoApi('/params/ACH_ORIG/FED_SIM_FAIL_ATTEMPTS', {
@@ -322,16 +323,19 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     body: JSON.stringify({ paramDesc: 'Fed simulator', paramRawType: 'INTEGER', paramRawValue: n }),
   })
 
-  it('only lets admins in', async () => {
+  it('only lets achorig in', async () => {
     await memberWithMfa()
     expect((await error(demoApi('/eod/status'))).status).toBe(403)
+    await demoLogin('admin', 'admin123')
+    expect((await error(demoApi('/eod/status'))).status).toBe(403)
+    expect((await error(run('2030-01-07'))).status).toBe(403)
   })
 
   it('sends a valid file, marks the transfer Processed, and a rerun adds nothing', async () => {
     await memberWithMfa()
     const r = await post('/transfers', await transfer()) as { transferSerNo: string; effectiveDt: string; estimatedArrival: string }
     expect(r.estimatedArrival > r.effectiveDt).toBe(true)
-    await asAdmin()
+    await asOrigOps()
     const s = await status()
     expect(s.pending).toHaveLength(1)
     expect(s.nextBusinessDate).toBe(r.effectiveDt)
@@ -357,7 +361,7 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     await memberWithMfa()
     const clean = await post('/transfers', await transfer({ amount: '10.00' })) as { effectiveDt: string }
     await post('/transfers', await transfer({ recvName: 'Blocked Test Person', amount: '20.00' }))
-    await asAdmin()
+    await asOrigOps()
     await run(clean.effectiveDt)
     const s = await status()
     expect(s.files[0]).toMatchObject({ totalCreditCount: 1, totalCreditAmt: 10 })
@@ -367,11 +371,14 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   it('EX-02: three failed attempts end in ERROR; a resend sends it; a sent file can\'t be resent', async () => {
     await memberWithMfa()
     const t = await post('/transfers', await transfer()) as { effectiveDt: string }
-    await asAdmin()
+    await demoLogin('admin', 'admin123') // the Fed simulator's failure count is a parameter, which only admins edit
     await setFailures('3')
+    await asOrigOps()
     const r = await run(t.effectiveDt)
     expect(r.fedStatus).toBe('ERROR')
+    await demoLogin('admin', 'admin123')
     await setFailures('2')
+    await asOrigOps()
     expect(await post(`/eod/files/${r.fileID}/resend`, {})).toEqual({ fedStatus: 'SENT' })
     expect((await error(post(`/eod/files/${r.fileID}/resend`, {}))).message).toBe('Only a file in ERROR can be resent.')
     expect((await error(demoApi('/eod/files/NOPE/content'))).status).toBe(404)
@@ -381,7 +388,7 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     await memberWithMfa()
     const first = await post('/transfers', await transfer({ amount: '6000.00', frequency: 'WEEKLY', transferCount: 3 })) as { effectiveDt: string; transferCount: number }
     expect(first.transferCount).toBe(3)
-    await asAdmin()
+    await asOrigOps()
     await run(first.effectiveDt)
     const second = (await status()).pending[0]
     await run(second.effectiveDt) // $2,500 left, so the $6,000 hold fails
@@ -401,14 +408,14 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   it("doesn't send a reserved Nacha word as the entry description", async () => {
     await memberWithMfa()
     const t = await post('/transfers', await transfer({ memo: 'reversal' })) as { effectiveDt: string }
-    await asAdmin()
+    await asOrigOps()
     const { fileID } = await run(t.effectiveDt)
     const { content } = await demoApi<{ content: string }>(`/eod/files/${fileID}/content`)
     expect(content.split('\n')[1].slice(53, 63).trim()).toBe('TRANSFER')
   })
 
   it('builds no file on a day that is not a banking day', async () => {
-    await demoLogin('admin', 'admin123')
+    await asOrigOps()
     expect((await run('2030-01-05')).message).toBe("2030-01-05 isn't a banking day, so no file was built.")
   })
 })

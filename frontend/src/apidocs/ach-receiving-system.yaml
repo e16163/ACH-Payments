@@ -1,0 +1,230 @@
+openapi: 3.0.3
+info:
+  title: ACH Receiving Processing & Validation API
+  version: 1.0.0
+  description: Enterprise REST API specifications for searching receiving transactions, validating inbound NACHA file/batch structures, and persisting records into the ACH Receiving database.
+paths:
+  /v1/ach/receiving/transactions/search:
+    get:
+      summary: Search ACH Receiving Transactions
+      description: Searches for ACH receiving transactions in the database based on processed date, processing status, amount range, and receiving account number.
+      parameters:
+        - name: processedDate
+          in: query
+          required: false
+          description: Target processed date (YYYY-MM-DD).
+          schema:
+            type: string
+            format: date
+            example: "2026-11-06"
+        - name: processingStatus
+          in: query
+          required: false
+          description: Status filter (e.g., PROCESSED, SETTLED, REJECTED).
+          schema:
+            type: string
+            example: "SETTLED"
+        - name: minAmount
+          in: query
+          required: false
+          description: Minimum transaction amount range.
+          schema:
+            type: number
+            format: double
+            example: 100.00
+        - name: maxAmount
+          in: query
+          required: false
+          description: Maximum transaction amount range.
+          schema:
+            type: number
+            format: double
+            example: 5000.00
+        - name: receivingAccountNumber
+          in: query
+          required: false
+          description: Receiving DFI account number.
+          schema:
+            type: string
+            example: "987654321019"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Search results retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalCount:
+                    type: integer
+                    example: 25
+                  page:
+                    type: integer
+                    example: 1
+                  transactions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tranID:
+                          type: integer
+                          example: 109485
+                        traceNo:
+                          type: string
+                          example: "061000010000001"
+                        amount:
+                          type: number
+                          format: double
+                          example: 1250.00
+                        creditFlag:
+                          type: integer
+                          example: 1
+                        recvAcctID:
+                          type: string
+                          example: "987654321019"
+                        fedStatus:
+                          type: string
+                          example: "SETTLED"
+
+  /v1/ach/receiving/files:
+    post:
+      summary: Validate and Save ACH Receiving File
+      description: Validates the format of an inbound ACH Receiving file starting with a Type 1 File Header record and ending with a Type 9 File Control record, then saves it to the ACH Receiving File database.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - rawFileContent
+                - sourceChannel
+              properties:
+                rawFileContent:
+                  type: string
+                  description: Complete raw 94-character fixed-width NACHA text file content.
+                  example: "101 021000021 19876543212611060830A094101FEDACH... \n 900005..."
+                sourceChannel:
+                  type: string
+                  example: "FED_ACH_SFTP"
+      responses:
+        '201':
+          description: File validated successfully and saved.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fileID:
+                    type: string
+                    example: "FILE_20261106_001"
+                  validationStatus:
+                    type: string
+                    example: "VALIDATED_AND_SAVED"
+                  totalBatches:
+                    type: integer
+                    example: 5
+                  totalRecords:
+                    type: integer
+                    example: 52
+        '400':
+          description: File validation failed due to header/control mismatch or formatting error.
+
+  /v1/ach/receiving/batches:
+    post:
+      summary: Validate and Save ACH Receiving Batch Segment
+      description: Validates the format of an ACH Receiving Batch segment starting with a Type 5 Batch Header record and ending with an 8 Batch Control record, then saves it to the ACH Receiving Batch database.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fileID
+                - rawBatchContent
+              properties:
+                fileID:
+                  type: string
+                  description: Reference parent file ID.
+                  example: "FILE_20261106_001"
+                rawBatchContent:
+                  type: string
+                  description: Raw 94-character lines representing the batch segment (Type 5 through Type 8).
+                  example: "5200ACME PAYROLL...\n62202100...\n82000010..."
+      responses:
+        '201':
+          description: Batch segment validated and saved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  batchID:
+                    type: string
+                    example: "BATCH_001"
+                  status:
+                    type: string
+                    example: "SAVED"
+                  entryCount:
+                    type: integer
+                    example: 10
+        '400':
+          description: Batch validation failed (hash total mismatch or invalid Type 5/8 structure).
+
+  /v1/ach/receiving/transactions:
+    post:
+      summary: Validate and Save ACH Receiving Transaction (Type 6 Record)
+      description: Validates an individual ACH receiving transaction entry (Type 6 record) and persists it into the ACH Receiving Transactions database.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - fileID
+                - batchID
+                - rawEntryRecord
+              properties:
+                fileID:
+                  type: string
+                  example: "FILE_20261106_001"
+                batchID:
+                  type: string
+                  example: "BATCH_001"
+                rawEntryRecord:
+                  type: string
+                  description: 94-character Type 6 Entry Detail record string.
+                  example: "622021000021987654321019000000150000EMP000000001      JOHN DOE              0001987654300001"
+      responses:
+        '201':
+          description: Transaction entry validated and saved to database.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tranID:
+                    type: integer
+                    example: 109485
+                  traceNo:
+                    type: string
+                    example: "061000010000001"
+                  status:
+                    type: string
+                    example: "PERSISTED"
+        '400':
+          description: Transaction validation failed (invalid routing check digit, malformed amount, or bad record length).

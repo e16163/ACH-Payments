@@ -24,7 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.achpayments.common.AppLogRepository;
 import com.achpayments.param.ParamCache;
 
-/** API for the admin ACH Origination File page (USE-CASES E3). Only ROLE_SYS_ADMIN gets here; see SecurityConfig. */
+/** API for the ACH Origination File page (USE-CASES E3). Only ROLE_ACH_ORIG_OPS gets here; see SecurityConfig. */
 @RestController
 public class EodController {
 
