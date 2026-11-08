@@ -363,4 +363,4 @@ We log one row per business action, not one per SQL statement. OWASP's logging g
 2. **UC-ACH-ORG-01.** ✅ Built (board X1–X7, D6, R6, T7 member login): every "Done when" check passed, including a full member run in the deployed app (MFA → Transfer & Pay → EX-01/EX-02 → review → Confirm Transfer → receipt).
 3. **UC-ACH-EOD-01.** ✅ Built.
 4. **UC-ACH-RCV-01, UC-ACH-RCV-02.** ✅ Built.
-5. **Ba's blueprint: Receiving and Origination redesign.** ✅ Built 2026-11-08 (BLUEPRINT-PLAN.md §7, steps 1–12).
+5. **Ba's blueprint: Receiving and Origination redesign.** ✅ Built 2026-11-08 (BLUEPRINT-PLAN.md §7, all 13 steps).
