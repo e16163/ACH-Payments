@@ -42,7 +42,8 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** USE-CASES T7: members must pass MFA before the transfer APIs; admins and members stay in their own areas. */
 @WebMvcTest({MeController.class, TransferController.class, ParamController.class, ReceivingController.class,
-        BackOfficeController.class, EodController.class, AppLogController.class, ExternalAccountController.class})
+        BackOfficeController.class, EodController.class, AppLogController.class, ExternalAccountController.class,
+        com.achpayments.inbound.ReceivingProcessingController.class})
 @Import({SecurityConfig.class, MfaService.class, UnhandledErrorLogger.class, MemberAccessTest.Clocks.class})
 @TestPropertySource(properties = {"app.admin-password=admin-pw", "app.orig-password=orig-pw", "app.recv-password=recv-pw",
         "app.member-password=member-pw"})
@@ -67,6 +68,15 @@ class MemberAccessTest {
 
     @MockitoBean
     ReceivingEngine receivingEngine;
+
+    @MockitoBean
+    com.achpayments.inbound.ReceivedEntryProcessor entryProcessor;
+
+    @MockitoBean
+    com.achpayments.inbound.ReceivingWindow receivingWindow;
+
+    @MockitoBean
+    com.achpayments.inbound.CorePostingFileJob corePosting;
 
     @MockitoBean
     EodFileJob eodFileJob;
@@ -283,6 +293,18 @@ class MemberAccessTest {
         mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("achrecv", "recv-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}")).andExpect(status().isOk());
         org.mockito.Mockito.verify(appLog).log("ACH_RCV", "INFO", "User 'achrecv' received sample PAYROLL: R1 VALIDATED");
+    }
+
+    @Test
+    void onlyReceivingOpsRunBlueprintSteps() throws Exception {
+        org.mockito.Mockito.when(receivingWindow.run("09:00", null)).thenReturn(new com.achpayments.inbound.ReceivingWindow.Run(
+                "EXEC-REC-20261106-0900", "COMPLETED", "09:00", java.time.OffsetDateTime.parse("2026-11-06T14:00:00Z"), java.util.List.of()));
+        mvc.perform(post("/api/v1/ach/receiving/trigger/0900").with(httpBasic("achorig", "orig-pw")).with(csrf()))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/ach/receiving/trigger/0900").with(httpBasic("achrecv", "recv-pw")).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.execution_id").value("EXEC-REC-20261106-0900"));
+        org.mockito.Mockito.verify(appLog).log("ACH_RCV", "INFO", "User 'achrecv' triggered processing window 09:00");
     }
 
     @Test

@@ -61,6 +61,7 @@ class ReceivingEngineIntegrationTest {
     @BeforeEach
     @AfterEach
     void clean() throws IOException {
+        jdbc.update("DELETE FROM " + recv + ".ACHRecvReturn WHERE lastModBy = 'ACH_SYS'"); // returns from Receive's steps 4-6
         jdbc.update("DELETE FROM " + recv + ".ACHRecvAddenda");
         jdbc.update("DELETE FROM " + recv + ".ACHRecvTransaction WHERE fileID LIKE 'ACHFILE-2%'");
         jdbc.update("DELETE FROM " + recv + ".ACHRecvBatch WHERE fileID LIKE 'ACHFILE-2%'");
@@ -191,7 +192,7 @@ class ReceivingEngineIntegrationTest {
         assertEquals("FED_ACH_INBOUND", d.sourceID());
         Map<String, Object> extra = jdbc.queryForMap("SELECT processStatus, recvRtn, individualID, addendaInd FROM " + recv
                 + ".ACHRecvTransaction WHERE tranID = ?", d.tranID());
-        assertEquals("UNPROCESSED", extra.get("processStatus"));
+        assertEquals("RECEIVED", extra.get("processStatus")); // Ba's blueprint name (V17)
         assertEquals("123456780", extra.get("recvRtn"));
         assertEquals("EMP000000001", extra.get("individualID"));
         assertEquals("0", extra.get("addendaInd"));

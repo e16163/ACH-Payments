@@ -91,6 +91,28 @@ The parser needed no change. Fixes made while rebuilding (tell Ba):
 
 Ba's transaction statuses `RECEIVED → AUTO_CORRECTED → REJECTED / MEMO_POSTED → POSTED` go in `processStatus` on `ACHRecvTransaction` (Q2). Screens: the existing ACH Receiving pages show the new statuses, the corrected account, the return code, and a **Manual review** filter. Fixing manual-review items in the UI isn't in Ba's blueprint, so it isn't built.
 
+**✅ Built 2026-11-08** (build steps 3–8), tested by `ReceivingBlueprintIntegrationTest` and `ReceivingSchedulerTest`:
+
+| Piece | Where |
+| --- | --- |
+| Migration | `V17__receiving_blueprint.sql`: new columns, 3 tables, 4 parameters, and 49 core accounts for the sample files' receivers, each set up to show one rule |
+| Windows | `ReceivingScheduler` (the latest passed window, once; the posting file at `CORE_POSTING_TIME` 19:00) and `ReceivingWindow` |
+| Steps 2–3 | `ReceivingEngine.validate` / `extract`. The folder pickup still checks and saves in one pass and one DB transaction. |
+| Steps 4–6 | `ReceivedEntryProcessor` |
+| Step 7 | `CorePostingFileJob` writes `CORE_ACH_POSTING_yyyyMMdd.DAT` to `app.core.posting-dir` (`~/dev/core/posting`) |
+| Endpoints | `ReceivingProcessingController`, with Ba's paths and snake_case fields |
+| Screen | ACH Inbound Overview: Status column (with the return code), a Status filter including **Manual review**, and a Processing section in the details |
+
+Decisions made while building, where Ba's text is silent:
+- **File statuses.** The validate endpoint leaves a file `PASSED`, and extract moves it to `VALIDATED`, the status the folder pickup already uses for "checked and saved".
+- **The trigger answers when the window is done**, so its status is `COMPLETED`, not Ba's `PROCESSING`.
+- **Core transaction codes** are made up for the simulated core: `22 → DDA_CR`, `27 → DDA_DR`, `32 → SAV_CR`, `37 → SAV_DR`, prenotes → `PRENOTE` (marked posted, no money). Return and NOC entries (`21`, `26`, `31`, `36`) go to manual review as `UNSUPPORTED_TRAN_CODE`; handling them is later work.
+- **Not found:** step 4 flags `MANUAL_REVIEW` (`ACCOUNT_NOT_FOUND`), then step 5 returns it `R03`, which matches Ba's sample counts (5 reviews among 8 rejections).
+- **Over the limit:** an entry above `ACH_RCV/MAX_ENTRY_AMOUNT` ($25,000) isn't returned, because Nacha has no return code for that. It waits as `MANUAL_REVIEW` (`OVER_LIMIT`).
+- **Blocked originators** apply to debits: `R29` for CCD/CTX, `R10` otherwise. **Stop payments** (`R08`) apply to debits.
+- **Each return** is an `ACHRecvReturn` row with `returnStatus = 'PENDING'` (Q5: sending comes later).
+- **The Receive button** on the ACH Receiving File page now runs steps 2–6, as a window would.
+
 ## 4. Origination redesign (we are the ODFI)
 
 **The big change:** today, every check and the memo hold happen the moment the member clicks **Confirm**. The blueprint moves processing into intraday windows on the payment's business date.

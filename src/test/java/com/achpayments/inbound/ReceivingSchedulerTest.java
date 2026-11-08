@@ -2,6 +2,7 @@ package com.achpayments.inbound;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -22,57 +23,80 @@ import com.achpayments.common.AppLogRepository;
 import com.achpayments.common.BankingCalendar;
 import com.achpayments.param.ParamCache;
 
-/** The 6 AM pickup: the time comes from AppParam, in Eastern time, once on each banking day. */
+/** Ba's processing windows and the core posting file: times from AppParam, in Eastern time, on banking days. */
 class ReceivingSchedulerTest {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
-    private final ReceivingEngine engine = mock(ReceivingEngine.class);
+    private final ReceivingWindow window = mock(ReceivingWindow.class);
+    private final CorePostingFileJob posting = mock(CorePostingFileJob.class);
     private final ParamCache params = mock(ParamCache.class);
     private final AppLogRepository appLog = mock(AppLogRepository.class);
     private final BankingCalendar calendar = new BankingCalendar(Set.of(LocalDate.of(2026, 11, 26)));
 
-    private ReceivingScheduler at(String dateTime, String time) {
-        when(params.get("ACH_RCV", "FED_RECV_FILE_TIME")).thenReturn(Optional.of(time));
-        Clock clock = Clock.fixed(Instant.parse(dateTime), ET);
-        return new ReceivingScheduler(engine, params, calendar, appLog, clock);
+    private ReceivingScheduler at(String instant) {
+        return at(instant, "06:00,09:00,12:00,15:00,18:00");
+    }
+
+    private ReceivingScheduler at(String instant, String windows) {
+        when(params.get("ACH_RCV", "RECV_WINDOW_TIMES")).thenReturn(Optional.of(windows));
+        when(params.get("ACH_RCV", "CORE_POSTING_TIME")).thenReturn(Optional.of("19:00"));
+        return new ReceivingScheduler(window, posting, params, calendar, appLog, Clock.fixed(Instant.parse(instant), ET));
     }
 
     @Test
-    void waitsFor6AmEastern() {
-        at("2026-11-06T10:59:00Z", "06:00:00").tick(); // 5:59 AM EST, a Friday
-        verify(engine, never()).ingestAll();
+    void waitsForTheFirstWindow() {
+        at("2026-11-06T10:59:00Z").tick(); // 5:59 AM EST, a Friday
+        verify(window, never()).run(any(), any());
     }
 
     @Test
-    void runsOnceAt6AmEastern() {
-        ReceivingScheduler s = at("2026-11-06T11:00:00Z", "06:00:00");
+    void runsEachWindowOnce() {
+        ReceivingScheduler s = at("2026-11-06T14:00:00Z"); // 9:00 AM
         s.tick();
         s.tick();
-        verify(engine, times(1)).ingestAll();
+        verify(window, times(1)).run(eq("09:00"), isNull());
+    }
+
+    @Test
+    void afterARestartOnlyTheLatestPassedWindowRuns() {
+        at("2026-11-06T18:30:00Z").tick(); // 1:30 PM
+        verify(window).run(eq("12:00"), isNull());
+        verify(window, never()).run(eq("06:00"), any());
+        verify(window, never()).run(eq("09:00"), any());
+    }
+
+    @Test
+    void thePostingFileRunsOnceAfterItsTime() {
+        ReceivingScheduler s = at("2026-11-07T00:00:00Z"); // 7:00 PM Friday
+        s.tick();
+        s.tick();
+        verify(posting, times(1)).generate(LocalDate.of(2026, 11, 6));
+        verify(window).run(eq("18:00"), isNull());
     }
 
     @Test
     void skipsWeekendsAndHolidays() {
-        at("2026-11-07T12:00:00Z", "06:00:00").tick(); // Saturday
-        at("2026-11-26T12:00:00Z", "06:00:00").tick(); // Thanksgiving
-        verify(engine, never()).ingestAll();
+        at("2026-11-07T15:00:00Z").tick(); // Saturday
+        at("2026-11-26T15:00:00Z").tick(); // Thanksgiving
+        verify(window, never()).run(any(), any());
+        verify(posting, never()).generate(any());
     }
 
     @Test
     void aBadTimeRaisesOneAlertAndDoesNotRun() {
-        ReceivingScheduler s = at("2026-11-06T12:00:00Z", "6am");
+        ReceivingScheduler s = at("2026-11-06T14:00:00Z", "6am");
         s.tick();
         s.tick();
-        verify(engine, never()).ingestAll();
-        verify(appLog, times(1)).log(eq("ACH_RCV"), eq("FATAL"), startsWith("Inbound pickup not run"));
+        verify(window, never()).run(any(), any());
+        verify(appLog, times(1)).log(eq("ACH_RCV"), eq("FATAL"), startsWith("Inbound processing not run"));
     }
 
     @Test
     void anErrorInTheScheduledRunIsLoggedWithItsStackTrace() {
-        ReceivingScheduler s = at("2026-11-06T12:00:00Z", "06:00:00");
+        ReceivingScheduler s = at("2026-11-06T14:00:00Z");
         IllegalStateException failure = new IllegalStateException("disk gone");
-        when(engine.ingestAll()).thenThrow(failure);
+        when(window.run(any(), any())).thenThrow(failure);
         s.tick();
-        verify(appLog).log(eq("ACH_RCV"), eq("FATAL"), startsWith("Inbound pickup stopped"), eq(failure));
+        verify(appLog).log(eq("ACH_RCV"), eq("FATAL"), startsWith("Inbound processing stopped"), eq(failure));
     }
 }

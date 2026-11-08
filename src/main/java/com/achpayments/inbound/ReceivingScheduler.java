@@ -7,6 +7,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
+import java.util.Arrays;
+import java.util.List;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
@@ -17,21 +19,30 @@ import com.achpayments.common.AppLogRepository;
 import com.achpayments.common.BankingCalendar;
 import com.achpayments.param.ParamCache;
 
-/** The Fed's morning file: checks once a minute, like EodScheduler, so a change to FED_RECV_FILE_TIME needs no restart. */
+/**
+ * Ba's blueprint, ACH Receiving Processing steps 1 and 7: on banking days, runs the latest processing window that has
+ * passed (ACH_RCV/RECV_WINDOW_TIMES) once, then the core posting file at ACH_RCV/CORE_POSTING_TIME. Checks once a minute,
+ * like EodScheduler, so a parameter change needs no restart. After a restart only the latest window runs; it picks up
+ * every waiting file, so nothing is missed.
+ */
 @Configuration
 @EnableScheduling
 @ConditionalOnProperty(name = "app.receiving.scheduler-enabled", havingValue = "true")
 public class ReceivingScheduler {
 
-    private final ReceivingEngine engine;
+    private final ReceivingWindow window;
+    private final CorePostingFileJob posting;
     private final ParamCache params;
     private final BankingCalendar calendar;
     private final AppLogRepository appLog;
     private final Clock clock;
-    private LocalDate lastRun;
+    private LocalDateTime lastWindow;
+    private LocalDate lastPosting, lastAlert;
 
-    public ReceivingScheduler(ReceivingEngine engine, ParamCache params, BankingCalendar calendar, AppLogRepository appLog, Clock clock) {
-        this.engine = engine;
+    public ReceivingScheduler(ReceivingWindow window, CorePostingFileJob posting, ParamCache params, BankingCalendar calendar,
+            AppLogRepository appLog, Clock clock) {
+        this.window = window;
+        this.posting = posting;
         this.params = params;
         this.calendar = calendar;
         this.appLog = appLog;
@@ -43,27 +54,40 @@ public class ReceivingScheduler {
         try {
             runIfDue();
         } catch (RuntimeException e) {
-            appLog.log(ACH_RCV, "FATAL", "Inbound pickup stopped: " + e, e);
+            appLog.log(ACH_RCV, "FATAL", "Inbound processing stopped: " + e, e);
         }
     }
 
     private void runIfDue() {
         LocalDateTime now = LocalDateTime.now(clock);
         LocalDate today = now.toLocalDate();
-        if (today.equals(lastRun) || !calendar.isBankingDay(today)) {
+        if (!calendar.isBankingDay(today)) {
             return;
         }
-        String time = params.get("ACH_RCV", "FED_RECV_FILE_TIME").orElse("");
+        List<LocalTime> windows;
+        LocalTime postingTime;
         try {
-            if (now.toLocalTime().isBefore(LocalTime.parse(time))) {
-                return;
-            }
+            windows = Arrays.stream(params.get("ACH_RCV", "RECV_WINDOW_TIMES").orElse("").split(","))
+                    .map(String::trim).map(LocalTime::parse).sorted().toList();
+            postingTime = LocalTime.parse(params.get("ACH_RCV", "CORE_POSTING_TIME").orElse(""));
         } catch (DateTimeParseException e) {
-            lastRun = today; // one alert a day, not one a minute
-            appLog.log(ACH_RCV, "FATAL", "Inbound pickup not run: FED_RECV_FILE_TIME '" + time + "' isn't a time like 06:00:00");
+            if (!today.equals(lastAlert)) { // one alert a day, not one a minute
+                lastAlert = today;
+                appLog.log(ACH_RCV, "FATAL", "Inbound processing not run: RECV_WINDOW_TIMES or CORE_POSTING_TIME isn't a list of "
+                        + "times like 06:00,09:00 (" + e.getParsedString() + ")");
+            }
             return;
         }
-        lastRun = today;
-        engine.ingestAll();
+        windows.stream().filter(t -> !t.isAfter(now.toLocalTime())).reduce((a, b) -> b).ifPresent(t -> {
+            LocalDateTime due = today.atTime(t);
+            if (!due.equals(lastWindow)) {
+                lastWindow = due;
+                window.run(t.toString(), null);
+            }
+        });
+        if (!now.toLocalTime().isBefore(postingTime) && !today.equals(lastPosting)) {
+            lastPosting = today;
+            posting.generate(today);
+        }
     }
 }

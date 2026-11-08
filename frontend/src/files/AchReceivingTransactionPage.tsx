@@ -4,7 +4,7 @@ import type { ReceivedFile } from './AchReceivingFilePage'
 
 type Overview = {
   tranID: number; amount: number; creditFlag: number; originatorID: string; companyName: string; recvName: string
-  createTm: string; settlementDt: string | null; traceNo: string
+  createTm: string; settlementDt: string | null; traceNo: string; processStatus: string; returnCode: string | null
 }
 type Page = { items: Overview[]; total: number; page: number; limit: number }
 type Detail = Record<string, string | number | null>
@@ -26,12 +26,21 @@ const FIELDS: [string, string][] = [
   ['fedStatus', 'Fed Status'], ['sourceID', 'Source ID'], ['createTm', 'Received Date'],
 ]
 
+// Ba's blueprint, Receiving steps 4-7: what processing did to the entry.
+const PROCESSING_FIELDS: [string, string][] = [
+  ['processStatus', 'Processing Status'], ['coreTranCode', 'Core Tran Code'], ['correctedAcctNo', 'Corrected Account'],
+  ['processReason', 'Reason'], ['returnCode', 'Return Code'], ['memoPostedTm', 'Memo Posted'], ['postedTm', 'Posted'],
+]
+
+// The blueprint's statuses, in processing order, for the Status filter.
+const STATUSES = ['RECEIVED', 'AUTO_CORRECTED', 'MANUAL_REVIEW', 'REJECTED', 'MEMO_POSTED', 'POSTED']
+
 function fieldValue(name: string, d: Detail): string {
   const v = d[name]
   if (v === null || v === '') return '—'
   if (name === 'amount') return usd(Number(v))
   if (name === 'creditFlag') return creditDebit(Number(v))
-  if (name === 'createTm') return dateTime(String(v))
+  if (name === 'createTm' || name === 'memoPostedTm' || name === 'postedTm') return dateTime(String(v))
   return String(v)
 }
 
@@ -39,6 +48,7 @@ function fieldValue(name: string, d: Detail): string {
 export default function AchReceivingTransactionPage({ route, fileID }: { route: string; fileID: string }) {
   const [files, setFiles] = useState<ReceivedFile[] | null>(null)
   const [page, setPage] = useState(1)
+  const [status, setStatus] = useState('')
   const [data, setData] = useState<Page | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [failed, setFailed] = useState(false)
@@ -49,17 +59,17 @@ export default function AchReceivingTransactionPage({ route, fileID }: { route: 
 
   const selected = fileID || files?.find((f) => f.entryCount > 0)?.fileID || files?.[0]?.fileID || ''
 
-  useEffect(() => setPage(1), [selected])
+  useEffect(() => setPage(1), [selected, status])
 
   const load = useCallback(async () => {
     if (!selected) return
     setFailed(false)
     try {
-      setData(await api<Page>(`/v1/ach/receiving/transactions?fileID=${encodeURIComponent(selected)}&page=${page}&limit=${LIMIT}&sortBy=traceNo&sortDir=ASC`))
+      setData(await api<Page>(`/v1/ach/receiving/transactions?fileID=${encodeURIComponent(selected)}${status ? `&status=${status}` : ''}&page=${page}&limit=${LIMIT}&sortBy=traceNo&sortDir=ASC`))
     } catch {
       setFailed(true)
     }
-  }, [selected, page])
+  }, [selected, status, page])
 
   useEffect(() => {
     load()
@@ -93,17 +103,26 @@ export default function AchReceivingTransactionPage({ route, fileID }: { route: 
               {files.map((f) => <option key={f.fileID} value={f.fileID}>{f.fileID} ({f.processStatus})</option>)}
             </select>
           </label>
+          <label>
+            Status
+            <select value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">All</option>
+              {STATUSES.map((s) => <option key={s} value={s}>{s === 'MANUAL_REVIEW' ? 'Manual review' : s}</option>)}
+            </select>
+          </label>
         </div>
       )}
 
-      {(data?.total === 0 || files?.length === 0) && <p className="notice" role="status">No receiving transactions found in this file batch.</p>}
+      {(data?.total === 0 || files?.length === 0) && (
+        <p className="notice" role="status">{status ? `No ${status} transactions in this file.` : 'No receiving transactions found in this file batch.'}</p>
+      )}
       {data && data.total > 0 && (
         <>
           <table aria-label="Receiving transactions">
             <thead>
               <tr>
                 <th>Transaction Amount</th><th>Cr/Db Indicator</th><th>Originator Name</th><th>Company Name</th><th>Recipient Name</th>
-                <th>Received Date</th><th>Settlement Date</th><th>Trace No</th><th>Action</th>
+                <th>Received Date</th><th>Settlement Date</th><th>Trace No</th><th>Status</th><th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -117,6 +136,7 @@ export default function AchReceivingTransactionPage({ route, fileID }: { route: 
                   <td>{dateTime(t.createTm)}</td>
                   <td>{t.settlementDt ?? '—'}</td>
                   <td className="code">{t.traceNo}</td>
+                  <td>{t.processStatus}{t.returnCode ? ` ${t.returnCode}` : ''}</td>
                   <td className="row-actions"><button className="primary" onClick={() => select(t.tranID)}>Select</button></td>
                 </tr>
               ))}
@@ -142,6 +162,12 @@ export default function AchReceivingTransactionPage({ route, fileID }: { route: 
             <h2>Transaction details</h2>
             <dl className="details">
               {FIELDS.map(([name, label]) => (
+                <div key={name}><dt>{label}</dt><dd>{fieldValue(name, detail)}</dd></div>
+              ))}
+            </dl>
+            <h3>Processing</h3>
+            <dl className="details">
+              {PROCESSING_FIELDS.map(([name, label]) => (
                 <div key={name}><dt>{label}</dt><dd>{fieldValue(name, detail)}</dd></div>
               ))}
             </dl>

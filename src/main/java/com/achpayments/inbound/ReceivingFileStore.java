@@ -118,6 +118,21 @@ public class ReceivingFileStore {
                 dollars(check.totalDebitCents()), dollars(check.totalCreditCents()), fileID);
     }
 
+    public void saveRawText(String fileID, String rawText) {
+        jdbc.update("UPDATE " + recv + ".ACHRecvFile SET rawFileText = ? WHERE fileID = ?", rawText, fileID);
+    }
+
+    public String rawText(String fileID) {
+        return jdbc.queryForList("SELECT rawFileText FROM " + recv + ".ACHRecvFile WHERE fileID = ?", String.class, fileID)
+                .stream().findFirst().orElse(null);
+    }
+
+    /** null for an unknown file. */
+    public String processStatus(String fileID) {
+        return jdbc.queryForList("SELECT processStatus FROM " + recv + ".ACHRecvFile WHERE fileID = ?", String.class, fileID)
+                .stream().findFirst().orElse(null);
+    }
+
     public void markFailed(String fileID, String processStatus) {
         jdbc.update("UPDATE " + recv + ".ACHRecvFile SET processStatus = ? WHERE fileID = ?", processStatus, fileID);
     }

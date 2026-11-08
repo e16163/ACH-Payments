@@ -8,6 +8,7 @@ import java.security.Principal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -39,17 +40,19 @@ public class ReceivingController {
     }
 
     public record Overview(long tranID, BigDecimal amount, int creditFlag, String originatorID, String companyName, String recvName,
-            LocalDateTime createTm, LocalDate settlementDt, String traceNo) {
+            LocalDateTime createTm, LocalDate settlementDt, String traceNo, String processStatus, String returnCode) {
     }
 
     public record Page(List<Overview> items, long total, int page, int limit) {
     }
 
-    /** The design's 24 ACHRecvTransaction columns. */
+    /** The design's 24 ACHRecvTransaction columns, then the blueprint's processing columns (V17). */
     public record Detail(long tranID, String transferSerNo, int transferVersion, String fileID, String batchID, int creditFlag,
             String tranCode, String companyName, String companyID, String companyDiscData, String stdEntryCode, String companyEntryDesc,
             LocalDate descriptiveDt, LocalDate effectiveDt, LocalDate settlementDt, String originatorID, BigDecimal amount, String recvAcctID,
-            String recvName, String transactionDiscData, String traceNo, String fedStatus, String sourceID, LocalDateTime createTm) {
+            String recvName, String transactionDiscData, String traceNo, String fedStatus, String sourceID, LocalDateTime createTm,
+            String processStatus, String coreTranCode, String correctedAcctNo, String processReason, String returnCode,
+            LocalDateTime memoPostedTm, LocalDateTime postedTm) {
     }
 
     public record ReceiveRequest(Sample sample) {
@@ -57,14 +60,16 @@ public class ReceivingController {
 
     private final JdbcTemplate jdbc;
     private final ReceivingEngine engine;
+    private final ReceivedEntryProcessor processor;
     private final FedInboundSimulator fed;
     private final AppLogRepository appLog;
     private final String recv;
 
-    public ReceivingController(JdbcTemplate jdbc, ReceivingEngine engine, FedInboundSimulator fed, AppLogRepository appLog,
+    public ReceivingController(JdbcTemplate jdbc, ReceivingEngine engine, ReceivedEntryProcessor processor, FedInboundSimulator fed, AppLogRepository appLog,
             @Value("${app.db.receiving}") String recv) {
         this.jdbc = jdbc;
         this.engine = engine;
+        this.processor = processor;
         this.fed = fed;
         this.appLog = appLog;
         this.recv = recv;
@@ -82,7 +87,7 @@ public class ReceivingController {
                 + "ORDER BY f.fileHeaderDt DESC, f.fileID DESC", new DataClassRowMapper<>(FileRow.class));
     }
 
-    /** Simulates the Fed delivering a file, then ingests it, so a demo needn't wait for 6 AM. */
+    /** Simulates the Fed delivering a file, then processes it as a window would (steps 2-6), so a demo needn't wait for one. */
     @PostMapping("/files/receive")
     public List<ReceivingEngine.Result> receive(@RequestBody ReceiveRequest body, Principal user) throws IOException {
         if (body.sample() == null) {
@@ -90,6 +95,7 @@ public class ReceivingController {
         }
         fed.deliver(body.sample());
         List<ReceivingEngine.Result> results = engine.ingestAll();
+        results.stream().filter(r -> r.processStatus().equals(ReceivingEngine.VALIDATED)).forEach(r -> processor.process(r.fileID()));
         String outcome = results.stream().map(r -> r.fileID() + " " + r.processStatus()).collect(Collectors.joining(", "));
         boolean validated = !results.isEmpty() && results.stream().allMatch(r -> r.processStatus().equals(ReceivingEngine.VALIDATED));
         appLog.log(ACH_RCV, validated ? "INFO" : "WARN", "User '%s' received sample %s: %s"
@@ -97,19 +103,33 @@ public class ReceivingController {
         return results;
     }
 
-    /** Steps 4-5, from the design's SQL. It filters by file, so the page's file comes as fileID; without one, every file is listed. */
+    /**
+     * Steps 4-5, from the design's SQL. It filters by file, so the page's file comes as fileID; without one, every file is listed.
+     * status filters by the blueprint's processing status, e.g. MANUAL_REVIEW.
+     */
     @GetMapping("/transactions")
-    public Page transactions(@RequestParam(required = false) String fileID, @RequestParam(defaultValue = "1") int page,
+    public Page transactions(@RequestParam(required = false) String fileID, @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int limit, @RequestParam(defaultValue = "traceNo") String sortBy,
             @RequestParam(defaultValue = "ASC") String sortDir) {
         if (page < 1 || limit < 1 || limit > 100 || !sortBy.equals("traceNo") || !List.of("ASC", "DESC").contains(sortDir)) {
             throw new IllegalArgumentException("Invalid page, limit or sort.");
         }
-        String where = fileID == null ? "" : " WHERE fileID = ?";
-        Object[] filter = fileID == null ? new Object[0] : new Object[] {fileID};
+        List<String> conditions = new ArrayList<>();
+        List<Object> values = new ArrayList<>();
+        if (fileID != null) {
+            conditions.add("fileID = ?");
+            values.add(fileID);
+        }
+        if (status != null && !status.isBlank()) {
+            conditions.add("processStatus = ?");
+            values.add(status);
+        }
+        String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+        Object[] filter = values.toArray();
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM " + recv + ".ACHRecvTransaction" + where, Long.class, filter);
-        List<Overview> items = jdbc.query("SELECT tranID, amount, creditFlag, originatorID, companyName, recvName, createTm, settlementDt, traceNo "
-                + "FROM " + recv + ".ACHRecvTransaction" + where + " ORDER BY traceNo " + sortDir + ", tranID LIMIT " + limit
+        List<Overview> items = jdbc.query("SELECT tranID, amount, creditFlag, originatorID, companyName, recvName, createTm, settlementDt, traceNo, "
+                + "processStatus, returnCode FROM " + recv + ".ACHRecvTransaction" + where + " ORDER BY traceNo " + sortDir + ", tranID LIMIT " + limit
                 + " OFFSET " + (page - 1L) * limit, new DataClassRowMapper<>(Overview.class), filter);
         return new Page(items, total == null ? 0 : total, page, limit);
     }
@@ -119,7 +139,8 @@ public class ReceivingController {
     public Detail transaction(@PathVariable long tranID) {
         return jdbc.queryForObject("SELECT tranID, transferSerNo, transferVersion, fileID, batchID, creditFlag, tranCode, companyName, "
                 + "companyID, companyDiscData, stdEntryCode, companyEntryDesc, descriptiveDt, effectiveDt, settlementDt, originatorID, amount, "
-                + "recvAcctID, recvName, transactionDiscData, traceNo, fedStatus, sourceID, createTm FROM " + recv
+                + "recvAcctID, recvName, transactionDiscData, traceNo, fedStatus, sourceID, createTm, processStatus, coreTranCode, "
+                + "correctedAcctNo, processReason, returnCode, memoPostedTm, postedTm FROM " + recv
                 + ".ACHRecvTransaction WHERE tranID = ?", new DataClassRowMapper<>(Detail.class), tranID);
     }
 

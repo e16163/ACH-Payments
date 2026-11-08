@@ -28,7 +28,7 @@ class BackOfficeIntegrationTest {
     @CsvSource({"origination,returns,1", "origination,return-actions,1", "origination,reversals,1", "origination,resubmissions,1",
             "origination,nocs,2", "origination,noc-actions,2", "origination,account-subs,1", "origination,trancode-subs,1",
             "receiving,returns,1", "receiving,return-requests,1", "receiving,reversals,1", "receiving,nocs,2",
-            "receiving,account-subs,1", "receiving,trancode-subs,1"})
+            "receiving,account-subs,2", "receiving,trancode-subs,1"})
     void everyListFindsItsSampleRows(String side, String dataset, int rows) {
         assertEquals(rows, controller.rows(side, dataset).size());
     }
