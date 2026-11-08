@@ -1,6 +1,6 @@
 # Use Case Plans
 
-the use case specs live in [design/](design/). The work is tracked as tasks on the GitHub Projects board (kanban). Each section below gives:
+the use case specs live in [ACH Payments System Design/](ACH%20Payments%20System%20Design/). The work is tracked as tasks on the GitHub Projects board (kanban). Each section below gives:
 - what the use case needs (tables, API, UI, rules);
 - the assumptions made where the spec is silent;
 - how it will be verified.
@@ -14,7 +14,7 @@ The order matters. The Parameter UI comes first because it lays the groundwork t
 
 ## UC-SYS-PARAM-01: Parameter UI
 
-Spec: [Use-Case-Parameter-UI.docx](design/Use-Case-Parameter-UI.docx). Table: `AppParam` and `AppLog`, exactly as in the design doc. `paramDesc` is already in the DDL, so no table change is needed.
+Spec: [Use Case Parameter UI.docx](ACH%20Payments%20System%20Design/Use%20Case%20Parameter%20UI.docx). Table: `AppParam` and `AppLog`, exactly as in the design doc. `paramDesc` is already in the DDL, so no table change is needed.
 
 **Purpose (the designer, 2026-11-03):** a tool for the **system designers** to enter new parameters, and edit existing ones, for each app. Example: a `credit_limit` for ACH Origination transfers. The apps' own code reads these values later.
 
@@ -84,7 +84,7 @@ The trial also changed the plan in four ways:
 
 ## UC-ACH-ORG-01: Origination Transfer UI (External ACH Transfer)
 
-Spec: [Use-Case-ACH-Origination-Transfer-UI.docx](design/Use-Case-ACH-Origination-Transfer-UI.docx). Actor: a **retail member** in online banking. This is the "digital banking channel" from PLAN.md A8, which is the demo member portal in roadmap step 17.
+Spec: [Use Case ACH Origination Transfer UI.docx](ACH%20Payments%20System%20Design/Use%20Case%20ACH%20Origination%20Transfer%20UI.docx). Actor: a **retail member** in online banking. This is the "digital banking channel" from PLAN.md A8, which is the demo member portal in roadmap step 17.
 
 ### Tables it needs
 
@@ -307,7 +307,7 @@ Decisions:
 
 ## UC-SYS-LOG-01: App Log capture and System Audit & App Logs UI
 
-Spec: [Use-Case-AppLog-UI.docx](design/Use-Case-AppLog-UI.docx). Every row goes through one function, `AppLogRepository.log(...)`, which is the only code that inserts into `AppLog`.
+Spec: [Use Case AppLog UI.docx](ACH%20Payments%20System%20Design/Use%20Case%20AppLog%20UI.docx). Every row goes through one function, `AppLogRepository.log(...)`, which is the only code that inserts into `AppLog`.
 
 ### What gets logged
 

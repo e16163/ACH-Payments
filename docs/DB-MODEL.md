@@ -1,6 +1,6 @@
 # Database Model: Review of the design's Design and Plan
 
-Source: The design's [ACH Payments System Design](design/ACH-Payments-System-Design.docx) ("Database Model" section) and the [architecture diagram](design/architecture-diagram.png).
+Source: The design's [ACH Payments System Design](ACH%20Payments%20System%20Design/ACH%20Payments%20System%20Design.docx) ("Database Model" section) and the [architecture diagram](ACH%20Payments%20System%20Design/ACH%20Core%20Processing%20Engine%20Ecosystem-2026-11-03-164439.png).
 
 the design replaces the first-pass model in [PLAN.md section 4](PLAN.md#4-database-design-first-pass). **The design's table and column names are the standard from now on**, e.g. `ACHOrigTransaction`, `traceNo`, `lastModBy`. This file covers four things:
 1. How the design's tables map to the system's components.

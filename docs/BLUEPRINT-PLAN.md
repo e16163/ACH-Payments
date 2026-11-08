@@ -21,7 +21,7 @@ Ba's message asks for 4 things:
 
 ## 1. Folder of Ba's documents
 
-**Today:** 5 of Ba's documents are in `docs/design/` under renamed copies. The rest are only in `~/Downloads`.
+**Before:** 5 of Ba's documents are in `docs/design/` under renamed copies. The rest are only in `~/Downloads`.
 
 **Plan:** Create `docs/ACH Payments System Design/` in the repo. That way it's backed up on GitHub, the friend helping on the project gets it, and I can read it in later sessions. Copy in every document Ba sent, keeping Ba's original file names:
 - 2 blueprints, 2 NACHA specs plus the earlier `-2` spec
@@ -29,9 +29,9 @@ Ba's message asks for 4 things:
 - 7 use cases
 - 3 Open API docs
 
-Then move out the 5 duplicates in `docs/design/`, delete that folder, and repoint the 6 links to it (DB-MODEL.md, USE-CASES.md, README.md). Not copied: the `FILE_20261105_01*.ach` files in Downloads, because those are files our own app made, not Ba's.
+✅ Done 2026-11-08: 16 files copied, the 5 duplicates in `docs/design/` removed with that folder, and the 6 links to it repointed (DB-MODEL.md, USE-CASES.md, README.md). Not copied: the `FILE_20261105_01*.ach` files in Downloads, because those are files our own app made, not Ba's.
 
-→ verify: `ls` shows 18 files; every link in docs/ and README opens.
+→ verify: `ls` shows 16 files; every link in docs/ and README opens.
 
 ## 2. NACHA parser against Ba's spec
 

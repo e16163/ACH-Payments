@@ -171,7 +171,7 @@ mvn test
 - [x] Step 0: Spring Boot + React skeleton deployed on Tomcat, with DB health check
 - [x] Step 1: NACHA file parser
 - [x] Parameter UI (UC-SYS-PARAM-01): designers add/edit parameters per app
-- [x] Design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/design/](docs/design/))
+- [x] Design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/ACH Payments System Design/](docs/ACH%20Payments%20System%20Design/))
 - [x] Database schema: all 30 designed tables exactly as written, plus approved additions (V1–V15), with the sample data
 - [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
 - [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, `achorig` ACH Origination File page
