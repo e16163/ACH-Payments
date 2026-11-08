@@ -70,3 +70,115 @@ export function ingest(text: string, rdfi: string): Ingested {
     ? { status: 'OUT_OF_BALANCE', ...parsed, entries: [], message: problems.join('; ') }
     : { status: 'VALIDATED', ...parsed, entries, message: 'The file was validated and saved.' }
 }
+
+// ---- Ba's blueprint, Receiving steps 4-6 (ReceivedEntryProcessor) ----
+
+export type Processing = {
+  processStatus: string; coreTranCode: string | null; correctedAcctNo: string | null; processReason: string | null
+  returnCode: string | null; memoPostedTm: string | null; postedTm: string | null
+}
+export type CoreAccount = { status: string; cents: number }
+
+export const RECEIVED: Processing = {
+  processStatus: 'RECEIVED', coreTranCode: null, correctedAcctNo: null, processReason: null, returnCode: null, memoPostedTm: null, postedTm: null,
+}
+
+const CORE_TRAN_CODES: Record<string, string> = {
+  '22': 'DDA_CR', '27': 'DDA_DR', '32': 'SAV_CR', '37': 'SAV_DR', '23': 'PRENOTE', '28': 'PRENOTE', '33': 'PRENOTE', '38': 'PRENOTE',
+}
+// The V17 seed: an alias (ACHRecvAcctSubs), a stop payment and a blocked originator
+const ALIASES: Record<string, string> = { '987654328019': '555000328019' }
+const STOPS = [{ acctNo: '987654323019', companyID: '2987654321' }]
+const BLOCKS = [{ acctNo: '987654322019', companyID: '2987654321' }]
+
+/** The V17 SimCoreAccount rows for the sample files' receivers, each set up to show one rule. */
+export function sampleCore(): Record<string, CoreAccount> {
+  const core: Record<string, CoreAccount> = {}
+  const add = (acctNo: string, status = 'ACTIVE') => (core[acctNo] = { status, cents: 200_000 })
+  for (let i = 1; i <= 5; i++) add(`98765432${i}019`)
+  add('987654326019', 'CLOSED')
+  add('987654327019', 'FROZEN')
+  add('0987654329019') // zero padding
+  add('555000328019') // the alias's account
+  for (const group of [4, 5, 6, 7]) for (let i = 1; i <= 10; i++) add(`987654${group}${String(i).padStart(2, '0')}019`)
+  core['987654410019'].cents = 500 // $5.00, for R01
+  return core
+}
+
+const stripZeros = (acct: string) => acct.replace(/^0+/, '')
+
+type Row = RecvEntry & Processing
+type Return = [code: string, reason: string]
+
+function reject(e: Row, [code, reason]: Return) {
+  Object.assign(e, { processStatus: 'REJECTED', returnCode: code, processReason: reason })
+}
+
+function returnFor(e: Row, core: Record<string, CoreAccount>): Return | null {
+  if (e.processStatus === 'MANUAL_REVIEW') return e.processReason === 'ACCOUNT_NOT_FOUND' ? ['R03', 'NO_ACCOUNT_UNABLE_TO_LOCATE'] : null
+  const acctNo = e.correctedAcctNo ?? e.recvAcctID
+  const acct = core[acctNo]
+  if (acct.status === 'CLOSED') return ['R02', 'ACCOUNT_CLOSED']
+  if (acct.status === 'FROZEN') return ['R16', 'ACCOUNT_FROZEN']
+  if (acct.status === 'DECEASED') return ['R15', 'BENEFICIARY_DECEASED']
+  if (e.creditFlag === 1) return null
+  if (STOPS.some((x) => x.acctNo === acctNo && x.companyID === e.companyID)) return ['R08', 'PAYMENT_STOPPED']
+  if (BLOCKS.some((x) => x.acctNo === acctNo && x.companyID === e.companyID)) {
+    return ['CCD', 'CTX'].includes(e.stdEntryCode) ? ['R29', 'CORPORATE_NOT_AUTHORIZED'] : ['R10', 'CUSTOMER_ADVISES_NOT_AUTHORIZED']
+  }
+  return acct.cents < Math.round(e.amount * 100) ? ['R01', 'INSUFFICIENT_FUNDS'] : null
+}
+
+/** Steps 4-6 on one file's entries, in three passes as the server runs them. Returns the counts the server logs. */
+export function processEntries(rows: Row[], core: Record<string, CoreAccount>, trusted: string[], maxCents: number | null, now: string) {
+  let matched = 0, corrected = 0, review = 0, rejected = 0, posted = 0
+  // Step 4: transaction code, then the account: exact, a known alias, or zero padding
+  for (const e of rows) {
+    const code = CORE_TRAN_CODES[e.tranCode]
+    if (!code) {
+      Object.assign(e, { processStatus: 'MANUAL_REVIEW', processReason: 'UNSUPPORTED_TRAN_CODE' })
+      review++
+      continue
+    }
+    e.coreTranCode = code
+    if (core[e.recvAcctID]) {
+      matched++
+      continue
+    }
+    const alias = ALIASES[e.recvAcctID]
+    const padded = alias ? undefined : Object.keys(core).filter((a) => stripZeros(a) === stripZeros(e.recvAcctID))
+    if (alias || padded?.length === 1) {
+      Object.assign(e, { processStatus: 'AUTO_CORRECTED', correctedAcctNo: alias ?? padded![0], processReason: alias ? 'KNOWN_ALIAS' : 'ZERO_PADDING' })
+      corrected++
+    } else {
+      Object.assign(e, { processStatus: 'MANUAL_REVIEW', processReason: 'ACCOUNT_NOT_FOUND' })
+      review++
+    }
+  }
+  // Step 5: return codes; an entry over MAX_ENTRY_AMOUNT waits for manual review
+  for (const e of rows) {
+    const r = returnFor(e, core)
+    if (r) {
+      reject(e, r)
+      rejected++
+    } else if (maxCents !== null && Math.round(e.amount * 100) > maxCents && e.processStatus !== 'MANUAL_REVIEW') {
+      Object.assign(e, { processStatus: 'MANUAL_REVIEW', processReason: 'OVER_LIMIT' })
+    }
+  }
+  // Step 6: debits are held; credits are made available only from a trusted Company ID
+  for (const e of rows) {
+    if (!['RECEIVED', 'AUTO_CORRECTED'].includes(e.processStatus) || e.coreTranCode === 'PRENOTE') continue
+    const credit = e.creditFlag === 1
+    if (credit && !trusted.includes(e.companyID)) continue
+    const acct = core[e.correctedAcctNo ?? e.recvAcctID]
+    const cents = Math.round(e.amount * 100)
+    if (!credit && acct.cents < cents) {
+      reject(e, ['R01', 'INSUFFICIENT_FUNDS']) // spent since step 5
+      continue
+    }
+    acct.cents += credit ? cents : -cents
+    Object.assign(e, { processStatus: 'MEMO_POSTED', memoPostedTm: now })
+    posted++
+  }
+  return { matched, corrected, review, rejected, posted }
+}

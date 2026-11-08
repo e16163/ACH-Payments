@@ -1,22 +1,24 @@
 // In-browser stand-in for the Java API, used only by the GitHub Pages demo build (VITE_DEMO=1).
-// It follows the server's rules and messages (TransferService, ParamValidator, MfaService, SecurityConfig, EodFileStore, EodFileJob)
+// It follows the server's rules and messages (TransferService, ParamValidator, MfaService, SecurityConfig, EodFileStore, EodFileJob,
+// OriginationWindow, ReceivedEntryProcessor)
 // on made-up data, and keeps its state in sessionStorage, so closing the tab resets it.
 import { ApiError } from '../api'
 import BACK_OFFICE from './backOffice.json'
 import { buildNachaFile, type NachaBatch, type NachaEntry } from './nacha'
-import { ingest, type RecvEntry } from './receive'
+import { ingest, processEntries, sampleCore, RECEIVED, type CoreAccount, type Processing, type RecvEntry } from './receive'
 import payrollSample from '../../../src/main/resources/fed-samples/sample1-payroll.ach?raw'
 import retailSample from '../../../src/main/resources/fed-samples/sample2-retail.ach?raw'
 import outOfBalanceSample from '../../../src/main/resources/fed-samples/sample3-out-of-balance.ach?raw'
 import { validateDesc, validateName, validateValue, PARAM_TYPES } from '../params/validation'
 import { isValidRouting } from '../member/rules'
 
-type Role = 'MEMBER' | 'SYS_ADMIN' | 'ACH_ORIG_OPS' | 'ACH_RECV_OPS'
+type Role = 'MEMBER' | 'SYS_ADMIN' | 'ACH_ORIG_OPS' | 'ACH_RECV_OPS' | 'COMPLIANCE'
 const USERS: Record<string, { password: string; role: Role }> = {
   member: { password: 'member123', role: 'MEMBER' },
   admin: { password: 'admin123', role: 'SYS_ADMIN' },
   achorig: { password: 'achorig123', role: 'ACH_ORIG_OPS' },
   achrecv: { password: 'achrecv123', role: 'ACH_RECV_OPS' },
+  achcomp: { password: 'achcomp123', role: 'COMPLIANCE' },
 }
 
 const APPS: [string, string][] = [
@@ -64,7 +66,7 @@ type Transfer = {
   transferSerNo: string; ofacStatus: string; memoStatus: string; recvName: string; bankName: string | null; routingNo: string
   acctNo: string; acctType: string; fromAcctNo: string; fromAcctName: string; fromAcctType: string; amount: number
   fee: number; effectiveDt: string; frequency: string; memo: string | null; submitted: string
-  processStatus: string; firstSerNo: string | null; reqNo: number; remaining: number
+  processStatus: string; firstSerNo: string | null; reqNo: number; remaining: number; ofacTm: string
 }
 type AchFileRow = {
   fileID: string; fileName: string; fedStatus: string; fileHeaderDt: string; totalCreditCount: number
@@ -73,7 +75,7 @@ type AchFileRow = {
 type RecvFile = {
   fileID: string; fileName: string; fileHeaderDt: string; fileHeaderTm: string; fedStatus: string; processStatus: string; modifier: string
 }
-type RecvRow = RecvEntry & { tranID: number; transferSerNo: string; transferVersion: number; fileID: string; batchID: string; fedStatus: string; sourceID: string; createTm: string }
+type RecvRow = RecvEntry & Processing & { tranID: number; transferSerNo: string; transferVersion: number; fileID: string; batchID: string; fedStatus: string; sourceID: string; createTm: string }
 type ExternalAccount = { recvAcctSerNo: string; routingNo: string; acctNo: string; acctType: string; acctOwner: string; acctStatus: string }
 type LogRow = { logAppId: number; systemID: string | null; logLevel: string; logMesg: string; logExceptionData: string | null; logTm: string }
 type State = {
@@ -88,10 +90,11 @@ type State = {
   nextTrace: number
   receivedFiles: RecvFile[]
   receivedEntries: RecvRow[]
+  core: Record<string, CoreAccount> // the receivers' accounts (SimCoreAccount)
   externalAccounts: ExternalAccount[] // newest last
 }
 
-const KEY = 'ach-demo-state-5' // new name: state saved by an older demo has no logs or external accounts
+const KEY = 'ach-demo-state-6' // new name: state saved by an older demo has no processing fields
 const MEMBER_NO = 'M10982347'
 const PENDING_MICRO_DEPOSIT = 'ACTIVE_PENDING_MICRO_DEPOSIT' // TransferService: stored as PENDING_MICRO_DEP
 
@@ -116,6 +119,11 @@ function freshState(): State {
       { systemName: 'ACH_ORIG', paramName: 'EXTERNAL_XFER_FEE', paramDesc: 'Fee for a member external ACH transfer (UC-ACH-ORG-01)', paramRawType: 'DECIMAL', paramRawValue: '0.00', lastModTm: '2026-11-03T21:21:05', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'FED_IMMEDIATE_DEST', paramDesc: 'Routing number of the Federal Reserve office that receives our files', paramRawType: 'STRING', paramRawValue: '011000015', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'ORIG_COMPANY_NAME', paramDesc: 'Company name in NACHA batch headers (16 characters at most)', paramRawType: 'STRING', paramRawValue: 'DEMO CU', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_ORIG', paramName: 'ORIG_WINDOW_TIMES', paramDesc: 'Intraday windows when scheduled transfers are checked and made ready to post (Eastern, comma-separated)', paramRawType: 'STRING', paramRawValue: '06:00,09:00,12:00,15:00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_RCV', paramName: 'RECV_WINDOW_TIMES', paramDesc: 'FedACH distribution windows when inbound files are processed (Eastern, comma-separated)', paramRawType: 'STRING', paramRawValue: '06:00,09:00,12:00,15:00,18:00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_RCV', paramName: 'CORE_POSTING_TIME', paramDesc: 'Time the end-of-day core posting file is generated (Eastern)', paramRawType: 'STRING', paramRawValue: '19:00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_RCV', paramName: 'TRUSTED_COMPANY_IDS', paramDesc: 'Originator Company IDs whose credits are memo posted at once (comma-separated)', paramRawType: 'STRING', paramRawValue: '1900483920', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_RCV', paramName: 'MAX_ENTRY_AMOUNT', paramDesc: 'A received entry above this amount waits for manual review', paramRawType: 'DECIMAL', paramRawValue: '25000.00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'FED_SIM_FAIL_ATTEMPTS', paramDesc: 'Fed simulator: how many send attempts fail, to demo EX-02 (0 = none)', paramRawType: 'INTEGER', paramRawValue: '0', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
     ],
     transfers: [],
@@ -127,14 +135,15 @@ function freshState(): State {
       tranID: 1, transferSerNo: 'TRF-20261101-0089', transferVersion: 1, fileID: 'ACHFILE-88392', batchID: 'BATCH-001', creditFlag: 1, tranCode: '22',
       companyName: 'ACME CORP', companyID: '1234567890', companyDiscData: 'DIRECT DEP', stdEntryCode: 'PPD', companyEntryDesc: 'PAYROLL', descriptiveDt: '2026-11-01',
       effectiveDt: '2026-11-03', settlementDt: '2026-11-03', originatorID: '9000123456', amount: 3450.5, recvAcctID: '987654321012', recvName: 'JOHN DOE',
-      transactionDiscData: 'S', traceNo: '051000031234567', fedStatus: 'SETTLED', sourceID: 'PAYROLL_SYS', createTm: '2026-11-01T16:00:00', batchNo: 1,
+      transactionDiscData: 'S', traceNo: '051000031234567', fedStatus: 'SETTLED', sourceID: 'PAYROLL_SYS', createTm: '2026-11-01T16:00:00', batchNo: 1, ...RECEIVED,
     }, {
       // The sample reversal (V14)
       tranID: 2, transferSerNo: '', transferVersion: 1, fileID: 'ACHFILE-88392', batchID: 'BATCH-002', creditFlag: 0, tranCode: '27',
       companyName: 'ACME CORP', companyID: '1234567890', companyDiscData: 'DIRECT DEP', stdEntryCode: 'PPD', companyEntryDesc: 'REVERSAL', descriptiveDt: '2026-11-04',
       effectiveDt: '2026-11-05', settlementDt: '2026-11-05', originatorID: '9000123456', amount: 3450.5, recvAcctID: '987654321012', recvName: 'JOHN DOE',
-      transactionDiscData: 'S', traceNo: '051000031234568', fedStatus: 'SETTLED', sourceID: 'PAYROLL_SYS', createTm: '2026-11-01T16:00:00', batchNo: 2,
+      transactionDiscData: 'S', traceNo: '051000031234568', fedStatus: 'SETTLED', sourceID: 'PAYROLL_SYS', createTm: '2026-11-01T16:00:00', batchNo: 2, ...RECEIVED,
     }],
+    core: sampleCore(),
     // The sample ACHOrigRecvAccount row (V7)
     externalAccounts: [{ recvAcctSerNo: 'REC-SRV-20261102-01', routingNo: '051000033', acctNo: '987654321012', acctType: 'CHECKING', acctOwner: 'JOHN DOE', acctStatus: 'ACTIVE' }],
   }
@@ -310,6 +319,12 @@ function route(s: State, method: string, path: string, body: Body): unknown {
     if (role !== 'ACH_RECV_OPS') denied()
     return receiving(s, method, path.slice('/v1/ach/receiving'.length), body)
   }
+  if (path.startsWith('/v1/compliance/ofac/')) {
+    if (role !== 'COMPLIANCE') denied()
+    if (path === '/v1/compliance/ofac/flagged' && method === 'GET') return flagged(s)
+    if (path === '/v1/compliance/ofac/resolve' && method === 'PATCH') return resolve(s, body)
+    fail(404, 'Not found')
+  }
   if (path.startsWith('/v1/ach/back-office/')) {
     const key = path.slice('/v1/ach/back-office/'.length)
     if (role !== (key.startsWith('origination/') ? 'ACH_ORIG_OPS' : 'ACH_RECV_OPS')) denied()
@@ -481,7 +496,7 @@ function submit(s: State, body: Body) {
     processStatus: c.ofacHit ? 'PENDING' : 'PENDING_BATCH', firstSerNo: null, reqNo: 1, remaining: c.count - 1,
     recvName: c.recvName, bankName: c.bankName, routingNo: c.routingNo, acctNo: c.acctNo, acctType: c.acctType,
     fromAcctNo: c.from.acctNo, fromAcctName: c.from.acctName, fromAcctType: c.from.acctType, amount: c.amount, fee: c.fee,
-    effectiveDt: c.effectiveDt, frequency: c.frequency, memo: c.memo, submitted: isoDateTime(new Date()),
+    effectiveDt: c.effectiveDt, frequency: c.frequency, memo: c.memo, submitted: isoDateTime(new Date()), ofacTm: isoDateTime(new Date()),
   }
   s.transfers.push(t)
   // TransferService.activate: an account still pending micro-deposits becomes ACTIVE; the transfer's account check has just verified it
@@ -557,7 +572,8 @@ function receiving(s: State, method: string, path: string, body: Body) {
     const q = new URLSearchParams(path.split('?')[1])
     const page = Number(q.get('page') ?? 1)
     const limit = Number(q.get('limit') ?? 10)
-    const rows = s.receivedEntries.filter((e) => e.fileID === q.get('fileID')).sort((a, b) => a.traceNo.localeCompare(b.traceNo) || a.tranID - b.tranID)
+    const status = q.get('status')
+    const rows = s.receivedEntries.filter((e) => e.fileID === q.get('fileID') && (!status || e.processStatus === status)).sort((a, b) => a.traceNo.localeCompare(b.traceNo) || a.tranID - b.tranID)
     return { items: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit }
   }
   const m = /^\/transactions\/(\d+)$/.exec(path)
@@ -586,8 +602,13 @@ function receiveSample(s: State, sample: string) {
     const serials = s.receivedEntries.filter((e) => e.transferSerNo.startsWith(`TRF-${day}-`)).length
     s.receivedEntries.push(...r.entries.map((e, i) => ({
       ...e, tranID: s.receivedEntries.length + i + 1, transferSerNo: `TRF-${day}-${pad(serials + i + 1, 4)}`, transferVersion: 1, fileID,
-      batchID: `${fileID}-B${pad(e.batchNo, 3)}`, fedStatus: 'SETTLED', sourceID: 'FED_ACH_INBOUND', createTm: isoDateTime(new Date()),
+      batchID: `${fileID}-B${pad(e.batchNo, 3)}`, fedStatus: 'SETTLED', sourceID: 'FED_ACH_INBOUND', createTm: isoDateTime(new Date()), ...RECEIVED,
     })))
+    // Ba's blueprint, steps 4-6, as the window that picks the file up runs them
+    const rcv = (name: string) => s.params.find((p) => p.systemName === 'ACH_RCV' && p.paramName === name)?.paramRawValue ?? ''
+    const n = processEntries(s.receivedEntries.filter((e) => e.fileID === fileID), s.core,
+      rcv('TRUSTED_COMPANY_IDS').split(',').map((x) => x.trim()).filter(Boolean), toCents(rcv('MAX_ENTRY_AMOUNT')), isoDateTime(new Date()))
+    log(s, 'ACH_RCV', 'INFO', `${fileID} processed: ${n.matched} matched, ${n.corrected} auto-corrected, ${n.review} for manual review, ${n.rejected} rejected, ${n.posted} memo posted`)
   }
   return { fileID, fileName, processStatus: row.processStatus, message: r.message }
 }
@@ -619,7 +640,9 @@ function eod(s: State, method: string, path: string, body: Body) {
 function eodStatus(s: State) {
   const item = (t: Transfer, reason: string | null) => ({ transferSerNo: t.transferSerNo, recvName: t.recvName, amount: t.amount / 100, effectiveDt: t.effectiveDt, reason })
   const byDate = [...s.transfers].sort((a, b) => a.effectiveDt.localeCompare(b.effectiveDt) || a.transferSerNo.localeCompare(b.transferSerNo))
-  const pending = byDate.filter((t) => t.processStatus === 'PENDING_BATCH').map((t) => item(t, null))
+  // Waiting for a window, or made ready to post by one (Ba's blueprint, steps 1-7)
+  const pending = byDate.filter((t) => ['PENDING_BATCH', 'READY_TO_POST'].includes(t.processStatus) && ['OFAC_PASSED', 'CLEARED'].includes(t.ofacStatus))
+    .map((t) => item(t, null))
   const today = isoDate(new Date())
   const next = pending[0]?.effectiveDt ?? today
   return {
@@ -627,8 +650,9 @@ function eodStatus(s: State) {
     nextBusinessDate: next < today ? today : next,
     pending,
     leftOut: [
-      ...byDate.filter((t) => t.ofacStatus === 'FLAGGED').map((t) => item(t, 'OFAC review')),
-      ...byDate.filter((t) => t.processStatus === 'REJECTED').map((t) => item(t, 'Insufficient funds')),
+      ...byDate.filter((t) => t.processStatus === 'PENDING' && t.ofacStatus === 'FLAGGED').map((t) => item(t, 'OFAC review')),
+      ...byDate.filter((t) => t.processStatus === 'REJECTED' && t.ofacStatus === 'BLOCKED').map((t) => item(t, 'OFAC blocked')),
+      ...byDate.filter((t) => t.processStatus === 'REJECTED' && t.ofacStatus !== 'BLOCKED').map((t) => item(t, 'Failed the account, limit or funds check')),
     ],
     files: [...s.files].reverse().map(({ content: _content, ...row }) => row),
   }
@@ -640,32 +664,86 @@ function scheduleNext(s: State, t: Transfer) {
   const firstSerNo = t.firstSerNo ?? t.transferSerNo
   const first = s.transfers.find((x) => x.transferSerNo === firstSerNo)!
   s.transfers.push({
-    ...t, transferSerNo: nextSerNo(s), firstSerNo, reqNo: t.reqNo + 1, remaining: t.remaining - 1, memoStatus: 'PENDING',
+    ...t, transferSerNo: nextSerNo(s), firstSerNo, reqNo: t.reqNo + 1, remaining: t.remaining - 1, memoStatus: 'PENDING', ofacStatus: 'OFAC_PASSED',
     processStatus: 'PENDING_BATCH', effectiveDt: occurrence(first.effectiveDt, t.frequency, t.reqNo), submitted: isoDateTime(new Date()),
   })
 }
 
-/** The first payment was held at submit. A later one is held when due; without the funds it's rejected and the series goes on. */
-function readyForFile(s: State, t: Transfer): boolean {
-  if (t.memoStatus === 'POSTED') return true
-  const from = s.accounts.find((a) => a.acctNo === t.fromAcctNo)!
-  if (from.cents >= t.amount + t.fee) {
-    from.cents -= t.amount + t.fee
-    t.memoStatus = 'POSTED'
-    return true
+/**
+ * OriginationWindow (Ba's blueprint, steps 1-7) for every transfer due by the business date: funds for a payment not yet held,
+ * OFAC (skipped once cleared), the hold, then READY_TO_POST. The demo's accounts are always active and its limits can't be
+ * changed, so the account and limit re-checks always pass.
+ */
+function runWindow(s: State, businessDate: string) {
+  const due = s.transfers.filter((t) => t.processStatus === 'PENDING_BATCH' && t.effectiveDt <= businessDate)
+    .sort((a, b) => a.transferSerNo.localeCompare(b.transferSerNo))
+  for (const t of due) {
+    const from = s.accounts.find((a) => a.acctNo === t.fromAcctNo)!
+    if (t.memoStatus !== 'POSTED' && from.cents < t.amount + t.fee) {
+      reject(s, t, 'INSUFFICIENT_FUNDS')
+      continue
+    }
+    if (t.ofacStatus !== 'CLEARED') {
+      t.ofacTm = isoDateTime(new Date())
+      if (OFAC.some((n) => normalize(n) === normalize(t.recvName))) {
+        t.ofacStatus = 'FLAGGED'
+        t.processStatus = 'PENDING'
+        log(s, 'ACH_ORIG', 'WARN', `Compliance alert: ${t.transferSerNo} is flagged by OFAC and waits for review`)
+        continue
+      }
+      t.ofacStatus = 'OFAC_PASSED'
+    }
+    if (t.memoStatus !== 'POSTED') { // a later payment of a series (E4); the first was held at Confirm
+      from.cents -= t.amount + t.fee
+      t.memoStatus = 'POSTED'
+    }
+    t.processStatus = 'READY_TO_POST'
   }
+}
+
+/** OriginationWindow.reject: gives the hold back and schedules the next payment of a series. */
+function reject(s: State, t: Transfer, reason: string) {
   t.processStatus = 'REJECTED'
-  t.memoStatus = 'NSF'
+  if (t.memoStatus === 'POSTED') {
+    s.accounts.find((a) => a.acctNo === t.fromAcctNo)!.cents += t.amount + t.fee
+    t.memoStatus = 'RELEASED'
+  }
+  log(s, 'ACH_ORIG', 'WARN', `Origination window: ${t.transferSerNo} rejected, ${reason}`)
   scheduleNext(s, t)
-  return false
+}
+
+// ---- OFAC Review (OriginationProcessingController, OriginationWindow.resolve) ----
+
+function flagged(s: State) {
+  return s.transfers.filter((t) => t.ofacStatus === 'FLAGGED')
+    .sort((a, b) => a.ofacTm.localeCompare(b.ofacTm) || a.transferSerNo.localeCompare(b.transferSerNo))
+    .map((t) => ({ transfer_id: t.transferSerNo, member_no: MEMBER_NO, recipient_name: t.recvName, amount: t.amount / 100, effective_dt: t.effectiveDt, flagged_at: t.ofacTm }))
+}
+
+function resolve(s: State, body: Body) {
+  const id = String(body.transfer_id ?? '')
+  const t = s.transfers.find((x) => x.transferSerNo === id) ?? fail(400, `No such transfer ${id}.`)
+  if (t.ofacStatus !== 'FLAGGED') fail(400, `${id} isn't waiting for OFAC review (ofacStatus ${t.ofacStatus}).`)
+  if (body.resolution === 'CLEARED_FALSE_POSITIVE') {
+    t.ofacStatus = 'CLEARED'
+    t.processStatus = 'PENDING_BATCH' // goes on at the next window
+  } else if (body.resolution === 'BLOCKED_CONFIRMED_MATCH') {
+    t.ofacStatus = 'BLOCKED'
+    reject(s, t, 'OFAC_BLOCKED')
+  } else {
+    fail(400, 'resolution must be CLEARED_FALSE_POSITIVE or BLOCKED_CONFIRMED_MATCH.')
+  }
+  t.ofacTm = isoDateTime(new Date())
+  log(s, 'ACH_ORIG', 'INFO', `Compliance officer '${s.user}' ${t.ofacStatus.toLowerCase()} ${id}`)
+  return { transfer_id: id, previous_status: 'FLAGGED', current_status: t.ofacStatus, updated_at: t.ofacTm }
 }
 
 function runEod(s: State, businessDate: string) {
   if (!isBankingDay(businessDate)) return { fileID: null, fedStatus: null, message: `${businessDate} isn't a banking day, so no file was built.` }
+  runWindow(s, businessDate) // one last window before the file (EodFileJob)
   const due = s.transfers
-    .filter((t) => t.processStatus === 'PENDING_BATCH' && t.effectiveDt <= businessDate)
+    .filter((t) => t.processStatus === 'READY_TO_POST' && t.effectiveDt <= businessDate)
     .sort((a, b) => a.transferSerNo.localeCompare(b.transferSerNo))
-    .filter((t) => readyForFile(s, t))
   if (due.length === 0) return { fileID: null, fedStatus: null, message: `Nothing is due for ${businessDate}.` }
 
   const entryDesc = (t: Transfer) => (t.memo === null || RESERVED_ENTRY_DESC.includes(t.memo) ? 'TRANSFER' : t.memo)

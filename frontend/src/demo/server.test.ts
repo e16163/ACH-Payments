@@ -234,6 +234,29 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
     expect((await error(files())).status).toBe(403)
   })
 
+  it("runs Ba's steps 4-6 on a received file, as the real app does on the same sample", async () => {
+    await asOperator()
+    const r = await receive('PAYROLL')
+    type Row = { tranID: number; recvAcctID: string; processStatus: string; returnCode: string | null; correctedAcctNo: string | null; processReason: string | null }
+    const rows = (await demoApi<{ items: Row[] }>(`${BASE}/transactions?fileID=${r.fileID}&page=1&limit=100&sortBy=traceNo&sortDir=ASC`)).items
+    const by = (acct: string) => rows.find((x) => x.recvAcctID === acct)!
+    expect(by('987654321019').processStatus).toBe('MEMO_POSTED')
+    expect(by('987654329019')).toMatchObject({ correctedAcctNo: '0987654329019', processReason: 'ZERO_PADDING' })
+    expect(by('987654328019')).toMatchObject({ correctedAcctNo: '555000328019', processReason: 'KNOWN_ALIAS' })
+    expect([by('987654330019').returnCode, by('987654327019').returnCode, by('987654326019').returnCode]).toEqual(['R03', 'R16', 'R02'])
+    const rejected = await demoApi<{ total: number }>(`${BASE}/transactions?fileID=${r.fileID}&status=REJECTED&page=1&limit=10&sortBy=traceNo&sortDir=ASC`)
+    expect(rejected.total).toBe(3)
+  })
+
+  it('returns retail debits that are stopped, blocked or short (R08, R10, R01)', async () => {
+    await asOperator()
+    type Row = { recvAcctID: string; returnCode: string | null }
+    const retail = await receive('RETAIL')
+    const debits = (await demoApi<{ items: Row[] }>(`${BASE}/transactions?fileID=${retail.fileID}&page=1&limit=100&sortBy=traceNo&sortDir=ASC`)).items
+    const code = (acct: string) => debits.find((x) => x.recvAcctID === acct)!.returnCode
+    expect([code('987654322019'), code('987654323019'), code('987654410019')]).toEqual(['R10', 'R08', 'R01'])
+  })
+
   it('keeps achrecv out of the other screens', async () => {
     await asOperator()
     expect(await demoApi('/me')).toMatchObject({ username: 'achrecv', roles: ['ACH_RECV_OPS'] })
@@ -409,7 +432,7 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     const second = (await status()).pending[0]
     await run(second.effectiveDt) // $2,500 left, so the $6,000 hold fails
     let s = await status()
-    expect(s.leftOut).toEqual([expect.objectContaining({ reason: 'Insufficient funds' })])
+    expect(s.leftOut).toEqual([expect.objectContaining({ reason: 'Failed the account, limit or funds check' })])
     expect(s.files).toHaveLength(1)
     expect(s.pending).toHaveLength(1)
     await run(s.pending[0].effectiveDt) // the last one, also short
@@ -428,6 +451,33 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     const { fileID } = await run(t.effectiveDt)
     const { content } = await demoApi<{ content: string }>(`/eod/files/${fileID}/content`)
     expect(content.split('\n')[1].slice(53, 63).trim()).toBe('TRANSFER')
+  })
+
+  it("Ba's OFAC review: only achcomp resolves; Clear sends it in the next file, Block gives the hold back", async () => {
+    await memberWithMfa()
+    const hit = await post('/transfers', await transfer({ externalAccountId: await recipient('Blocked Test Person'), amount: '20.00' })) as { transferSerNo: string; effectiveDt: string }
+    const other = await post('/transfers', await transfer({ externalAccountId: await recipient('Blocked Demo Entity', '77700002'), amount: '30.00' })) as { transferSerNo: string }
+    const resolve = (transfer_id: string, resolution: string) => demoApi<{ current_status: string }>('/v1/compliance/ofac/resolve', {
+      method: 'PATCH', body: JSON.stringify({ transfer_id, resolution }),
+    })
+    await asOrigOps()
+    expect((await error(resolve(hit.transferSerNo, 'CLEARED_FALSE_POSITIVE'))).status).toBe(403)
+
+    await demoLogin('achcomp', 'achcomp123')
+    expect((await demoApi<{ transfer_id: string }[]>('/v1/compliance/ofac/flagged')).map((f) => f.transfer_id)).toEqual([hit.transferSerNo, other.transferSerNo])
+    expect((await resolve(hit.transferSerNo, 'CLEARED_FALSE_POSITIVE')).current_status).toBe('CLEARED')
+    expect((await resolve(other.transferSerNo, 'BLOCKED_CONFIRMED_MATCH')).current_status).toBe('BLOCKED')
+    expect((await error(resolve(hit.transferSerNo, 'CLEARED_FALSE_POSITIVE'))).message).toBe(`${hit.transferSerNo} isn't waiting for OFAC review (ofacStatus CLEARED).`)
+    expect(await demoApi('/v1/compliance/ofac/flagged')).toEqual([])
+
+    await asOrigOps()
+    const r = await run(hit.effectiveDt)
+    const s = await status()
+    expect(s.files[0]).toMatchObject({ fileID: r.fileID, totalCreditCount: 1, totalCreditAmt: 20 })
+    expect(s.leftOut).toEqual([expect.objectContaining({ recvName: 'BLOCKED DEMO ENTITY', reason: 'OFAC blocked' })])
+    await demoLogout()
+    await memberWithMfa()
+    expect(await available()).toBe(8500 - 20) // the $20 is held at the window after Clear; the blocked $30 was never held
   })
 
   it('builds no file on a day that is not a banking day', async () => {

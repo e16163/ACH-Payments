@@ -31,8 +31,9 @@ export default function LoginPage({ onSignedIn }: { onSignedIn: () => void }) {
           Demo logins: <strong className="code">member</strong> / <strong className="code">member123</strong> for online
           banking, <strong className="code">admin</strong> / <strong className="code">admin123</strong> for System
           Configuration, <strong className="code">achorig</strong> / <strong className="code">achorig123</strong> for the ACH
-          Origination back office, or <strong className="code">achrecv</strong> / <strong className="code">achrecv123</strong> for
-          the ACH Receiving back office.
+          Origination back office, <strong className="code">achrecv</strong> / <strong className="code">achrecv123</strong> for
+          the ACH Receiving back office, or <strong className="code">achcomp</strong> / <strong className="code">achcomp123</strong> for
+          OFAC Review.
         </p>
       )}
       <label className="field">

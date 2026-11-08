@@ -205,7 +205,7 @@
    "addendaInd": null,
    "recvAcctSerNo": null,
    "recvAcctVersion": null,
-   "processStatus": "UNPROCESSED"
+   "processStatus": "RECEIVED"
   }
  ],
  "receiving/nocs": [
