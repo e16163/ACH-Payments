@@ -139,7 +139,8 @@ From your blueprint, the engine processes the Fed's files at 6 AM, 9 AM, 12 PM, 
    - most entries are **MEMO_POSTED**: the account was found and, as payroll from the trusted Company ID `1900483920` (`TRUSTED_COMPANY_IDS`), the money is available at once;
    - James Thomas (account `987654329019`) is **AUTO_CORRECTED** to `0987654329019` (zero padding), and Laura Anderson (`987654328019`) to `555000328019` (a known alias);
    - three are **REJECTED** with a return code: **R03** (no such account), **R16** (frozen) and **R02** (closed).
-7. In Sample 2, the debits are held (**MEMO_POSTED**) unless they're returned: **R10** (blocked originator), **R08** (stop payment) and **R01** ($19.99 against $5.00). Credits from other companies stay **RECEIVED** until the end-of-day posting file.
+7. In Sample 2, the debits are held (**MEMO_POSTED**) unless they're returned: **R10** (blocked originator), **R08** (stop payment), and the same **R02**, **R16** and **R03** accounts as Sample 1. Credits from other companies stay **RECEIVED** until the end-of-day posting file.
+   - **R01 (no funds)** needs Sample 2 *before* Sample 1 (in the online demo, a fresh tab): then Supplier Kappa's $19.99 debit meets a $5.00 balance. After Sample 1, Kappa already has an $8,500 payment from a trusted company, available at once, so the debit goes through. That's memo posting doing its job.
 
 Entries aren't OFAC screened (they were screened at origination). In the full app, the end-of-day posting file (step 7) is written at 7 PM (`CORE_POSTING_TIME`) to `~/dev/core/posting`, and the returns wait as `PENDING` rows in `ACHRecvReturn`; sending them to the Fed is not built yet.
 
