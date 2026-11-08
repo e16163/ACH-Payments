@@ -56,6 +56,27 @@ Ba's message asks for 4 things:
    → verify: passes.
 4. Change parser code **only if** a test finds a real gap.
 
+**✅ Done 2026-11-08.** `src/test/resources/nacha/ba-sample-1-payroll-b2b.ach` and `ba-sample-2-retail-web-ccd.ach`, tested by `BaSampleFilesTest`:
+- Both pass every validation rule.
+- Each batch is checked: entry count and totals, plus the first and last entries.
+- Streaming (Receiving) hands over the same batches as a full parse.
+- Writing the parsed file (Origination) gives back the same bytes.
+- Every field in Ba's Type 6, 8 and 9 tables is read from Ba's positions.
+
+The parser needed no change. Fixes made while rebuilding (tell Ba):
+
+| Sample | Ba's value | Written as |
+| --- | --- | --- |
+| Both | Batch numbers have 6 digits (`000001`) | 7 digits (`0000001`) |
+| Both | Amounts are 11–12 digits | 10 digits |
+| Both | The two names in each batch header run together | Company Name = the most words that fit 16 characters (`ACME PAYROLL`), the rest is Discretionary Data (`WEEKLY PAYROLL`) |
+| Both | Control records (types 8 and 9) can't be read | Recomputed from the entries |
+| 1, batch 3 (BONUSES) | Batch total $26,750.00 | $26,700.00, the sum of its 10 entries |
+| 2, batch 1 (WEB PAYMENTS) | Batch debits $895.00 | $945.00 |
+| 2, batch 4 (PAYOUT) | Batch total $1,625.00 | $1,670.00 |
+| 2, batch 5 (DIVIDEND) | Batch total $2,675.00 | $2,670.00 |
+| 2, every entry | RDFI routing `031000030` fails the 3-7-1 check digit | `031000037`. The File Header keeps Ba's `031000030`, because header routing numbers aren't check-digit tested. |
+
 ## 3. Receiving redesign (we are the RDFI)
 
 | Blueprint step | Today | Change |
