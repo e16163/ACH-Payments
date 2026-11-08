@@ -34,6 +34,8 @@ public class OriginationWindow {
 
     public static final String PENDING_BATCH = "PENDING_BATCH", READY_TO_POST = "READY_TO_POST", REJECTED = "REJECTED",
             FLAGGED = "FLAGGED", CLEARED = "CLEARED", BLOCKED = "BLOCKED", OFAC_PASSED = "OFAC_PASSED";
+    /** lastModBy on a transfer the window rejects; the EOD screen lists them. */
+    public static final String WINDOW_USER = "ORIG_WINDOW";
     public static final String CLEAR_RESOLUTION = "CLEARED_FALSE_POSITIVE", BLOCK_RESOLUTION = "BLOCKED_CONFIRMED_MATCH";
 
     public record Run(String windowId, String windowTime, int extracted, int ready, int flagged, int rejected) {
@@ -187,8 +189,9 @@ public class OriginationWindow {
 
     /** Rejects the transfer, gives its hold back, and schedules the next payment of a series (E4). */
     void reject(Transfer t, String reason) {
-        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processStatus = ?, processTm = NOW() WHERE transferSerNo = ? "
-                + "AND transferVersion = 1", REJECTED, t.serNo());
+        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processStatus = ?, processTm = NOW(), "
+                + "lastModBy = IF(ofacStatus = ?, lastModBy, ?) WHERE transferSerNo = ? AND transferVersion = 1",
+                REJECTED, BLOCKED, WINDOW_USER, t.serNo()); // a block keeps the officer's name
         if ("POSTED".equals(t.memoStatus())) {
             jdbc.update("UPDATE SimCoreAccount SET availBal = availBal + ? WHERE acctNo = ?", t.total(), t.acctNo());
             jdbc.update("INSERT INTO ACHMemoPost (tranSource, tranRef, acctNo, creditFlag, amount, postType, memoStatus, reason) "

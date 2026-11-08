@@ -42,6 +42,7 @@ class OriginationWindowIntegrationTest {
     @Autowired TransferService transfers;
     @Autowired TransferDates dates;
     @Autowired JdbcTemplate jdbc;
+    @Autowired com.achpayments.outbound.EodController eod;
 
     @Value("${app.db.origination}")
     String orig;
@@ -98,6 +99,7 @@ class OriginationWindowIntegrationTest {
         assertEquals(Map.of("processStatus", "READY_TO_POST", "ofacStatus", "OFAC_PASSED", "memoStatus", "POSTED"), transfer(serNo));
         assertEquals(held, available()); // no second hold
         assertTrue(run.extracted() >= 1 && run.ready() >= 1);
+        assertTrue(eod.status().pending().stream().anyMatch(i -> i.transferSerNo().equals(serNo))); // still on the EOD screen
     }
 
     @Test
@@ -110,6 +112,8 @@ class OriginationWindowIntegrationTest {
         assertEquals("REJECTED", transfer(serNo).get("processStatus"));
         assertEquals("RELEASED", transfer(serNo).get("memoStatus"));
         assertEquals(new BigDecimal("20000.00"), available());
+        assertTrue(eod.status().leftOut().stream().anyMatch(i -> i.transferSerNo().equals(serNo)
+                && i.reason().equals("Failed the account, limit or funds check")));
     }
 
     @Test
@@ -156,6 +160,7 @@ class OriginationWindowIntegrationTest {
         api.resolve(new ResolveRequest(serNo, "BLOCKED_CONFIRMED_MATCH", null, "Confirmed match."), OFFICER);
 
         assertEquals(Map.of("processStatus", "REJECTED", "ofacStatus", "BLOCKED", "memoStatus", "RELEASED"), transfer(serNo));
+        assertTrue(eod.status().leftOut().stream().anyMatch(i -> i.transferSerNo().equals(serNo) && i.reason().equals("OFAC blocked")));
         assertEquals(new BigDecimal("20000.00"), available());
     }
 

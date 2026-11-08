@@ -69,9 +69,12 @@ public class EodController {
 
     @GetMapping("/api/eod/status")
     public Status status() {
-        List<Item> pending = items("t.processStatus = 'PENDING_BATCH' AND t.ofacStatus = 'OFAC_PASSED'", null);
+        // Waiting for a window, or made ready to post by one (Ba's blueprint, steps 1-7)
+        List<Item> pending = items("t.processStatus IN ('PENDING_BATCH', 'READY_TO_POST') AND t.ofacStatus IN ('OFAC_PASSED', 'CLEARED')", null);
         List<Item> flagged = items("t.processStatus = 'PENDING' AND t.ofacStatus = 'FLAGGED'", "OFAC review");
-        List<Item> rejected = items("t.processStatus = 'REJECTED' AND t.lastModBy = 'EOD_BATCH'", "Insufficient funds");
+        List<Item> blocked = items("t.processStatus = 'REJECTED' AND t.ofacStatus = 'BLOCKED'", "OFAC blocked");
+        List<Item> rejected = items("t.processStatus = 'REJECTED' AND t.ofacStatus <> 'BLOCKED' AND t.lastModBy IN ('EOD_BATCH', 'ORIG_WINDOW')",
+                "Failed the account, limit or funds check");
         LocalDate today = LocalDate.now(clock);
         LocalDate next = pending.isEmpty() ? today : pending.get(0).effectiveDt();
         List<FileRow> files = jdbc.query("SELECT fileID, fileName, fedStatus, fileHeaderDt, totalCreditCount, totalCreditAmt, sendTm FROM "
@@ -79,7 +82,7 @@ public class EodController {
                 (rs, i) -> new FileRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getObject(4, LocalDate.class), rs.getInt(5),
                         rs.getBigDecimal(6), rs.getObject(7, LocalDateTime.class)));
         return new Status(params.get("ACH_ORIG", "FED_FILE_CUTOFF_TIME").orElse(""), next.isBefore(today) ? today : next,
-                pending, java.util.stream.Stream.concat(flagged.stream(), rejected.stream()).toList(), files);
+                pending, java.util.stream.Stream.of(flagged, blocked, rejected).flatMap(List::stream).toList(), files);
     }
 
     /** Run now. Design step 2 allows a "scheduled business date", which is what lets a demo send a future-dated transfer. */
