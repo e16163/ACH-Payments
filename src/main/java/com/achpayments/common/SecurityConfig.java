@@ -27,7 +27,7 @@ import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * Demo login (docs/USE-CASES.md P1, T7): the app's own sign-in page (POST /api/login, POST /api/logout) for an
- * admin, the two back-office logins (ROLE_ACH_ORIG_OPS, ROLE_ACH_RECV_OPS) and a member, whose passwords come from environment variables. HTTP Basic still works for
+ * admin, the back-office logins (ROLE_ACH_ORIG_OPS, ROLE_ACH_RECV_OPS, ROLE_COMPLIANCE) and a member, whose passwords come from environment variables. HTTP Basic still works for
  * scripts and tests, but a 401 never sends the browser's login popup. Members also pass a simulated MFA step.
  * Real users come in step 16.
  */
@@ -44,6 +44,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/eod/**").hasRole("ACH_ORIG_OPS")
                         .requestMatchers("/api/v1/ach/back-office/origination/**").hasRole("ACH_ORIG_OPS")
                         .requestMatchers("/api/v1/ach/back-office/receiving/**").hasRole("ACH_RECV_OPS")
+                        // Ba's blueprint, ACH Origination Processing: compliance resolves OFAC hits, origination ops run the rest
+                        .requestMatchers("/api/v1/compliance/**").hasRole("COMPLIANCE")
+                        .requestMatchers("/api/v1/ach/origination/**", "/api/v1/ach/processing/**", "/api/v1/ach/limits/**",
+                                "/api/v1/ach/transfers/**", "/api/v1/accounts/**").hasRole("ACH_ORIG_OPS")
                         // UC-ACH-RCV-02: ACH_RECV_OPS or SUPPORT. Only operations receive files.
                         .requestMatchers(HttpMethod.POST, "/api/v1/ach/receiving/**").hasRole("ACH_RECV_OPS")
                         .requestMatchers("/api/v1/ach/receiving/**").hasAnyRole("ACH_RECV_OPS", "SUPPORT")
@@ -83,7 +87,7 @@ public class SecurityConfig {
     private static String systemOf(Authentication auth) {
         List<String> roles = auth.getAuthorities().stream().map(GrantedAuthority::getAuthority).toList();
         if (roles.contains("ROLE_ACH_RECV_OPS")) return AppLogRepository.ACH_RCV;
-        if (roles.contains("ROLE_ACH_ORIG_OPS") || roles.contains("ROLE_MEMBER")) return AppLogRepository.ACH_ORIG;
+        if (roles.contains("ROLE_ACH_ORIG_OPS") || roles.contains("ROLE_MEMBER") || roles.contains("ROLE_COMPLIANCE")) return AppLogRepository.ACH_ORIG;
         return AppLogRepository.ACH_SYS;
     }
 
@@ -123,6 +127,8 @@ public class SecurityConfig {
             @Value("${app.orig-password}") String origPassword,
             @Value("${app.recv-username}") String recvUsername,
             @Value("${app.recv-password}") String recvPassword,
+            @Value("${app.comp-username}") String compUsername,
+            @Value("${app.comp-password}") String compPassword,
             @Value("${app.member-username}") String memberUsername,
             @Value("${app.member-password}") String memberPassword) {
         PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
@@ -130,6 +136,7 @@ public class SecurityConfig {
                 User.withUsername(adminUsername).password(encoder.encode(adminPassword)).roles("SYS_ADMIN").build(),
                 User.withUsername(origUsername).password(encoder.encode(origPassword)).roles("ACH_ORIG_OPS").build(),
                 User.withUsername(recvUsername).password(encoder.encode(recvPassword)).roles("ACH_RECV_OPS").build(),
+                User.withUsername(compUsername).password(encoder.encode(compPassword)).roles("COMPLIANCE").build(),
                 User.withUsername(memberUsername).password(encoder.encode(memberPassword)).roles("MEMBER").build());
     }
 

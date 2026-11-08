@@ -290,6 +290,16 @@ public class TransferService {
      * adds up the member's transfers from that type within its dayNo days (today counts as day 1), plus this one.
      */
     private void checkLimits(String memberNo, String acctType, BigDecimal amount) {
+        limitProblem(memberNo, acctType, amount).ifPresent(message -> {
+            throw new TransferRejected(Kind.LIMIT, message);
+        });
+    }
+
+    /**
+     * The first limit the member's transfers plus extra would break, as the message to show. Ba's blueprint step 3 calls it
+     * with extra = 0 for a transfer that's already saved and so already counted.
+     */
+    public Optional<String> limitProblem(String memberNo, String acctType, BigDecimal extra) {
         List<Map<String, Object>> rules = jdbc.queryForList("SELECT acctType, dayNo, limitAmt FROM " + orig
                 + ".ACHOrigLimitRule WHERE status = 'ACTIVE' AND acctType IN (?, 'ALL') ORDER BY dayNo, limitAmt", acctType);
         for (Map<String, Object> rule : rules) {
@@ -300,11 +310,12 @@ public class TransferService {
                     + ".ACHOriginatorTransfer WHERE memberNo = ? AND processStatus NOT IN ('CANCELLED', 'REJECTED') "
                     + "AND createTm >= CURDATE() - INTERVAL ? DAY AND (? = 'ALL' OR origAcctType = ?)",
                     BigDecimal.class, memberNo, dayNo - 1, ruleType, acctType);
-            if (used.add(amount).compareTo(limit) > 0) {
-                throw new TransferRejected(Kind.LIMIT, "This transfer exceeds your " + period(dayNo)
+            if (used.add(extra).compareTo(limit) > 0) {
+                return Optional.of("This transfer exceeds your " + period(dayNo)
                         + " external limit of " + money(limit) + ". Please reduce the amount or contact support.");
             }
         }
+        return Optional.empty();
     }
 
     // ---- saving ----

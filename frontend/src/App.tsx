@@ -12,6 +12,7 @@ import ExternalTransferPage from './member/ExternalTransferPage'
 import MfaPage from './member/MfaPage'
 import AppLogPage from './logs/AppLogPage'
 import ParameterPage from './params/ParameterPage'
+import OfacReviewPage from './compliance/OfacReviewPage'
 import './app.css'
 
 // Admin-only, so the YAML parser and specs load only when an API page opens. A failed download (e.g. after a redeploy) shows a message, not a blank app.
@@ -30,6 +31,7 @@ const ROUTES = {
   originationFile: '#/ach-origination-file',
   receivingFile: '#/ach-receiving-file',
   receivingTransactions: '#/ach-receiving-transactions',
+  ofacReview: '#/ofac-review',
   accounts: '#/accounts',
   external: '#/transfer-pay/external-ach',
   externalAccounts: '#/transfer-pay/external-accounts',
@@ -88,6 +90,7 @@ export default function App() {
   const isAdmin = me?.roles.includes('SYS_ADMIN')
   const isOrigOps = me?.roles.includes('ACH_ORIG_OPS')
   const isRecvOps = me?.roles.includes('ACH_RECV_OPS')
+  const isCompliance = me?.roles.includes('COMPLIANCE')
   const isMember = me?.roles.includes('MEMBER')
   const memberReady = isMember && me?.mfaVerified
   const onTransferPay = hash === ROUTES.external || hash === ROUTES.externalAccounts
@@ -108,7 +111,8 @@ export default function App() {
     page = <AchReceivingTransactionPage route={ROUTES.receivingTransactions} fileID={decodeURIComponent(hash.slice(ROUTES.receivingTransactions.length + 1))} />
   } else if (isRecvOps) {
     page = <AchReceivingFilePage transactionsRoute={ROUTES.receivingTransactions} />
-  } else if (isAdmin) page = <ParameterPage />
+  } else if (isCompliance) page = <OfacReviewPage />
+  else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
   else if (memberReady && hash === ROUTES.external) page = <ExternalTransferPage memberNo={me.memberNo ?? ''} />
   else if (memberReady && hash === ROUTES.externalAccounts) page = <ExternalAccountsPage memberNo={me.memberNo ?? ''} />
@@ -148,6 +152,7 @@ export default function App() {
           {isOrigOps && (
             <a className={!screen ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
           )}
+          {isCompliance && <a className="active" href={ROUTES.ofacReview}>OFAC Review</a>}
           {isRecvOps && (
             <>
               <a className={!onTransactions && !screen ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>

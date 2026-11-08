@@ -131,6 +131,25 @@ Decisions made while building, where Ba's text is silent:
 
 The endpoints use Ba's JSON field names exactly (`transfer_id`, `business_date`, …) and are for back-office roles only; members never call them.
 
+**✅ Built 2026-11-08** (build steps 9–11), tested by `OriginationWindowIntegrationTest`, `EodFileJobIntegrationTest` and `MemberAccessTest`:
+
+| Piece | Where |
+| --- | --- |
+| Migration | `V18__origination_blueprint.sql`: the `ACHOrigOfacReview` table (every compliance decision) and the `ORIG_WINDOW_TIMES` parameter |
+| Windows | `OriginationScheduler` (the latest passed window, once a day) and `OriginationWindow.run` |
+| Steps 1–7 | `OriginationWindow`: extract, account, limits (`TransferService.limitProblem`), OFAC, hold, `READY_TO_POST` |
+| Step 8 | `EodFileJob` runs one last window, then builds the file from `READY_TO_POST` transfers only |
+| Endpoints | `OriginationProcessingController`, with Ba's paths and snake_case fields |
+| Compliance | New role `COMPLIANCE` and login `achcomp` (password `APP_COMP_PASSWORD`); the **OFAC Review** page lists flagged transfers with Clear and Block buttons |
+
+Decisions made while building, where Ba's text is silent:
+- **`PENDING_BATCH` stays as the window's input** instead of a migration renaming rows. A submitted transfer is `PENDING_BATCH` until a window moves it to `READY_TO_POST`, so nothing old needs renaming.
+- **The EOD run does one last window first**, so a transfer submitted after 3 PM for today, and the demo's **Run now**, still go out.
+- **A flagged transfer is `PENDING` with `ofacStatus FLAGGED`** and keeps its hold. Clear sets `CLEARED` and puts it back to `PENDING_BATCH`; the next window skips OFAC for it. Block sets `BLOCKED`, rejects it and releases the hold.
+- **Resolution values** are `CLEARED_FALSE_POSITIVE` and `BLOCKED_CONFIRMED_MATCH`; the officer is the logged-in user.
+- **Any rejection releases the hold** (a `RELEASE` row in `ACHMemoPost`, `memoStatus RELEASED`) and schedules the next payment of a recurring series.
+- **The trigger answers when the window is done** (`COMPLETED`), as on Receiving.
+
 ## 5. Notes
 
 `docs/ACH-NOTES.md` gets each finished piece:

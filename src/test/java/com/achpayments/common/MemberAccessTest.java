@@ -43,9 +43,9 @@ import tools.jackson.databind.json.JsonMapper;
 /** USE-CASES T7: members must pass MFA before the transfer APIs; admins and members stay in their own areas. */
 @WebMvcTest({MeController.class, TransferController.class, ParamController.class, ReceivingController.class,
         BackOfficeController.class, EodController.class, AppLogController.class, ExternalAccountController.class,
-        com.achpayments.inbound.ReceivingProcessingController.class})
+        com.achpayments.inbound.ReceivingProcessingController.class, com.achpayments.origination.OriginationProcessingController.class})
 @Import({SecurityConfig.class, MfaService.class, UnhandledErrorLogger.class, MemberAccessTest.Clocks.class})
-@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.orig-password=orig-pw", "app.recv-password=recv-pw",
+@TestPropertySource(properties = {"app.admin-password=admin-pw", "app.orig-password=orig-pw", "app.recv-password=recv-pw", "app.comp-password=comp-pw",
         "app.member-password=member-pw"})
 class MemberAccessTest {
 
@@ -77,6 +77,12 @@ class MemberAccessTest {
 
     @MockitoBean
     com.achpayments.inbound.CorePostingFileJob corePosting;
+
+    @MockitoBean
+    com.achpayments.origination.OriginationWindow originationWindow;
+
+    @MockitoBean
+    com.achpayments.transfer.OfacScreening ofacScreening;
 
     @MockitoBean
     EodFileJob eodFileJob;
@@ -293,6 +299,29 @@ class MemberAccessTest {
         mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("achrecv", "recv-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}")).andExpect(status().isOk());
         org.mockito.Mockito.verify(appLog).log("ACH_RCV", "INFO", "User 'achrecv' received sample PAYROLL: R1 VALIDATED");
+    }
+
+    @Test
+    void onlyComplianceResolvesOfacHitsAndOnlyOriginationOpsRunWindows() throws Exception {
+        String resolve = "{\"transfer_id\":\"TRF-1\",\"resolution\":\"CLEARED_FALSE_POSITIVE\"}";
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/compliance/ofac/resolve")
+                .with(httpBasic("achorig", "orig-pw")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(resolve))
+                .andExpect(status().isForbidden());
+        org.mockito.Mockito.when(originationWindow.resolve("TRF-1", "CLEARED_FALSE_POSITIVE", "achcomp", null))
+                .thenReturn(new com.achpayments.origination.OriginationWindow.Resolution("TRF-1", "FLAGGED", "CLEARED"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch("/api/v1/compliance/ofac/resolve")
+                .with(httpBasic("achcomp", "comp-pw")).with(csrf()).contentType(MediaType.APPLICATION_JSON).content(resolve))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.current_status").value("CLEARED"));
+
+        String trigger = "{\"window_time\":\"12:00\"}";
+        mvc.perform(post("/api/v1/ach/processing/trigger-window").with(httpBasic("achcomp", "comp-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(trigger)).andExpect(status().isForbidden());
+        org.mockito.Mockito.when(originationWindow.run(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("12:00")))
+                .thenReturn(new com.achpayments.origination.OriginationWindow.Run("WIN-20261106-1200", "12:00", 0, 0, 0, 0));
+        mvc.perform(post("/api/v1/ach/processing/trigger-window").with(httpBasic("achorig", "orig-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(trigger)).andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.window_id").value("WIN-20261106-1200"));
     }
 
     @Test

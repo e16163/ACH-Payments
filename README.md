@@ -96,7 +96,7 @@ JDBC URL: `jdbc:mysql://localhost:3306/ach_payments`
 
 The app reads its secrets from the environment:
 - `JDBC_URL`, `DB_USER` and `DB_PASSWORD` go in `~/dev/mysql-credentials.txt`.
-- `APP_ADMIN_PASSWORD`, `APP_ORIG_PASSWORD`, `APP_RECV_PASSWORD` and `APP_MEMBER_PASSWORD` go in `~/dev/app-credentials.txt` (optionally `APP_ADMIN_USERNAME`, `APP_ORIG_USERNAME`, `APP_RECV_USERNAME` and `APP_MEMBER_USERNAME`). These are the demo logins (see below).
+- `APP_ADMIN_PASSWORD`, `APP_ORIG_PASSWORD`, `APP_RECV_PASSWORD`, `APP_COMP_PASSWORD` and `APP_MEMBER_PASSWORD` go in `~/dev/app-credentials.txt` (optionally `APP_ADMIN_USERNAME`, `APP_ORIG_USERNAME`, `APP_RECV_USERNAME`, `APP_COMP_USERNAME` and `APP_MEMBER_USERNAME`). These are the demo logins (see below).
 
 Write them as `KEY=value` lines, then create `~/dev/tomcat/bin/setenv.sh` so Tomcat loads them:
 

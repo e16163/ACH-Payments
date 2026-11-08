@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import com.achpayments.common.AppLogRepository;
 import com.achpayments.common.BankingCalendar;
+import com.achpayments.origination.OriginationWindow;
 
 /** UC-ACH-EOD-01: one run of the batch job. Synchronized, because a run must never overlap another. */
 @Service
@@ -24,15 +25,17 @@ public class EodFileJob {
     }
 
     private final EodFileStore store;
+    private final OriginationWindow window;
     private final FedSimulator fed;
     private final AppLogRepository appLog;
     private final BankingCalendar calendar;
     private final Clock clock;
     private final long backoffMillis;
 
-    public EodFileJob(EodFileStore store, FedSimulator fed, AppLogRepository appLog, BankingCalendar calendar, Clock clock,
+    public EodFileJob(EodFileStore store, OriginationWindow window, FedSimulator fed, AppLogRepository appLog, BankingCalendar calendar, Clock clock,
             @Value("${app.fed.retry-backoff-ms}") long backoffMillis) {
         this.store = store;
+        this.window = window;
         this.fed = fed;
         this.appLog = appLog;
         this.calendar = calendar;
@@ -47,6 +50,9 @@ public class EodFileJob {
             return new RunResult(null, null, businessDate + " isn't a banking day, so no file was built.");
         }
         store.queuedFiles().forEach(this::transmit);
+        // A last origination window first (Ba's blueprint steps 1-7), so a transfer cleared by compliance after 3 PM, or a
+        // business date chosen with Run now, is made ready to post.
+        window.run(businessDate, "EOD");
         String processID = processID();
         Optional<String> fileID;
         try {

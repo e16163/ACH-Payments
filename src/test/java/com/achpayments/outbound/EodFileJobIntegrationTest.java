@@ -44,6 +44,7 @@ class EodFileJobIntegrationTest {
 
     @Autowired EodFileJob job;
     @Autowired EodFileStore store;
+    @Autowired com.achpayments.origination.OriginationWindow window;
     @Autowired TransferService transfers;
     @Autowired TransferDates dates;
     @Autowired BankingCalendar calendar;
@@ -230,6 +231,7 @@ class EodFileJobIntegrationTest {
     @Test
     void aRerunSendsAFileLeftQueuedInsteadOfBuildingAnother() throws IOException {
         String serNo = submit("Jane Smith", "10.00", "Rent");
+        window.run(date, "15:00"); // Ba's steps 1-7 made it READY_TO_POST
         String fileID = store.compile(date, "EOD-TEST-INTERRUPTED").orElseThrow(); // the job died before sending
         String expected = store.fileText(fileID);
 

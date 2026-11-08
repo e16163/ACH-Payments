@@ -22,9 +22,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.achpayments.common.AppLogRepository;
-import com.achpayments.memo.MemoPostingEngine;
-import com.achpayments.memo.MemoPostingEngine.Screening;
-import com.achpayments.memo.MemoPostingEngine.Source;
 import com.achpayments.nacha.AchFile;
 import com.achpayments.nacha.AchFile.BatchHeader;
 import com.achpayments.nacha.AchFile.Entry;
@@ -56,7 +53,7 @@ public class EodFileStore {
             "REDEPCHECK", "HCCLAIMPMT", "AUTOENROLL");
 
     /** One due transfer, joined to its recipient and originator. */
-    private record Due(String serNo, String firstSerNo, String acctNo, BigDecimal amount, BigDecimal fee, String memoStatus,
+    private record Due(String serNo, String firstSerNo, BigDecimal amount, String memoStatus, String ofacStatus,
             String memo, LocalDate effectiveDt, String originatorID, String odfiRouting, String sourceID, boolean recurring,
             String recvName, String routingNo, String recvAcctNo, String recvAcctType) {
     }
@@ -72,7 +69,6 @@ public class EodFileStore {
 
     private final JdbcTemplate jdbc;
     private final ParamCache params;
-    private final MemoPostingEngine memo;
     private final OfacScreening ofac;
     private final TraceNumberGenerator traces;
     private final TransferService transfers;
@@ -80,12 +76,11 @@ public class EodFileStore {
     private final Clock clock;
     private final String orig;
 
-    public EodFileStore(JdbcTemplate jdbc, ParamCache params, MemoPostingEngine memo, OfacScreening ofac,
+    public EodFileStore(JdbcTemplate jdbc, ParamCache params, OfacScreening ofac,
             TraceNumberGenerator traces, TransferService transfers, AppLogRepository appLog, Clock clock,
             @Value("${app.db.origination}") String orig) {
         this.jdbc = jdbc;
         this.params = params;
-        this.memo = memo;
         this.ofac = ofac;
         this.traces = traces;
         this.transfers = transfers;
@@ -96,7 +91,7 @@ public class EodFileStore {
 
     /**
      * Steps 2-6 in one DB transaction: either the file, its batches, its entries and the transfer statuses are all
-     * saved, or none are. Only transfers still PENDING_BATCH are picked up, so a rerun can't duplicate anything.
+     * saved, or none are. Only transfers still READY_TO_POST are picked up, so a rerun can't duplicate anything.
      *
      * @return the new fileID, or empty if nothing is due
      */
@@ -139,50 +134,38 @@ public class EodFileStore {
     }
 
     private List<Due> dueTransfers(LocalDate businessDate) {
-        return jdbc.query("SELECT t.transferSerNo, COALESCE(t.pTransferSerNo, t.transferSerNo) AS firstSerNo, t.origAcctNo, "
-                + "t.transferAmt, t.feeAmt, t.memoStatus, t.companyEntryDesc, t.effectiveDt, t.originatorID, o.routingNo AS odfiRouting, "
+        return jdbc.query("SELECT t.transferSerNo, COALESCE(t.pTransferSerNo, t.transferSerNo) AS firstSerNo, "
+                + "t.transferAmt, t.memoStatus, t.ofacStatus, t.companyEntryDesc, t.effectiveDt, t.originatorID, o.routingNo AS odfiRouting, "
                 + "t.sourceID, t.recurringFlag, a.acctOwner, a.routingNo, a.acctNo, a.acctType "
                 + "FROM " + orig + ".ACHOriginatorTransfer t "
                 + "JOIN " + orig + ".ACHOrigRecvAccount a ON a.recvAcctSerNo = t.recvAcctSerNo AND a.recvAcctVersion = t.recvAcctVersion "
                 + "JOIN " + orig + ".ACHOriginator o ON o.originatorID = t.originatorID "
-                + "WHERE t.processStatus = 'PENDING_BATCH' AND t.ofacStatus = 'OFAC_PASSED' AND t.transferVersion = 1 "
+                + "WHERE t.processStatus = 'READY_TO_POST' AND t.ofacStatus IN ('OFAC_PASSED', 'CLEARED') AND t.transferVersion = 1 "
                 + "AND t.effectiveDt <= ? ORDER BY t.transferSerNo FOR UPDATE",
-                (rs, i) -> new Due(rs.getString("transferSerNo"), rs.getString("firstSerNo"), rs.getString("origAcctNo"),
-                        rs.getBigDecimal("transferAmt"), rs.getBigDecimal("feeAmt"), rs.getString("memoStatus"),
+                (rs, i) -> new Due(rs.getString("transferSerNo"), rs.getString("firstSerNo"),
+                        rs.getBigDecimal("transferAmt"), rs.getString("memoStatus"), rs.getString("ofacStatus"),
                         rs.getString("companyEntryDesc"), rs.getObject("effectiveDt", LocalDate.class), rs.getString("originatorID"),
                         rs.getString("odfiRouting"), rs.getString("sourceID"), rs.getBoolean("recurringFlag"),
                         rs.getString("acctOwner"), rs.getString("routingNo"), rs.getString("acctNo"), rs.getString("acctType")),
                 businessDate);
     }
 
-    /** EX-01 and E4: screens the name again and places the hold of a later recurring payment. */
+    /**
+     * EX-01: screens the name again, unless a compliance officer cleared it. The hold was placed by the origination window
+     * (Ba's blueprint step 6), so a transfer without one is left out.
+     */
     private boolean readyForFile(Due d) {
-        if (ofac.isHit(d.recvName())) {
+        if (!"CLEARED".equals(d.ofacStatus()) && ofac.isHit(d.recvName())) {
             jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET ofacStatus = 'FLAGGED', ofacTm = NOW(), processStatus = 'PENDING' "
                     + "WHERE transferSerNo = ? AND transferVersion = 1", d.serNo());
             appLog.log(ACH_ORIG, "WARN", "Compliance alert: " + d.serNo() + " is flagged by OFAC and left out of the EOD file");
             return false;
         }
-        if ("POSTED".equals(d.memoStatus())) {
-            return true;
-        }
-        if (!"PENDING".equals(d.memoStatus())) {
+        if (!"POSTED".equals(d.memoStatus())) {
             appLog.log(ACH_ORIG, "WARN", "EOD file: " + d.serNo() + " left out, memoStatus is " + d.memoStatus());
             return false;
         }
-        var hold = memo.post(new MemoPostingEngine.Request(Source.ORIG, d.serNo(), d.acctNo(), false,
-                d.amount().add(d.fee()), Screening.ALLOW));
-        if (hold.status() == MemoPostingEngine.Status.POSTED) {
-            jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET memoStatus = 'POSTED', memoTm = NOW() "
-                    + "WHERE transferSerNo = ? AND transferVersion = 1", d.serNo());
-            return true;
-        }
-        // E4: this payment is rejected with no retry, and the series continues.
-        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processStatus = 'REJECTED', processTm = NOW(), memoStatus = ?, "
-                + "memoTm = NOW() WHERE transferSerNo = ? AND transferVersion = 1", hold.status().name(), d.serNo());
-        appLog.log(ACH_ORIG, "WARN", "EOD file: " + d.serNo() + " rejected, " + hold.reason());
-        transfers.scheduleNextPayment(d.serNo());
-        return false;
+        return true;
     }
 
     private String insertFile(String processID, Map<BatchKey, List<Due>> groups) {
