@@ -24,6 +24,7 @@ import com.achpayments.common.AppLogRepository;
 import com.achpayments.memo.MemoPostingEngine;
 import com.achpayments.memo.MemoPostingEngine.Screening;
 import com.achpayments.memo.MemoPostingEngine.Source;
+import com.achpayments.nacha.AchFileValidator;
 import com.achpayments.param.ParamCache;
 import com.achpayments.transfer.TransferRejected.Kind;
 
@@ -55,7 +56,7 @@ public class TransferService {
     }
 
     /** A request that passed every check, with the values to store. */
-    private record Checked(Account from, String recvName, String routingNo, String acctNo, String acctType,
+    private record Checked(Account from, String recvAcctSerNo, String recvName, String routingNo, String acctNo, String acctType,
             BigDecimal amount, BigDecimal fee, LocalDate effectiveDt, String frequency, int count, String memo,
             String bankName, boolean ofacHit) {
         BigDecimal total() {
@@ -107,8 +108,8 @@ public class TransferService {
     @Transactional
     public Receipt submit(String memberNo, TransferRequest r) {
         Checked c = check(memberNo, r);
-        String recvAcct = recvAccount(memberNo, c);
-        String serNo = insertTransfer(memberNo, recvAcct, c);
+        activate(memberNo, c.recvAcctSerNo());
+        String serNo = insertTransfer(memberNo, c.recvAcctSerNo(), c);
         MemoPostingEngine.Result hold = memo.post(new MemoPostingEngine.Request(Source.ORIG, serNo, c.from().acctNo(),
                 false, c.total(), c.ofacHit() ? Screening.REVIEW : Screening.ALLOW));
         if (hold.status() == MemoPostingEngine.Status.NSF) {
@@ -155,6 +156,8 @@ public class TransferService {
     /** The same status as stored: ACHOrigRecvAccount.acctStatus is VARCHAR(20), too short for Ba's value. */
     static final String PENDING_MICRO_DEPOSIT_DB = "PENDING_MICRO_DEP";
 
+    static final String ROUTING_DIGITS = "Enter all 9 digits of the routing number.";
+
     public record NewExternalAccount(String bankName, String routingNumber, String accountNumber, String accountType,
             String accountHolderName) {
     }
@@ -189,7 +192,10 @@ public class TransferService {
         if (r.bankName() == null || r.bankName().isBlank()) {
             throw invalid("Enter the bank name.");
         }
-        routing.bankName(r.routingNumber()).orElseThrow(() -> invalid(RoutingService.INVALID));
+        // For now any 9 digits pass (the user, 2026-11-07), until real routing number validation is written
+        if (r.routingNumber() == null || !r.routingNumber().matches("\\d{9}")) {
+            throw invalid(ROUTING_DIGITS);
+        }
         if (r.accountNumber() == null || !r.accountNumber().matches("\\d{4,17}")) {
             throw invalid("Enter the account number: 4 to 17 digits.");
         }
@@ -221,17 +227,21 @@ public class TransferService {
         Account from = accounts(memberNo).stream().filter(a -> a.acctNo().equals(r.origAcctNo())).findFirst()
                 .orElseThrow(() -> invalid("Choose one of your accounts to transfer from."));
 
-        String recvName = r.recvName() == null ? "" : r.recvName().trim().replaceAll("\\s+", " ");
-        if (!recvName.matches("[A-Za-z0-9 .,'&-]{1,22}")) {
-            throw invalid("Enter the recipient's name: up to 22 letters, numbers and spaces.");
+        // The recipient: one of the member's own registered external bank accounts, active or pending micro-deposits
+        Map<String, Object> to = jdbc.queryForList("SELECT acctOwner, routingNo, acctNo, acctType FROM " + orig
+                + ".ACHOrigRecvAccount WHERE recvAcctSerNo = ? AND recvAcctVersion = 1 AND memberNo = ? AND acctStatus IN ('ACTIVE', ?)",
+                r.externalAccountId(), memberNo, PENDING_MICRO_DEPOSIT_DB).stream().findFirst()
+                .orElseThrow(() -> invalid("Choose one of your external bank accounts to transfer to."));
+        String recvName = (String) to.get("acctOwner");
+        String routingNo = (String) to.get("routingNo");
+        String acctNo = (String) to.get("acctNo");
+        String acctType = (String) to.get("acctType");
+        // The ABA check digit is required (the EOD job rejects a NACHA file with a bad one); for now a bank missing from
+        // ABADirectory passes with no bank name (the user, 2026-11-07), until real routing number validation is written
+        if (!AchFileValidator.isValidRouting(routingNo)) {
+            throw invalid(RoutingService.INVALID);
         }
-        String bankName = routing.bankName(r.routingNo()).orElseThrow(() -> invalid(RoutingService.INVALID));
-        if (r.acctNo() == null || !r.acctNo().matches("\\d{4,17}")) {
-            throw invalid("Enter the recipient's account number: 4 to 17 digits.");
-        }
-        if (!"CHECKING".equals(r.acctType()) && !"SAVINGS".equals(r.acctType())) {
-            throw invalid("Choose Checking or Savings for the recipient's account.");
-        }
+        String bankName = routing.bankName(routingNo).orElse(null);
         BigDecimal amount = r.amount();
         if (amount == null || amount.signum() <= 0 || amount.stripTrailingZeros().scale() > 2
                 || amount.compareTo(MAX_AMOUNT) > 0) {
@@ -263,7 +273,7 @@ public class TransferService {
         }
         BigDecimal fee = params.get("ACH_ORIG", "EXTERNAL_XFER_FEE").map(BigDecimal::new).orElse(BigDecimal.ZERO).setScale(2);
 
-        if (!verifier.isEligibleForAch(r.routingNo(), r.acctNo(), r.acctType())) {
+        if (!verifier.isEligibleForAch(routingNo, acctNo, acctType)) {
             throw new TransferRejected(Kind.NOT_VERIFIED, NOT_VERIFIED);
         }
         checkLimits(memberNo, from.acctType(), amount);
@@ -271,7 +281,7 @@ public class TransferService {
             throw new TransferRejected(Kind.FUNDS, "Your available balance of " + money(from.availBal())
                     + " isn't enough for this transfer.");
         }
-        return new Checked(from, recvName.toUpperCase(Locale.ROOT), r.routingNo(), r.acctNo(), r.acctType(), amount, fee,
+        return new Checked(from, r.externalAccountId(), recvName, routingNo, acctNo, acctType, amount, fee,
                 r.effectiveDt(), r.frequency(), count, memoText.isEmpty() ? null : memoText, bankName, ofac.isHit(recvName));
     }
 
@@ -299,22 +309,10 @@ public class TransferService {
 
     // ---- saving ----
 
-    /** Reuses the member's saved recipient account if it's the same one, otherwise saves a new one. */
-    private String recvAccount(String memberNo, Checked c) {
-        List<String> existing = jdbc.queryForList("SELECT recvAcctSerNo FROM " + orig + ".ACHOrigRecvAccount WHERE "
-                + "memberNo = ? AND routingNo = ? AND acctNo = ? AND acctType = ? AND acctOwner = ? AND acctStatus IN ('ACTIVE', ?) "
-                + "AND recvAcctVersion = 1 ORDER BY acctStatus = 'ACTIVE' DESC", String.class, memberNo, c.routingNo(), c.acctNo(),
-                c.acctType(), c.recvName(), PENDING_MICRO_DEPOSIT_DB);
-        if (!existing.isEmpty()) {
-            // A saved account still pending micro-deposits becomes ACTIVE: the transfer's account check has just verified it
-            jdbc.update("UPDATE " + orig + ".ACHOrigRecvAccount SET acctStatus = 'ACTIVE', lastModBy = ? WHERE recvAcctSerNo = ? "
-                    + "AND recvAcctVersion = 1 AND acctStatus = ?", memberNo, existing.get(0), PENDING_MICRO_DEPOSIT_DB);
-            return existing.get(0);
-        }
-        return insertWithNextSerial("REC", orig + ".ACHOrigRecvAccount", "recvAcctSerNo", serNo -> jdbc.update(
-                "INSERT INTO " + orig + ".ACHOrigRecvAccount (recvAcctSerNo, recvAcctVersion, memberNo, acctNo, routingNo, "
-                + "acctType, acctOwner, sourceID, lastModBy) VALUES (?, 1, ?, ?, ?, ?, ?, 'ONLINE_BANKING', ?)",
-                serNo, memberNo, c.acctNo(), c.routingNo(), c.acctType(), c.recvName(), memberNo));
+    /** A picked account still pending micro-deposits becomes ACTIVE: the transfer's account check has just verified it. */
+    private void activate(String memberNo, String recvAcctSerNo) {
+        jdbc.update("UPDATE " + orig + ".ACHOrigRecvAccount SET acctStatus = 'ACTIVE', lastModBy = ? WHERE recvAcctSerNo = ? "
+                + "AND recvAcctVersion = 1 AND acctStatus = ?", memberNo, recvAcctSerNo, PENDING_MICRO_DEPOSIT_DB);
     }
 
     private String insertTransfer(String memberNo, String recvAcct, Checked c) {

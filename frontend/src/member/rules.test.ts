@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  accountNumberError, amountError, countError, formatAmountInput, isSelectableDate, isValidRouting, memoError, money,
-  nameError, parseAmount,
+  amountError, countError, formatAmountInput, isSelectableDate, isValidRouting, memoError, money, parseAmount,
 } from './rules'
 
 describe('routing check digit (EX-01)', () => {
@@ -57,13 +56,7 @@ describe('date picker restrictions', () => {
 })
 
 describe('field rules match the server', () => {
-  it('checks name, account, memo and count', () => {
-    expect(nameError('Jane Smith')).toBeNull()
-    expect(nameError('A'.repeat(23))).not.toBeNull()
-    expect(nameError('')).not.toBeNull()
-    expect(accountNumberError('123456789')).toBeNull()
-    expect(accountNumberError('123')).not.toBeNull()
-    expect(accountNumberError('12AB5678')).not.toBeNull()
+  it('checks memo and count', () => {
     expect(memoError('Rent')).toBeNull()
     expect(memoError('ELEVENCHARS')).not.toBeNull()
     expect(countError('ONETIME', '')).toBeNull()

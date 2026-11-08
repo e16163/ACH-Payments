@@ -61,7 +61,7 @@ const RESERVED_ENTRY_DESC = ['REVERSAL', 'RECLAIM', 'NONSETTLED', 'RETRY PYMT', 
 type Account = { acctNo: string; acctName: string; acctType: string; cents: number }
 type Param = { systemName: string; paramName: string; paramDesc: string; paramRawType: string; paramRawValue: string; lastModTm: string; lastModBy: string }
 type Transfer = {
-  transferSerNo: string; ofacStatus: string; memoStatus: string; recvName: string; bankName: string; routingNo: string
+  transferSerNo: string; ofacStatus: string; memoStatus: string; recvName: string; bankName: string | null; routingNo: string
   acctNo: string; acctType: string; fromAcctNo: string; fromAcctName: string; fromAcctType: string; amount: number
   fee: number; effectiveDt: string; frequency: string; memo: string | null; submitted: string
   processStatus: string; firstSerNo: string | null; reqNo: number; remaining: number
@@ -410,19 +410,17 @@ function bankName(routing: string): string | null {
 }
 
 type Checked = {
-  from: Account; recvName: string; routingNo: string; acctNo: string; acctType: string; amount: number; fee: number
-  effectiveDt: string; frequency: string; count: number; memo: string | null; bankName: string; ofacHit: boolean
+  from: Account; to: ExternalAccount; recvName: string; routingNo: string; acctNo: string; acctType: string; amount: number; fee: number
+  effectiveDt: string; frequency: string; count: number; memo: string | null; bankName: string | null; ofacHit: boolean
 }
 
 function check(s: State, r: Body): Checked {
   const from = s.accounts.find((a) => a.acctNo === r.origAcctNo) ?? invalid('Choose one of your accounts to transfer from.')
-  const recvName = typeof r.recvName === 'string' ? r.recvName.trim().replace(/\s+/g, ' ') : ''
-  if (!/^[A-Za-z0-9 .,'&-]{1,22}$/.test(recvName)) invalid("Enter the recipient's name: up to 22 letters, numbers and spaces.")
-  const routingNo = typeof r.routingNo === 'string' ? r.routingNo : ''
-  const bank = bankName(routingNo) ?? invalid('Invalid routing number. Please check the 9-digit ABA number.')
-  const acctNo = typeof r.acctNo === 'string' ? r.acctNo : ''
-  if (!/^\d{4,17}$/.test(acctNo)) invalid("Enter the recipient's account number: 4 to 17 digits.")
-  if (r.acctType !== 'CHECKING' && r.acctType !== 'SAVINGS') invalid("Choose Checking or Savings for the recipient's account.")
+  // The recipient: one of the member's registered external bank accounts, active or pending micro-deposits
+  const to = s.externalAccounts.find((a) => a.recvAcctSerNo === r.externalAccountId && (a.acctStatus === 'ACTIVE' || a.acctStatus === PENDING_MICRO_DEPOSIT))
+    ?? invalid('Choose one of your external bank accounts to transfer to.')
+  // The check digit is required (the EOD job rejects a file with a bad one); a bank missing from the directory passes for now
+  if (!isValidRouting(to.routingNo)) invalid('Invalid routing number. Please check the 9-digit ABA number.')
   const amount = toCents(r.amount)
   if (amount === null || amount <= 0 || amount > MAX_CENTS) invalid('Enter an amount between $0.01 and $99,999,999,999.99.')
   const effectiveDt = typeof r.effectiveDt === 'string' ? r.effectiveDt : ''
@@ -448,8 +446,8 @@ function check(s: State, r: Body): Checked {
   checkLimits(s, from.acctType, amount!)
   if (from.cents < amount! + fee) fail(400, `Your available balance of ${money(from.cents)} isn't enough for this transfer.`, 'FUNDS')
   return {
-    from, recvName: recvName.toUpperCase(), routingNo, acctNo, acctType: String(r.acctType), amount: amount!, fee,
-    effectiveDt, frequency, count, memo: memo || null, bankName: bank, ofacHit: OFAC.some((n) => normalize(n) === normalize(recvName)),
+    from, to, recvName: to.acctOwner, routingNo: to.routingNo, acctNo: to.acctNo, acctType: to.acctType, amount: amount!, fee,
+    effectiveDt, frequency, count, memo: memo || null, bankName: bankName(to.routingNo), ofacHit: OFAC.some((n) => normalize(n) === normalize(to.acctOwner)),
   }
 }
 
@@ -486,14 +484,8 @@ function submit(s: State, body: Body) {
     effectiveDt: c.effectiveDt, frequency: c.frequency, memo: c.memo, submitted: isoDateTime(new Date()),
   }
   s.transfers.push(t)
-  // TransferService.recvAccount: the recipient is saved as an ACTIVE external account, unless the same one is already there.
-  // A saved one still pending micro-deposits becomes ACTIVE, because the transfer's account check has just verified it.
-  const saved = s.externalAccounts.filter((a) => a.routingNo === c.routingNo && a.acctNo === c.acctNo && a.acctType === c.acctType && a.acctOwner === c.recvName)
-  const reuse = saved.find((a) => a.acctStatus === 'ACTIVE') ?? saved.find((a) => a.acctStatus === PENDING_MICRO_DEPOSIT)
-  if (reuse) reuse.acctStatus = 'ACTIVE'
-  else {
-    s.externalAccounts.push({ recvAcctSerNo: nextRecvSerNo(s), routingNo: c.routingNo, acctNo: c.acctNo, acctType: c.acctType, acctOwner: c.recvName, acctStatus: 'ACTIVE' })
-  }
+  // TransferService.activate: an account still pending micro-deposits becomes ACTIVE; the transfer's account check has just verified it
+  c.to.acctStatus = 'ACTIVE'
   log(s, 'ACH_ORIG', 'INFO', `Member M10982347 submitted transfer ${t.transferSerNo} for ${((c.amount + c.fee) / 100).toFixed(2)}, memo status ${memoStatus}`)
   return receipt(t)
 }
@@ -517,7 +509,7 @@ function addExternalAccount(s: State, r: Body) {
   if (!/^[A-Za-z0-9 .,'&-]{1,22}$/.test(owner)) fail(400, "Enter the account holder's name: up to 22 letters, numbers and spaces.")
   if (!String(r.bankName ?? '').trim()) fail(400, 'Enter the bank name.')
   const routingNo = String(r.routingNumber ?? '')
-  if (!bankName(routingNo)) fail(400, 'Invalid routing number. Please check the 9-digit ABA number.')
+  if (!/^\d{9}$/.test(routingNo)) fail(400, 'Enter all 9 digits of the routing number.') // for now any 9 digits pass
   const acctNo = String(r.accountNumber ?? '')
   if (!/^\d{4,17}$/.test(acctNo)) fail(400, 'Enter the account number: 4 to 17 digits.')
   const acctType = String(r.accountType ?? '')

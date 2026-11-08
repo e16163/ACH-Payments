@@ -20,7 +20,7 @@ export function receiptText(r: Receipt): string {
     '',
     `From:               ${r.fromAcctName} ${masked(r.fromAcctLast4)}`,
     `To:                 ${r.recvName}`,
-    `Bank:               ${r.bankName} (routing ${r.routingNo})`,
+    `Bank:               ${r.bankName ?? '—'} (routing ${r.routingNo})`,
     `Account:            ${r.acctType === 'SAVINGS' ? 'Savings' : 'Checking'} ${masked(r.acctLast4)}`,
     '',
     `Amount:             ${money(r.amount)}`,

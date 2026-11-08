@@ -1,9 +1,8 @@
 /** Client-side rules for the External ACH Transfer screen (UC-ACH-ORG-01). The server checks all of them again. */
 
 export const MAX_AMOUNT = '99999999999.99' // The design's DECIMAL(13,2)
-export const INVALID_ROUTING = 'Invalid routing number. Please check the 9-digit ABA number.'
 
-/** ABA 3-7-1 check digit (EX-01), run before asking the server for the bank name. */
+/** ABA 3-7-1 check digit (EX-01), as the server's AchFileValidator.isValidRouting (the demo server uses it). */
 export function isValidRouting(routing: string): boolean {
   if (!/^\d{9}$/.test(routing)) return false
   const w = [3, 7, 1, 3, 7, 1, 3, 7, 1]
@@ -81,14 +80,6 @@ export const FREQUENCIES: { value: string; label: string }[] = [
 
 export function frequencyLabel(value: string): string {
   return FREQUENCIES.find((f) => f.value === value)?.label ?? value
-}
-
-export function nameError(name: string): string | null {
-  return /^[A-Za-z0-9 .,'&-]{1,22}$/.test(name.trim()) ? null : "Enter the recipient's name: up to 22 letters, numbers and spaces."
-}
-
-export function accountNumberError(acct: string): string | null {
-  return /^\d{4,17}$/.test(acct) ? null : "Enter the recipient's account number: 4 to 17 digits."
 }
 
 export function memoError(memo: string): string | null {

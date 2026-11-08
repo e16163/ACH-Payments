@@ -2,6 +2,7 @@ package com.achpayments.transfer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -32,6 +33,7 @@ class TransferServiceIntegrationTest {
 
     private static final String MEMBER = "X-TEST-MEMBER";
     private static final String CHECKING = "X-TEST-CHK";
+    private static final String JANE = "REC-20000101-0001"; // an old date, so it never takes today's serial numbers
 
     @Autowired
     TransferService service;
@@ -53,6 +55,13 @@ class TransferServiceIntegrationTest {
         when(verifier.isEligibleForAch(any(), any(), any())).thenReturn(true);
         jdbc.update("INSERT INTO SimCoreAccount (acctNo, memberNo, acctName, acctType, acctOwner, ledgerBal, availBal) "
                 + "VALUES (?, ?, 'Test Checking', 'CHECKING', 'TEST MEMBER', 100000.00, 100000.00)", CHECKING, MEMBER);
+        recipient(JANE, "JANE SMITH", "021000021", "123456789", "ACTIVE");
+    }
+
+    private void recipient(String serNo, String owner, String routingNo, String acctNo, String status) {
+        jdbc.update("INSERT INTO " + orig + ".ACHOrigRecvAccount (recvAcctSerNo, recvAcctVersion, memberNo, acctNo, routingNo, "
+                + "acctType, acctOwner, acctStatus, sourceID, lastModBy) VALUES (?, 1, ?, ?, ?, 'CHECKING', ?, ?, 'ONLINE_BANKING', ?)",
+                serNo, MEMBER, acctNo, routingNo, owner, status, MEMBER);
     }
 
     @AfterEach
@@ -65,8 +74,7 @@ class TransferServiceIntegrationTest {
     }
 
     private TransferRequest request(String amount) {
-        return new TransferRequest(CHECKING, "Jane Smith", "021000021", "123456789", "CHECKING", new BigDecimal(amount),
-                dates.earliest(), "ONETIME", null, "Rent");
+        return new TransferRequest(CHECKING, JANE, new BigDecimal(amount), dates.earliest(), "ONETIME", null, "Rent");
     }
 
     private TransferRequest with(String amount, UnaryOperator<TransferRequest> change) {
@@ -102,8 +110,8 @@ class TransferServiceIntegrationTest {
 
     @Test
     void anOfacHitIsSavedAsFlaggedUnderReviewWithoutAHold() {
-        TransferRequest r = new TransferRequest(CHECKING, "Blocked-Test  person", "021000021", "123456789", "CHECKING",
-                new BigDecimal("100.00"), dates.earliest(), "ONETIME", null, null);
+        recipient("REC-20000101-0002", "BLOCKED-TEST PERSON", "021000021", "123456789", "ACTIVE");
+        TransferRequest r = new TransferRequest(CHECKING, "REC-20000101-0002", new BigDecimal("100.00"), dates.earliest(), "ONETIME", null, null);
         assertTrue(service.preview(MEMBER, r).underReview());
         TransferService.Receipt receipt = service.submit(MEMBER, r);
         assertEquals("FLAGGED", receipt.ofacStatus());
@@ -150,7 +158,7 @@ class TransferServiceIntegrationTest {
     }
 
     @Test
-    void serialNumbersAreUniqueAndTheRecipientIsSavedOnce() {
+    void serialNumbersAreUniqueAndNoRecipientIsAdded() {
         String first = service.submit(MEMBER, request("10.00")).transferSerNo();
         String second = service.submit(MEMBER, request("10.00")).transferSerNo();
         assertFalse(first.equals(second));
@@ -181,35 +189,51 @@ class TransferServiceIntegrationTest {
                 Integer.class, MEMBER));
     }
 
+    private TransferRequest to(String externalAccountId) {
+        return with("10.00", r -> new TransferRequest(r.origAcctNo(), externalAccountId, r.amount(), r.effectiveDt(), r.frequency(), null, r.memo()));
+    }
+
     @Test
     void payloadsThatSkipUiValidationAreRejected() {
-        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest("100049281920", r.recvName(), r.routingNo(),
-                r.acctNo(), r.acctType(), r.amount(), r.effectiveDt(), r.frequency(), null, r.memo())))); // someone else's account
-        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.recvName(), "021000022",
-                r.acctNo(), r.acctType(), r.amount(), r.effectiveDt(), r.frequency(), null, r.memo())))); // EX-01
+        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest("100049281920", r.externalAccountId(), r.amount(),
+                r.effectiveDt(), r.frequency(), null, r.memo())))); // someone else's account
         assertEquals(Kind.INVALID, rejection(request("10.001")));
         assertEquals(Kind.INVALID, rejection(request("0.00")));
         assertEquals(Kind.INVALID, rejection(request("-5.00")));
         assertEquals(Kind.INVALID, rejection(request("100000000000.00")));
-        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.recvName(), r.routingNo(),
-                r.acctNo(), r.acctType(), r.amount(), LocalDate.now(), r.frequency(), null, r.memo())))); // today
-        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.recvName(), r.routingNo(),
-                r.acctNo(), r.acctType(), r.amount(), r.effectiveDt(), r.frequency(), null, "ELEVENCHARS")))); // memo > 10
-        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), "", r.routingNo(),
-                r.acctNo(), r.acctType(), r.amount(), r.effectiveDt(), r.frequency(), null, r.memo()))));
-        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.recvName(), r.routingNo(),
-                "12AB", r.acctType(), r.amount(), r.effectiveDt(), r.frequency(), null, r.memo()))));
-        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.recvName(), r.routingNo(),
-                r.acctNo(), "MONEY_MARKET", r.amount(), r.effectiveDt(), r.frequency(), null, r.memo()))));
-        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.recvName(), r.routingNo(),
-                r.acctNo(), r.acctType(), r.amount(), r.effectiveDt(), "WEEKLY", 1, r.memo())))); // recurring needs 2+
+        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.externalAccountId(), r.amount(),
+                LocalDate.now(), r.frequency(), null, r.memo())))); // today
+        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.externalAccountId(), r.amount(),
+                r.effectiveDt(), r.frequency(), null, "ELEVENCHARS")))); // memo > 10
+        assertEquals(Kind.INVALID, rejection(with("10.00", r -> new TransferRequest(r.origAcctNo(), r.externalAccountId(), r.amount(),
+                r.effectiveDt(), "WEEKLY", 1, r.memo())))); // recurring needs 2+
         assertEquals(Kind.INVALID, rejection(null));
+    }
+
+    @Test
+    void theRecipientMustBeOneOfTheMembersOwnExternalAccounts() {
+        String message = "Choose one of your external bank accounts to transfer to.";
+        assertEquals(message, assertThrows(TransferRejected.class, () -> service.preview(MEMBER, to(null))).getMessage());
+        assertEquals(message, assertThrows(TransferRejected.class, () -> service.preview(MEMBER, to("REC-NOPE"))).getMessage());
+        jdbc.update("UPDATE " + orig + ".ACHOrigRecvAccount SET memberNo = 'X-TEST-OTHER' WHERE recvAcctSerNo = ?", JANE);
+        assertEquals(message, assertThrows(TransferRejected.class, () -> service.preview(MEMBER, request("10.00"))).getMessage()); // someone else's
+        jdbc.update("UPDATE " + orig + ".ACHOrigRecvAccount SET memberNo = ? WHERE recvAcctSerNo = ?", MEMBER, JANE);
+        jdbc.update("UPDATE " + orig + ".ACHOrigRecvAccount SET acctStatus = 'INACTIVE' WHERE recvAcctSerNo = ?", JANE);
+        assertEquals(message, assertThrows(TransferRejected.class, () -> service.preview(MEMBER, request("10.00"))).getMessage());
+    }
+
+    @Test
+    void aValidRoutingNumberMissingFromTheDirectoryPassesWithNoBankNameAndABadCheckDigitDoesNot() {
+        recipient("REC-20000101-0003", "NAVY MEMBER", "256074974", "55501234", "ACTIVE"); // valid check digit, not in ABADirectory
+        recipient("REC-20000101-0004", "TYPO", "123456789", "55501234", "ACTIVE"); // fails the check digit
+        assertNull(service.preview(MEMBER, to("REC-20000101-0003")).bankName());
+        assertEquals(RoutingService.INVALID, assertThrows(TransferRejected.class, () -> service.preview(MEMBER, to("REC-20000101-0004"))).getMessage());
     }
 
     @Test
     void recurringTransfersStoreTheDesignFrequencyFields() {
         TransferService.Receipt receipt = service.submit(MEMBER, with("10.00", r -> new TransferRequest(r.origAcctNo(),
-                r.recvName(), r.routingNo(), r.acctNo(), r.acctType(), r.amount(), r.effectiveDt(), "MONTHLY", 6, r.memo())));
+                r.externalAccountId(), r.amount(), r.effectiveDt(), "MONTHLY", 6, r.memo())));
         var row = jdbc.queryForMap("SELECT recurringFlag, pmtFrequency, transferReqNo, transferReqRemaining, nextPmtDt FROM "
                 + orig + ".ACHOriginatorTransfer WHERE transferSerNo = ?", receipt.transferSerNo());
         assertEquals(true, row.get("recurringFlag"));
@@ -240,7 +264,6 @@ class TransferServiceIntegrationTest {
 
     @Test
     void aNewExternalAccountIsPendingMicroDepositsAndShowsFirstInTheList() {
-        service.submit(MEMBER, request("10.00")); // a transfer saves its recipient as an ACTIVE external account
         TransferService.AddedExternalAccount added = service.addExternalAccount(MEMBER, account("55501234"));
         assertEquals("ACTIVE_PENDING_MICRO_DEPOSIT", added.status());
 
@@ -263,11 +286,12 @@ class TransferServiceIntegrationTest {
 
     @Test
     void aTransferToAPendingAccountUsesItAndMakesItActive() {
-        String serNo = service.addExternalAccount(MEMBER,
-                new TransferService.NewExternalAccount("JPMorgan Chase", "021000021", "123456789", "CHECKING", "Jane Smith")).externalAccountId();
-        service.submit(MEMBER, request("10.00")); // the same recipient: Jane Smith, 021000021, 123456789, Checking
+        String serNo = service.addExternalAccount(MEMBER, account("55501234")).externalAccountId();
+        TransferService.Receipt receipt = service.submit(MEMBER, to(serNo));
+        assertEquals("JANE SMITH", receipt.recvName());
+        assertEquals("1234", receipt.acctLast4());
         var list = service.externalAccounts(MEMBER);
-        assertEquals(1, list.size());
+        assertEquals(2, list.size());
         assertEquals(serNo, list.get(0).externalAccountId());
         assertEquals("ACTIVE", list.get(0).status());
     }
@@ -276,13 +300,23 @@ class TransferServiceIntegrationTest {
     void anExternalAccountIsCheckedLikeATransferRecipientAndOnlyAddedOnce() {
         service.addExternalAccount(MEMBER, account("55501234"));
         assertEquals("This account is already in your external bank accounts.", invalidAdd(account("55501234")));
-        assertEquals(RoutingService.INVALID, invalidAdd(new TransferService.NewExternalAccount("Bank", "021000022", "55501234", "SAVINGS", "Jane")));
+        assertEquals("Enter all 9 digits of the routing number.", invalidAdd(new TransferService.NewExternalAccount("Bank", "02100002", "55501234", "SAVINGS", "Jane")));
+        assertEquals("Enter all 9 digits of the routing number.", invalidAdd(new TransferService.NewExternalAccount("Bank", "0210000211", "55501234", "SAVINGS", "Jane")));
+        assertEquals("Enter all 9 digits of the routing number.", invalidAdd(new TransferService.NewExternalAccount("Bank", null, "55501234", "SAVINGS", "Jane")));
         assertEquals("Enter the account number: 4 to 17 digits.", invalidAdd(account("123")));
         assertEquals("Choose Checking or Savings.", invalidAdd(new TransferService.NewExternalAccount("Bank", "021000021", "55509999", "MONEY_MARKET", "Jane")));
         assertEquals("Enter the bank name.", invalidAdd(new TransferService.NewExternalAccount(" ", "021000021", "55509999", "SAVINGS", "Jane")));
         assertEquals("Enter the account holder's name: up to 22 letters, numbers and spaces.",
                 invalidAdd(new TransferService.NewExternalAccount("Bank", "021000021", "55509999", "SAVINGS", "<script>")));
         assertEquals("Fill in the account details.", invalidAdd(null));
-        assertEquals(1, service.externalAccounts(MEMBER).size());
+        assertEquals(2, service.externalAccounts(MEMBER).size()); // Jane's from setUp and the one added
+    }
+
+    @Test
+    void forNowAnyNineDigitRoutingNumberCanBeAdded() {
+        // 021000022 fails the check digit and 256074974 isn't in ABADirectory: both pass until real validation is written
+        service.addExternalAccount(MEMBER, new TransferService.NewExternalAccount("Some Bank", "021000022", "55501234", "SAVINGS", "Jane"));
+        service.addExternalAccount(MEMBER, new TransferService.NewExternalAccount("Navy Federal", "256074974", "55501234", "SAVINGS", "Jane"));
+        assertNull(service.externalAccounts(MEMBER).get(0).bankName());
     }
 }

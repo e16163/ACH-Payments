@@ -3,26 +3,27 @@ import { api, ApiError } from '../api'
 import DatePicker from './DatePicker'
 import { receiptText, statusLabel } from './receipt'
 import {
-  FREQUENCIES, INVALID_ROUTING, accountNumberError, amountError, countError, formatAmountInput, formatDate,
-  frequencyLabel, isValidRouting, masked, memoError, money, nameError, parseAmount,
+  FREQUENCIES, amountError, countError, formatAmountInput, formatDate, frequencyLabel, masked, memoError, money, parseAmount,
 } from './rules'
-import type { Account, Preview, Receipt } from './types'
+import type { Account, ExternalAccount, Preview, Receipt } from './types'
 
 type DateRules = { earliest: string; holidays: string[] }
-type Bank = { state: 'idle' | 'checking' | 'ok' | 'error'; name?: string }
+
+/** "Bank ••••1234 · Checking", as the To list shows a registered external bank account. */
+export function externalAccountLabel(a: ExternalAccount): string {
+  const pending = a.status === 'ACTIVE' ? '' : ' (pending verification)'
+  return `${a.bankName ?? 'Bank not in our directory'} ${a.maskedAccountNumber} · ${a.accountType === 'CHECKING' ? 'Checking' : 'Savings'}${pending}`
+}
 
 /** UC-ACH-ORG-01 External ACH Transfer, named "Add ACH Transfer" on screen (Ba, 2026-11-07): enter details, review, confirm, receipt. */
-export default function ExternalTransferPage() {
+export default function ExternalTransferPage({ memberNo }: { memberNo: string }) {
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [externals, setExternals] = useState<ExternalAccount[] | null>(null)
   const [dateRules, setDateRules] = useState<DateRules | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   const [fromAcct, setFromAcct] = useState('')
-  const [recvName, setRecvName] = useState('')
-  const [routingNo, setRoutingNo] = useState('')
-  const [bank, setBank] = useState<Bank>({ state: 'idle' })
-  const [acctNo, setAcctNo] = useState('')
-  const [acctType, setAcctType] = useState('CHECKING')
+  const [toAcct, setToAcct] = useState('')
   const [amount, setAmount] = useState('')
   const [effectiveDt, setEffectiveDt] = useState('')
   const [frequency, setFrequency] = useState('ONETIME')
@@ -49,43 +50,29 @@ export default function ExternalTransferPage() {
   useEffect(() => {
     loadAccounts()
     api<DateRules>('/transfers/dates').then(setDateRules).catch((e) => setLoadError(String(e.message ?? e)))
-  }, [])
-
-  // Step 3: check the routing number as soon as 9 digits are typed, then show the bank name.
-  useEffect(() => {
-    if (routingNo.length < 9) return setBank({ state: 'idle' })
-    if (!isValidRouting(routingNo)) return setBank({ state: 'error' })
-    setBank({ state: 'checking' })
-    let current = true
-    api<{ bankName: string }>(`/routing/${routingNo}`)
-      .then((b) => current && setBank({ state: 'ok', name: b.bankName }))
-      .catch(() => current && setBank({ state: 'error' }))
-    return () => {
-      current = false
-    }
-  }, [routingNo])
+    // "To" lists only the member's registered external bank accounts (Ba, 2026-11-07)
+    api<ExternalAccount[]>(`/v1/holders/${encodeURIComponent(memberNo)}/external-accounts`)
+      .then(setExternals)
+      .catch((e) => setLoadError(String(e.message ?? e)))
+  }, [memberNo])
 
   const holidays = useMemo(() => new Set(dateRules?.holidays ?? []), [dateRules])
   const from = accounts.find((a) => a.acctNo === fromAcct)
+  const to = externals?.find((a) => a.externalAccountId === toAcct)
 
   const errors = {
-    recvName: nameError(recvName),
-    routing: bank.state === 'ok' ? null : routingNo.length === 9 && bank.state === 'checking' ? null : INVALID_ROUTING,
-    acctNo: accountNumberError(acctNo),
+    to: to ? null : 'Choose the external bank account to transfer to.',
     amount: amountError(amount),
     date: effectiveDt ? null : 'Choose a transfer date.',
     count: countError(frequency, count),
     memo: memoError(memo),
   }
-  const ready = Object.values(errors).every((e) => e === null) && bank.state === 'ok' && Boolean(from)
+  const ready = Object.values(errors).every((e) => e === null) && Boolean(from)
   const show = (field: keyof typeof errors) => (touched ? errors[field] : null)
 
   const request = () => ({
     origAcctNo: fromAcct,
-    recvName,
-    routingNo,
-    acctNo,
-    acctType,
+    externalAccountId: toAcct,
     amount: parseAmount(amount),
     effectiveDt,
     frequency,
@@ -134,9 +121,7 @@ export default function ExternalTransferPage() {
     setStep('form')
     setPreview(null)
     setTouched(false)
-    setRecvName('')
-    setRoutingNo('')
-    setAcctNo('')
+    setToAcct('')
     setAmount('')
     setEffectiveDt('')
     setFrequency('ONETIME')
@@ -177,48 +162,23 @@ export default function ExternalTransferPage() {
           {from && <p className="balance">Available balance: <strong>{money(from.availBal)}</strong></p>}
 
           <h3>To</h3>
-          <label className="field">
-            Recipient name
-            <input value={recvName} maxLength={22} onChange={(e) => setRecvName(e.target.value)} className={show('recvName') ? 'invalid' : ''} />
-          </label>
-          {show('recvName') && <p className="field-error">{errors.recvName}</p>}
-
-          <div className="row">
+          {externals?.length === 0 ? (
+            <div className="notice">
+              <p>You don't have any external bank accounts yet. Add one first, then come back to transfer to it.</p>
+              <a className="button" href="#/transfer-pay/external-accounts">Add External Bank Account</a>
+            </div>
+          ) : (
             <label className="field">
-              Routing number (9 digits)
-              <input
-                inputMode="numeric"
-                maxLength={9}
-                value={routingNo}
-                onChange={(e) => setRoutingNo(e.target.value.replace(/\D/g, ''))}
-                className={bank.state === 'error' ? 'invalid code' : 'code'}
-              />
+              External bank account
+              <select value={toAcct} onChange={(e) => setToAcct(e.target.value)} className={show('to') ? 'invalid' : ''}>
+                <option value="">Choose an account…</option>
+                {externals?.map((a) => (
+                  <option key={a.externalAccountId} value={a.externalAccountId}>{externalAccountLabel(a)}</option>
+                ))}
+              </select>
             </label>
-            <label className="field">
-              Account number
-              <input
-                inputMode="numeric"
-                maxLength={17}
-                value={acctNo}
-                onChange={(e) => setAcctNo(e.target.value.replace(/\D/g, ''))}
-                className={show('acctNo') ? 'invalid code' : 'code'}
-              />
-            </label>
-          </div>
-          {bank.state === 'ok' && <p className="bank-name">✓ {bank.name}</p>}
-          {bank.state === 'checking' && <p className="muted small">Looking up bank…</p>}
-          {bank.state === 'error' && <p className="field-error">{INVALID_ROUTING}</p>}
-          {show('acctNo') && <p className="field-error">{errors.acctNo}</p>}
-
-          <fieldset className="field radio-row">
-            <legend>Account type</legend>
-            {['CHECKING', 'SAVINGS'].map((t) => (
-              <label key={t}>
-                <input type="radio" name="acctType" checked={acctType === t} onChange={() => setAcctType(t)} />
-                {t === 'CHECKING' ? 'Checking' : 'Savings'}
-              </label>
-            ))}
-          </fieldset>
+          )}
+          {show('to') && externals?.length !== 0 && <p className="field-error">{errors.to}</p>}
 
           <h3>Transfer details</h3>
           <div className="row">
@@ -267,7 +227,7 @@ export default function ExternalTransferPage() {
           {show('date') && <p className="field-error">{errors.date}</p>}
 
           <div className="actions left">
-            <button className="primary" onClick={review} disabled={busy || bank.state !== 'ok'}>Continue</button>
+            <button className="primary" onClick={review} disabled={busy || externals?.length === 0}>Continue</button>
           </div>
         </div>
       )}
@@ -277,9 +237,7 @@ export default function ExternalTransferPage() {
           <h3>Review your transfer</h3>
           <dl className="summary">
             <dt>From</dt><dd>{from?.acctName} {masked(fromAcct.slice(-4))}</dd>
-            <dt>To</dt><dd>{recvName.toUpperCase()}</dd>
-            <dt>Bank</dt><dd>{preview.bankName} <span className="muted">(routing {routingNo})</span></dd>
-            <dt>Account</dt><dd>{acctType === 'CHECKING' ? 'Checking' : 'Savings'} {masked(acctNo.slice(-4))}</dd>
+            <dt>To</dt><dd>{to && externalAccountLabel(to)}</dd>
             <dt>Amount</dt><dd>{money(preview.amount)}</dd>
             <dt>Fee</dt><dd>{money(preview.fee)}</dd>
             <dt>Total</dt><dd><strong>{money(preview.total)}</strong></dd>
@@ -332,7 +290,7 @@ export default function ExternalTransferPage() {
             <dl className="summary">
               <dt>Status</dt><dd>{statusLabel(receipt)}</dd>
               <dt>Amount</dt><dd>{money(receipt.total)}</dd>
-              <dt>To</dt><dd>{receipt.recvName} · {receipt.bankName} {masked(receipt.acctLast4)}</dd>
+              <dt>To</dt><dd>{receipt.recvName} · {receipt.bankName ?? '—'} {masked(receipt.acctLast4)}</dd>
               <dt>Transfer date</dt><dd>{formatDate(receipt.effectiveDt)}</dd>
               <dt>Estimated arrival</dt><dd>{formatDate(receipt.estimatedArrival)}</dd>
             </dl>

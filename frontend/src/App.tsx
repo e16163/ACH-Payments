@@ -110,7 +110,7 @@ export default function App() {
     page = <AchReceivingFilePage transactionsRoute={ROUTES.receivingTransactions} />
   } else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
-  else if (memberReady && hash === ROUTES.external) page = <ExternalTransferPage />
+  else if (memberReady && hash === ROUTES.external) page = <ExternalTransferPage memberNo={me.memberNo ?? ''} />
   else if (memberReady && hash === ROUTES.externalAccounts) page = <ExternalAccountsPage memberNo={me.memberNo ?? ''} />
   else if (memberReady) page = <AccountsPage />
   else if (me) page = <p className="card narrow">There are no screens for your role yet.</p>

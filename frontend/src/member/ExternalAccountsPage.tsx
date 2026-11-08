@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import { INVALID_ROUTING, isValidRouting } from './rules'
+import type { ExternalAccount } from './types'
 
-type ExternalAccount = { externalAccountId: string; bankName: string | null; maskedAccountNumber: string; accountType: string; status: string }
-type Bank = { state: 'idle' | 'checking' | 'ok' | 'error'; name?: string }
+// 'unknown': not in our bank directory, so the member types the bank name (Ba's API requires bankName)
+type Bank = { state: 'idle' | 'checking' | 'ok' | 'unknown'; name?: string }
+const ROUTING_DIGITS = 'Enter all 9 digits of the routing number.'
 
 const STATUS: Record<string, string> = { ACTIVE: 'Active', ACTIVE_PENDING_MICRO_DEPOSIT: 'Pending micro-deposit verification' }
 const ADDED = 'External bank account added. It stays pending until micro-deposit verification.'
@@ -73,21 +74,23 @@ function AddAccountForm({ path, onCancel, onAdded }: { path: string; onCancel: (
   const [holderName, setHolderName] = useState('')
   const [routingNo, setRoutingNo] = useState('')
   const [bank, setBank] = useState<Bank>({ state: 'idle' })
+  const [typedBankName, setTypedBankName] = useState('')
+  const [routingLeft, setRoutingLeft] = useState(false)
   const [acctNo, setAcctNo] = useState('')
   const [acctType, setAcctType] = useState('CHECKING')
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // As on the transfer page: check the routing number once 9 digits are typed, then show the bank name.
+  // For now any 9 digits pass (the user, 2026-11-07), until real routing number validation is written.
+  // The bank directory only fills in the bank name.
   useEffect(() => {
     if (routingNo.length < 9) return setBank({ state: 'idle' })
-    if (!isValidRouting(routingNo)) return setBank({ state: 'error' })
     setBank({ state: 'checking' })
     let current = true
     api<{ bankName: string }>(`/routing/${routingNo}`)
       .then((b) => current && setBank({ state: 'ok', name: b.bankName }))
-      .catch(() => current && setBank({ state: 'error' }))
+      .catch(() => current && setBank({ state: 'unknown' }))
     return () => {
       current = false
     }
@@ -95,20 +98,22 @@ function AddAccountForm({ path, onCancel, onAdded }: { path: string; onCancel: (
 
   const errors = {
     holderName: /^[A-Za-z0-9 .,'&-]{1,22}$/.test(holderName.trim()) ? null : "Enter the account holder's name: up to 22 letters, numbers and spaces.",
-    routing: bank.state === 'ok' ? null : INVALID_ROUTING,
+    routing: /^\d{9}$/.test(routingNo) ? null : ROUTING_DIGITS,
+    bankName: bank.state !== 'unknown' || typedBankName.trim() ? null : 'Enter the bank name.',
     acctNo: /^\d{4,17}$/.test(acctNo) ? null : 'Enter the account number: 4 to 17 digits.',
   }
   const show = (field: keyof typeof errors) => (touched ? errors[field] : null)
+  const showRouting = (touched || routingLeft) && errors.routing !== null
 
   async function save() {
     setTouched(true)
-    if (Object.values(errors).some((e) => e !== null)) return
+    if (Object.values(errors).some((e) => e !== null) || bank.state === 'checking') return
     setBusy(true)
     setError(null)
     try {
       await api(path, {
         method: 'POST',
-        body: JSON.stringify({ bankName: bank.name, routingNumber: routingNo, accountNumber: acctNo, accountType: acctType, accountHolderName: holderName }),
+        body: JSON.stringify({ bankName: bank.state === 'ok' ? bank.name : typedBankName.trim(), routingNumber: routingNo, accountNumber: acctNo, accountType: acctType, accountHolderName: holderName }),
       })
       onAdded()
     } catch (e) {
@@ -135,7 +140,8 @@ function AddAccountForm({ path, onCancel, onAdded }: { path: string; onCancel: (
             maxLength={9}
             value={routingNo}
             onChange={(e) => setRoutingNo(e.target.value.replace(/\D/g, ''))}
-            className={bank.state === 'error' || show('routing') ? 'invalid code' : 'code'}
+            onBlur={() => setRoutingLeft(true)}
+            className={showRouting ? 'invalid code' : 'code'}
           />
         </label>
         <label className="field">
@@ -151,7 +157,16 @@ function AddAccountForm({ path, onCancel, onAdded }: { path: string; onCancel: (
       </div>
       {bank.state === 'ok' && <p className="bank-name">✓ {bank.name}</p>}
       {bank.state === 'checking' && <p className="muted small">Looking up bank…</p>}
-      {(bank.state === 'error' || (show('routing') && bank.state !== 'checking')) && <p className="field-error">{INVALID_ROUTING}</p>}
+      {showRouting && <p className="field-error">{ROUTING_DIGITS}</p>}
+      {bank.state === 'unknown' && (
+        <>
+          <label className="field">
+            Bank name
+            <input value={typedBankName} maxLength={60} onChange={(e) => setTypedBankName(e.target.value)} className={show('bankName') ? 'invalid' : ''} />
+          </label>
+          {show('bankName') && <p className="field-error">{errors.bankName}</p>}
+        </>
+      )}
       {show('acctNo') && <p className="field-error">{errors.acctNo}</p>}
       <fieldset className="field radio-row">
         <legend>Account type</legend>

@@ -89,14 +89,29 @@ class EodFileJobIntegrationTest {
         params.clear();
     }
 
+    /** The member's registered external account for this recipient name, added on first use. */
+    private String recipient(String name) {
+        String owner = name.toUpperCase(java.util.Locale.ROOT);
+        List<String> found = jdbc.queryForList("SELECT recvAcctSerNo FROM " + orig + ".ACHOrigRecvAccount WHERE memberNo = ? AND acctOwner = ?",
+                String.class, MEMBER, owner);
+        if (!found.isEmpty()) {
+            return found.get(0);
+        }
+        String serNo = "REC-20000102-%04d".formatted(count("SELECT COUNT(*) FROM " + orig + ".ACHOrigRecvAccount WHERE memberNo = ?", MEMBER) + 1);
+        jdbc.update("INSERT INTO " + orig + ".ACHOrigRecvAccount (recvAcctSerNo, recvAcctVersion, memberNo, acctNo, routingNo, acctType, "
+                + "acctOwner, sourceID, lastModBy) VALUES (?, 1, ?, '123456789', '021000021', 'CHECKING', ?, 'ONLINE_BANKING', ?)",
+                serNo, MEMBER, owner, MEMBER);
+        return serNo;
+    }
+
     private String submit(String name, String amount, String memo) {
-        return transfers.submit(MEMBER, new TransferRequest(CHECKING, name, "021000021", "123456789", "CHECKING",
-                new BigDecimal(amount), date, "ONETIME", null, memo)).transferSerNo();
+        return transfers.submit(MEMBER, new TransferRequest(CHECKING, recipient(name), new BigDecimal(amount), date, "ONETIME", null, memo))
+                .transferSerNo();
     }
 
     private String submitSeries(String frequency, int count) {
-        return transfers.submit(MEMBER, new TransferRequest(CHECKING, "Jane Smith", "021000021", "123456789", "CHECKING",
-                new BigDecimal("100.00"), date, frequency, count, "RENT")).transferSerNo();
+        return transfers.submit(MEMBER, new TransferRequest(CHECKING, recipient("Jane Smith"), new BigDecimal("100.00"), date, frequency,
+                count, "RENT")).transferSerNo();
     }
 
     private String status(String serNo) {

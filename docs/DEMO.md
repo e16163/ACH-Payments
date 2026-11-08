@@ -45,11 +45,15 @@ Keep the $2.50 fee; Part 2 uses it.
 
 **Step 2 (source account):** **Primary Checking ••••1920** is picked, with "Available balance: $8,500.00".
 
-**Step 3 (recipient):**
-1. **Recipient name:** `Jane Smith`.
-2. **EX-01 (bad routing):** type routing number `051000031`, the one from your sample data. You get "Invalid routing number. Please check the 9-digit ABA number." and **Continue** stays disabled. The check digit (weights 3-7-1) is wrong: we changed your sample to `051000033`, which passes (see DB-MODEL.md section 0).
-3. Change it to `021000021`. You see "✓ JPMorgan Chase Bank, N.A.", looked up in the ABADirectory table.
-4. **Account number:** `123456789`. **Account type:** Checking.
+**Step 3 (recipient):** **To** only lists your registered external bank accounts (Ba, 2026-11-07). With none, it says to add one first and shows an **Add External Bank Account** button.
+1. Go to **Transfer & Pay ▾ → External Bank Accounts** and click **Add New External Bank Account**.
+2. **Account holder name:** `Jane Smith`. **Routing number:** type `02100002` (8 digits) and click out of the box: "Enter all 9 digits of the routing number." For now any 9 digits pass, until real routing validation is written.
+3. Change it to `021000021`. You see "✓ JPMorgan Chase Bank, N.A.", looked up in the ABADirectory table. (A 9-digit number the directory doesn't know, such as Navy Federal's `256074974`, asks for the **Bank name** instead.)
+4. **Account number:** `123456789`. **Account type:** Checking. Click **Add Account**.
+5. Add a second account the same way: `Blocked Test Person`, `021000021`, account `987654321`, Checking (the OFAC check below uses it).
+6. Back on **Add ACH Transfer**, pick **To: JPMorgan Chase Bank, N.A. ••••6789 · Checking (pending verification)**.
+
+**EX-01 (bad routing):** add an account with routing `051000031`, the one from your sample data. It's saved (9 digits), with no bank name. Transfer to it and **Continue** says "Invalid routing number. Please check the 9-digit ABA number.": a transfer still needs the ABA check digit (weights 3-7-1), because the EOD job rejects a NACHA file with a bad one. We changed your sample to `051000033`, which passes (see DB-MODEL.md section 0).
 
 **Step 4 (amount, date, frequency):**
 1. **Amount:** type `1500`. It formats to `1,500`.
@@ -79,11 +83,11 @@ Keep the $2.50 fee; Part 2 uses it.
 2. **Download receipt** saves a text receipt.
 3. Click **Done**, then **Accounts**. Checking now shows **$6,997.50**: $1,502.50 is on memo hold.
 
-**OFAC screening:** start another transfer with recipient name `Blocked Test Person`. Keep it; Part 3 uses it. That's a made-up name on the simulated SDN list. The review page says "This transfer will be reviewed by our compliance team before it's sent." The result is **Transfer under review**, and no money is held.
+**OFAC screening:** start another transfer to **Blocked Test Person's** account (••••4321). Keep it; Part 3 uses it. That's a made-up name on the simulated SDN list. The review page says "This transfer will be reviewed by our compliance team before it's sent." The result is **Transfer under review**, and no money is held.
 
 ## Part 2B: External Bank Accounts
 
-1. Still signed in as **member**, click **Transfer & Pay ▾ → External Bank Accounts**. The list shows the sample account, **Sample Bank ••••1012**, Checking, **Active**, plus the recipient accounts of your Part 2 transfers (••••6789), because a transfer saves its recipient as an active external account.
+1. Still signed in as **member**, click **Transfer & Pay ▾ → External Bank Accounts**. The list shows the sample account, **Sample Bank ••••1012**, Checking, **Active**, plus the accounts you added in Part 2. Jane's ••••6789 is now **Active**: the transfer's account check verified it.
 2. Click **Add New External Bank Account**. Enter `Jane Smith`, routing `021000021` (the bank name appears), account `55501234`, and **Savings**. Click **Add Account**.
 3. The new account is first in the list, with status **Pending micro-deposit verification**, as credit unions do before an external account can be used.
 4. Add the same account again: "This account is already in your external bank accounts."

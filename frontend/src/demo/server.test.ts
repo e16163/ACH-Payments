@@ -35,10 +35,17 @@ async function memberWithMfa() {
 async function transfer(overrides: Record<string, unknown> = {}) {
   const { earliest } = await demoApi<{ earliest: string }>('/transfers/dates')
   return {
-    origAcctNo: '100049281920', recvName: 'Jane Smith', routingNo: '021000021', acctNo: '123456789',
-    acctType: 'CHECKING', amount: '1500.00', effectiveDt: earliest, frequency: 'ONETIME',
+    origAcctNo: '100049281920', externalAccountId: 'REC-SRV-20261102-01', amount: '1500.00', effectiveDt: earliest, frequency: 'ONETIME',
     transferCount: null, memo: 'rent', ...overrides,
   }
+}
+
+/** A registered external bank account for this holder name (the transfer's To list only offers registered ones). */
+async function recipient(accountHolderName: string, accountNumber = '77700001') {
+  const added = await post('/v1/holders/M10982347/external-accounts', {
+    bankName: 'JPMorgan Chase Bank, N.A.', routingNumber: '021000021', accountNumber, accountType: 'CHECKING', accountHolderName,
+  }) as { externalAccountId: string }
+  return added.externalAccountId
 }
 
 beforeEach(() => store.clear())
@@ -94,13 +101,13 @@ describe('demo transfer (UC-ACH-ORG-01)', () => {
   it('submits: PENDING_BATCH with a reference number, and holds the money', async () => {
     const r = await post('/transfers', await transfer()) as Record<string, unknown>
     expect(r.transferSerNo).toMatch(/^TRF-\d{8}-0001$/)
-    expect(r).toMatchObject({ processStatus: 'PENDING_BATCH', ofacStatus: 'OFAC_PASSED', memoStatus: 'POSTED', recvName: 'JANE SMITH', memo: 'RENT', amount: 1500, total: 1500 })
+    expect(r).toMatchObject({ processStatus: 'PENDING_BATCH', ofacStatus: 'OFAC_PASSED', memoStatus: 'POSTED', recvName: 'JOHN DOE', memo: 'RENT', amount: 1500, total: 1500 })
     const accounts = await demoApi<{ acctNo: string; availBal: number }[]>('/member/accounts')
     expect(accounts.find((a) => a.acctNo === '100049281920')?.availBal).toBe(7000)
   })
 
   it('flags an OFAC name for review without holding the money', async () => {
-    const r = await post('/transfers', await transfer({ recvName: 'Blocked Test Person' })) as Record<string, unknown>
+    const r = await post('/transfers', await transfer({ externalAccountId: await recipient('Blocked Test Person') })) as Record<string, unknown>
     expect(r).toMatchObject({ processStatus: 'PENDING', ofacStatus: 'FLAGGED', memoStatus: 'REVIEW' })
   })
 
@@ -369,7 +376,7 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   it('EX-01: a flagged item stays out and the clean one proceeds', async () => {
     await memberWithMfa()
     const clean = await post('/transfers', await transfer({ amount: '10.00' })) as { effectiveDt: string }
-    await post('/transfers', await transfer({ recvName: 'Blocked Test Person', amount: '20.00' }))
+    await post('/transfers', await transfer({ externalAccountId: await recipient('Blocked Test Person'), amount: '20.00' }))
     await asOrigOps()
     await run(clean.effectiveDt)
     const s = await status()
@@ -450,7 +457,7 @@ describe("demo External Bank Accounts (Ba's ach-origination-system.yaml)", () =>
     await memberWithMfa()
     await add()
     expect((await error(add())).message).toBe('This account is already in your external bank accounts.')
-    expect((await error(add({ routingNumber: '021000022' }))).message).toBe('Invalid routing number. Please check the 9-digit ABA number.')
+    expect((await error(add({ routingNumber: '02100002' }))).message).toBe('Enter all 9 digits of the routing number.')
     expect((await error(add({ accountNumber: '123' }))).message).toBe('Enter the account number: 4 to 17 digits.')
     expect((await error(add({ accountType: 'MONEY_MARKET', accountNumber: '9999' }))).message).toBe('Choose Checking or Savings.')
     expect((await error(add({ bankName: ' ', accountNumber: '9999' }))).message).toBe('Enter the bank name.')
@@ -458,18 +465,32 @@ describe("demo External Bank Accounts (Ba's ach-origination-system.yaml)", () =>
     expect(await list()).toHaveLength(2)
   })
 
-  it('makes a pending account active when a transfer goes to it, instead of adding it again', async () => {
+  it('for now accepts any 9-digit routing number; a bank missing from the directory has no name', async () => {
     await memberWithMfa()
-    await add({ routingNumber: '021000021', accountNumber: '123456789', accountType: 'CHECKING', accountHolderName: 'Jane Smith' })
-    await post('/transfers', await transfer())
-    expect((await list()).filter((a) => a.maskedAccountNumber === '••••6789')).toEqual([expect.objectContaining({ status: 'ACTIVE' })])
+    await add({ bankName: 'Navy Federal', routingNumber: '256074974' })
+    expect((await list())[0]).toMatchObject({ bankName: null, maskedAccountNumber: '••••1234' })
+    await add({ bankName: 'Typo Bank', routingNumber: '021000022' }) // fails the check digit, still saved
+    expect(await list()).toHaveLength(3)
   })
 
-  it("saves a transfer's recipient as an active account once, and keeps other holders and staff out", async () => {
+  it('transfers only to a registered account: no bad check digit, and a pending one becomes active', async () => {
     await memberWithMfa()
-    await post('/transfers', await transfer())
-    await post('/transfers', await transfer({ amount: '10.00' }))
-    expect((await list()).filter((a) => a.maskedAccountNumber === '••••6789')).toEqual([expect.objectContaining({ status: 'ACTIVE', accountType: 'CHECKING' })])
+    const pending = (await add()).externalAccountId
+    const r = await post('/transfers', await transfer({ externalAccountId: pending, amount: '10.00' })) as Record<string, unknown>
+    expect(r).toMatchObject({ recvName: 'JANE SMITH', bankName: 'JPMorgan Chase Bank, N.A.', acctLast4: '1234' })
+    expect((await list()).find((a) => a.externalAccountId === pending)?.status).toBe('ACTIVE')
+    expect(await list()).toHaveLength(2) // a transfer adds no account
+    const navy = (await add({ bankName: 'Navy Federal', routingNumber: '256074974', accountNumber: '4444' })).externalAccountId
+    expect(await post('/transfers/preview', await transfer({ externalAccountId: navy, amount: '10.00' }))).toMatchObject({ bankName: null })
+    const typo = (await add({ bankName: 'Typo Bank', routingNumber: '021000022', accountNumber: '5555' })).externalAccountId
+    expect((await error(post('/transfers/preview', await transfer({ externalAccountId: typo })))).message).toBe('Invalid routing number. Please check the 9-digit ABA number.')
+    for (const id of [undefined, 'REC-NOPE']) {
+      expect((await error(post('/transfers/preview', await transfer({ externalAccountId: id })))).message).toBe('Choose one of your external bank accounts to transfer to.')
+    }
+  })
+
+  it('keeps other holders and staff out', async () => {
+    await memberWithMfa()
     expect((await error(demoApi('/v1/holders/SOMEONE-ELSE/external-accounts'))).status).toBe(403)
     await demoLogin('admin', 'admin123')
     expect((await error(list())).status).toBe(403)
