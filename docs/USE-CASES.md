@@ -259,6 +259,20 @@ Decisions:
 - **R8. Streaming limit.** One batch is held in memory at a time, so a single huge batch is still all in memory.
 - **R9. Roles.** `ROLE_SUPPORT` can read, but no support user exists yet. `achrecv` and admins can receive.
 
+**Redesigned 2026-11-08 from Ba's blueprint** ([BLUEPRINT-PLAN.md §3](BLUEPRINT-PLAN.md)). These changes replace parts of the table above:
+- Step 1 now runs at `ACH_RCV/RECV_WINDOW_TIMES` (06:00, 09:00, 12:00, 15:00, 18:00); `FED_RECV_FILE_TIME` is gone.
+- Entries go in as `processStatus = 'RECEIVED'` (existing rows: `UNPROCESSED` → `RECEIVED`, `PROCESSED` → `POSTED`).
+- New steps 4–7 (`ReceivedEntryProcessor`, `CorePostingFileJob`): account matching (exact, alias, zero padding), return codes (R01, R02, R03, R08, R10, R15, R16, R29), memo posting (debits, and credits from `TRUSTED_COMPANY_IDS`), and the end-of-day core posting file.
+- R2 is replaced: memo posting is built.
+
+## UC-ACH-ORG-01 and UC-ACH-EOD-01: Origination redesign (Ba's blueprint, 2026-11-08)
+
+See [BLUEPRINT-PLAN.md §4](BLUEPRINT-PLAN.md). What changes in the two sections above:
+- Submit still checks everything and places the hold at Confirm. The transfer then waits as `PENDING_BATCH`.
+- On its date, windows at `ACH_ORIG/ORIG_WINDOW_TIMES` check it again: account status and funds, limits, OFAC. Then they mark it `READY_TO_POST`. A failure rejects it and releases the hold.
+- An OFAC hit is `FLAGGED` and waits for the new `achcomp` compliance login (OFAC Review page). Clear sets it to `CLEARED`, and it goes on at the next window. Block sets it to `BLOCKED` and rejects it.
+- EOD step 2 now picks up `READY_TO_POST` transfers whose `ofacStatus` is `OFAC_PASSED` or `CLEARED`, after one last window. The extra OFAC screen at compilation (EX-01) stays as a safety net. Hold placement for later payments of a series (E4) moved into the window.
+
 ## UC-ACH-BO: Back-office logins and screens
 
 The designer's instruction: `achorig` sees the ACH origination back office, `achrecv` sees the ACH receiving back office, and the `ACHOperator` login is removed. The screens are guessed from the table design until the use cases arrive.
@@ -349,3 +363,4 @@ We log one row per business action, not one per SQL statement. OWASP's logging g
 2. **UC-ACH-ORG-01.** ✅ Built (board X1–X7, D6, R6, T7 member login): every "Done when" check passed, including a full member run in the deployed app (MFA → Transfer & Pay → EX-01/EX-02 → review → Confirm Transfer → receipt).
 3. **UC-ACH-EOD-01.** ✅ Built.
 4. **UC-ACH-RCV-01, UC-ACH-RCV-02.** ✅ Built.
+5. **Ba's blueprint: Receiving and Origination redesign.** ✅ Built 2026-11-08 (BLUEPRINT-PLAN.md §7, steps 1–12).

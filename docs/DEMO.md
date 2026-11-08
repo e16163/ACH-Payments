@@ -13,6 +13,7 @@ A walk-through of what's built from your documents, and what isn't yet.
 | Admin login | `admin` / `admin123` | the local admin login |
 | ACH origination login | `achorig` / `achorig123` | `achorig` with the local password |
 | ACH receiving login | `achrecv` / `achrecv123` | `achrecv` with the local password |
+| Compliance login (OFAC Review) | `achcomp` / `achcomp123` | `achcomp` with the local password (`APP_COMP_PASSWORD`) |
 | ACH files | Kept in the browser tab | Written to `~/dev/fed/outbound`, the simulated Fed |
 
 Use the online demo to click through. Use the full app to see the rows land in your tables (the last section).
@@ -96,7 +97,7 @@ Keep the $2.50 fee; Part 2 uses it.
 
 ## Part 3: End-of-day ACH file (UC-ACH-EOD-01)
 
-The file normally builds by itself after `FED_FILE_CUTOFF_TIME` (5 PM Eastern) on each banking day. **Run now** does the same thing on demand.
+From your blueprint: on the transfer's date, processing windows at 6 AM, 9 AM, 12 PM and 3 PM Eastern (`ORIG_WINDOW_TIMES`) check each transfer again (account, limits, OFAC, hold) and mark it `READY_TO_POST`. The file builds by itself after `FED_FILE_CUTOFF_TIME` (5 PM) from `READY_TO_POST` transfers only. **Run now** runs one last window, then builds the file, so you needn't wait for the windows.
 
 1. Sign out, sign in as **achorig**, and click **ACH Origination File**.
 2. You see:
@@ -109,13 +110,21 @@ The file normally builds by itself after `FED_FILE_CUTOFF_TIME` (5 PM Eastern) o
 6. Click **View** to read the NACHA file: the file header, batch header, Jane's entry line, the batch and file controls, and the rows of 9s that pad it to a multiple of 10 records. **Download** saves the `.ach` file.
 7. Click **Run now** again: "Nothing is due". A rerun can't duplicate anything.
 
-In the full app, the transfer's `processStatus` is now `PROCESSED` (the query in Part 4). There's no member screen yet that lists past transfers.
+In the full app, the transfer's `processStatus` is now `PROCESSED` (the query in Part 4): `PENDING_BATCH` at Confirm, `READY_TO_POST` after a window, `PROCESSED` once in a file. There's no member screen yet that lists past transfers.
 
 To see a recurring series, make a Weekly transfer with 3 payments in Part 2. Each time you run the file, the next payment appears under **Waiting**, with its own date and its own hold. If the money isn't there on that date, that payment is rejected, shows under **Left out**, and the series continues.
 
+## Part 3A: OFAC Review (your blueprint, Origination step 5)
+
+1. Sign out and sign in as **achcomp**. **OFAC Review** lists Blocked Test Person's transfer from Part 2.
+2. Type a note and click **Clear** (a false positive). It leaves the list. Sign in as **achorig**: in **ACH Origination File** it's now under **Waiting**, and **Run now** sends it. Its hold is placed at the window, since none was placed at Confirm.
+3. As **member**, make another transfer to Blocked Test Person, then, as **achcomp**, click **Block**. As **achorig**, it shows under **Left out** with the reason **OFAC blocked**, and it never goes in a file.
+
+Only **achcomp** sees **OFAC Review** and can clear or block; the other logins are refused. In the full app, each decision is a row in `ach_origination.ACHOrigOfacReview`, with the officer's login and the note.
+
 ## Part 3B: ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)
 
-The engine picks up the Fed's file by itself at 6 AM Eastern on banking days. **Receive file** simulates a delivery, so you needn't wait.
+From your blueprint, the engine processes the Fed's files at 6 AM, 9 AM, 12 PM, 3 PM and 6 PM Eastern (`RECV_WINDOW_TIMES`) on banking days. **Receive file** simulates a delivery, so you needn't wait.
 
 1. Sign out and sign in as **achrecv**. **ACH Receiving File** opens.
 2. In **Simulate a file from the Fed**, choose **Sample 1: payroll (valid)** and click **Receive file**: **VALIDATED**, 50 entries, $129,450.00. Do the same with **Sample 2: retail (valid)**: 50 entries, $71,840.00 credits and $1,144.90 debits.
@@ -126,7 +135,13 @@ The engine picks up the Fed's file by itself at 6 AM Eastern on banking days. **
    - **EX-02:** choose **Sample 1 with a wrong batch total**: **OUT_OF_BALANCE**, nothing saved, and a rejection notice for the Fed.
    - **EX-01:** choose **Sample 1 changed in transit**: **REJECTED_SIG_FAIL**, nothing saved, and a Security Operations alert. **View transactions** on it shows "No receiving transactions found in this file batch."
 
-Received entries stay `UNPROCESSED`. They aren't OFAC screened (they were screened at origination), and memo posting waits for your use case.
+6. **Processing (your blueprint, steps 4–6).** Each entry's **Status** column shows what happened to it. Use the **Status** filter, and **Select** an entry to see its **Processing** section. In Sample 1:
+   - most entries are **MEMO_POSTED**: the account was found and, as payroll from the trusted Company ID `1900483920` (`TRUSTED_COMPANY_IDS`), the money is available at once;
+   - James Thomas (account `987654329019`) is **AUTO_CORRECTED** to `0987654329019` (zero padding), and Laura Anderson (`987654328019`) to `555000328019` (a known alias);
+   - three are **REJECTED** with a return code: **R03** (no such account), **R16** (frozen) and **R02** (closed).
+7. In Sample 2, the debits are held (**MEMO_POSTED**) unless they're returned: **R10** (blocked originator), **R08** (stop payment) and **R01** ($19.99 against $5.00). Credits from other companies stay **RECEIVED** until the end-of-day posting file.
+
+Entries aren't OFAC screened (they were screened at origination). In the full app, the end-of-day posting file (step 7) is written at 7 PM (`CORE_POSTING_TIME`) to `~/dev/core/posting`, and the returns wait as `PENDING` rows in `ACHRecvReturn`; sending them to the Fed is not built yet.
 
 ## Part 3C: Back-office screens (UC-ACH-BO)
 
@@ -185,6 +200,11 @@ SELECT fileID, fileName, fileHeaderDt, fileHeaderTm, processStatus, totalCreditA
 SELECT batchID, fileID, companyName, stdEntryCode, totalBatchCount, totalCreditAmt, totalDebitAmt FROM ach_receiving.ACHRecvBatch;
 SELECT tranID, transferSerNo, fileID, recvName, amount, creditFlag, traceNo, fedStatus, processStatus FROM ach_receiving.ACHRecvTransaction ORDER BY traceNo LIMIT 10;
 
+-- your blueprint: what processing did to each entry, the returns waiting to go back, and the compliance decisions
+SELECT tranID, recvAcctID, correctedAcctNo, coreTranCode, processStatus, processReason, returnCode FROM ach_receiving.ACHRecvTransaction ORDER BY tranID DESC LIMIT 20;
+SELECT tranID, returnCode, amount, acctName, returnStatus, returnRtn FROM ach_receiving.ACHRecvReturn ORDER BY 1 DESC LIMIT 10;
+SELECT * FROM ach_origination.ACHOrigOfacReview ORDER BY 1 DESC LIMIT 10;
+
 -- Parameter UI changes and security events
 SELECT * FROM ach_payments.AppParam;
 SELECT * FROM ach_payments.AppLog ORDER BY 1 DESC LIMIT 10;
@@ -205,11 +225,12 @@ What's in the database today:
 ## What isn't built yet
 
 The transfer now reaches the (simulated) Fed. The rest of the back office from your System Design isn't built yet:
-- Same Day windows
-- memo posting of received entries
-- the engines and actions behind returns, NOCs, reversals and resubmissions (their screens are read-only)
-- fraud rules and the review queue
-- end-of-day posting
+- Same Day windows (the processing windows from your blueprint are built; the file still goes once, at 5 PM)
+- sending the returns to the Fed (they're recorded, waiting as `PENDING`)
+- the engines and actions behind NOCs, reversals and resubmissions (their screens are read-only)
+- a screen for the receiving manual-review queue
+- fraud rules
+- the core banking system reading the posting file (the simulated core is updated directly)
 
 These are the remaining roadmap cards in `docs/PLAN.md`.
 

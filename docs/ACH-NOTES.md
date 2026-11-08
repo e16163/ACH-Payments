@@ -44,17 +44,28 @@ Code: `nacha/AchFileParser`, `AchFileWriter`, `AchFileValidator`. A file must pa
 - **Same Day ACH:** FedACH submission deadlines 10:30 AM, 2:45 PM and 4:45 PM ET. Limit $1M per payment. IAT can't go Same Day.
 - **Next-day ACH:** files sent after the last Same Day window settle on the next banking day.
 - **Banking days** skip weekends and Federal Reserve holidays, so every date calculation goes through a calendar (`common/BankingCalendar`).
-- In this demo: **Receiving** picks up the Fed's inbound file at 06:00 ET; **Origination** builds one EOD file after the `FED_FILE_CUTOFF_TIME` parameter (5 PM). Same Day windows aren't built yet.
+- In this system (Ba's blueprint), times Eastern:
+
+| Time | Receiving (RDFI) | Origination (ODFI) |
+|---|---|---|
+| 06:00 | window: validate, extract, match accounts, returns, memo post | window: checks on transfers due today, `READY_TO_POST` |
+| 09:00, 12:00, 15:00 | same | same |
+| 17:00 | | EOD: one last window, then the NACHA file to the Fed |
+| 18:00 | last window | |
+| 19:00 | core posting file: final posting of everything memo posted or waiting | |
+
+- The windows mirror the Fed's distribution times: a bank processes what arrived since the last window instead of once a day. Same Day *submission* windows (sending several files a day) are still not built.
 
 ## 4. ACH Origination, as built (we are the ODFI)
 
 1. **Register the payee.** The member adds an external bank account (`ACHOrigRecvAccount`, status `PENDING_MICRO_DEP`). Real banks verify it with micro-deposits; Nacha requires account validation before first use for WEB debits.
 2. **Request the transfer** (`TransferService.preview`, then `submit`). Checks: the member owns the source account, available balance, daily and monthly limits (`ACHOrigLimitRule`), **OFAC** name screening, account verification (simulated Plaid), and a banking-day effective date.
-3. **Memo hold.** In the same DB transaction as the insert, the amount + fee is held against available balance (`ACHMemoPost`, `memoStatus = 'POSTED'`). That stops the member spending the money twice before the file goes out.
-4. **Wait for cutoff.** The transfer sits as `processStatus = 'PENDING_BATCH'`, `ofacStatus = 'OFAC_PASSED'`.
-5. **EOD file** (`outbound/EodFileJob`): picks up eligible transfers, re-screens OFAC, assigns trace numbers, groups them into batches (SEC code, company, effective date, entry description), writes the file, then **re-parses and validates its own output**. A bad file never leaves the bank.
-6. **Persist, then send.** One DB transaction writes `ACHOrigFile` (`QUEUED`), batches and entries; the Fed simulator then takes the file (`SENT`). 3 attempts with backoff; all failing gives `ERROR`.
-7. **Audit.** Every state change adds an `ACHOrigFedAction` row; DB triggers refuse UPDATE and DELETE on it.
+3. **Memo hold.** In the same DB transaction as the insert, the amount + fee is held against available balance (`ACHMemoPost`, `memoStatus = 'POSTED'`). That stops the member spending the money twice before the file goes out. The transfer waits as `PENDING_BATCH`.
+4. **Processing windows** (`origination/OriginationWindow`, Ba's steps 1–7). On the transfer's date, at 6, 9, 12 and 3, check it **again**, because things change between Confirm and the date: is the account still active, do limits still allow it, is the name on the OFAC list *now*? Pass → `READY_TO_POST`. Fail → `REJECTED`, and the hold is **released** (a `RELEASE` memo row), so the member gets the money back at once.
+5. **OFAC hit → compliance.** The transfer is `FLAGGED` and keeps its hold. A compliance officer (separate role, `achcomp`) clears a false positive (`CLEARED`, goes on at the next window) or blocks a true match (`BLOCKED`, rejected). Each decision is logged in `ACHOrigOfacReview`. That's *separation of duties*: the ops user who runs files can't approve sanctions hits.
+6. **EOD file** (`outbound/EodFileJob`): one last window, then picks up `READY_TO_POST` transfers, re-screens OFAC, assigns trace numbers, groups them into batches (SEC code, company, effective date, entry description), writes the file, then **re-parses and validates its own output**. A bad file never leaves the bank.
+7. **Persist, then send.** One DB transaction writes `ACHOrigFile` (`QUEUED`), batches and entries; the Fed simulator then takes the file (`SENT`). 3 attempts with backoff; all failing gives `ERROR`.
+8. **Audit.** Every state change adds an `ACHOrigFedAction` row; DB triggers refuse UPDATE and DELETE on it.
 
 Not built yet: returns coming back to us, NOCs from RDFIs, reversals, Same Day windows, final posting to the core.
 
@@ -63,12 +74,16 @@ Not built yet: returns coming back to us, NOCs from RDFIs, reversals, Same Day w
 1. **Ingest** (`inbound/ReceivingScheduler`, `ReceivingEngine`): the Fed's file arrives in `fed/inbound`; `ACHRecvFile` starts as `INGESTING`.
 2. **Trust it first:** check the signature (simulated HMAC), then the File Header (is it for our routing number? valid date, time, modifier?).
 3. **Duplicate check:** same date, time and File ID Modifier as a file already seen gives `DUPLICATE`.
-4. **Load** one batch at a time (streaming, so a big file doesn't fill memory): entries `SETTLED` / `UNPROCESSED`, addenda to `ACHRecvAddenda`.
+4. **Load** one batch at a time (streaming, so a big file doesn't fill memory): entries `SETTLED` / `RECEIVED`, addenda to `ACHRecvAddenda`.
 5. **Balance check:** batch and file control totals must match the entries; otherwise `OUT_OF_BALANCE`, roll everything back and write a rejection notice.
 6. **Hand off:** `VALIDATED`, archive the raw file (kept for audit), publish `ACH_FILE_INGESTED_EVENT`.
 7. **No OFAC on received entries:** Ba's design screens once, at origination. (A real RDFI still answers for its own members, especially on IAT.)
+8. **Transcode and match** (`ReceivedEntryProcessor`, Ba's step 4): NACHA tran code → core code (`22`→`DDA_CR`, `27`→`DDA_DR`, `32`/`37` savings, prenotes). Find the account: exact; a **known alias** (`ACHRecvAcctSubs`, e.g. after a NOC or a merger); or **zero padding** (`982341` = `000982341`, only if exactly one account matches). Not found → `MANUAL_REVIEW`.
+9. **Returns** (step 5): not found **R03**, closed **R02**, frozen **R16**, deceased **R15**. Debits also: stop payment **R08**, blocked originator **R10** (consumer) or **R29** (corporate, CCD/CTX), no funds **R01**. A return is recorded in `ACHRecvReturn` as `PENDING`. Over `MAX_ENTRY_AMOUNT` isn't returned; it waits for a person.
+10. **Memo post** (step 6): **debits are held at once** (so the money can't be spent twice); **credits are available at once only from trusted Company IDs** (e.g. a known payroll), because a credit can still be returned or reversed. Other credits wait.
+11. **Final posting** (step 7, `CorePostingFileJob`): at 19:00 a pipe-delimited file (`H` header, `D` details, `T` totals) for the core; ledger balances change only here. Idempotent per date.
 
-Not built yet: matching entries to member accounts, memo posting received entries, returns and NOCs we send back, final posting.
+Not built yet: sending returns to the Fed, NOCs we send, a manual-review screen.
 
 ## 6. Returns and NOCs (to learn before building)
 
@@ -84,9 +99,13 @@ Not built yet: matching entries to member accounts, memo posting received entrie
 - **One DB transaction per state change** (insert + memo hold; file + batches + entries), so a crash can't leave half a payment.
 - **Immutable audit trail** enforced by the database, not just the code.
 - **Parameters, not hardcoded values,** for cutoffs, fees and limits (`AppParam`), since Nacha changes limits on known dates.
+- **Memo posting vs. final posting.** *Available* balance changes intraday (holds, trusted credits); *ledger* balance changes once, at end of day, from one file the core ingests. Two numbers, two moments.
+- **Re-check at the last responsible moment.** Origination checks at Confirm *and* in the window on the date: accounts get frozen, limits change, OFAC lists update daily.
+- **Separation of duties.** OFAC decisions need a compliance role the operations user doesn't have; every decision is stored with who and why.
 - **Simulated outside systems** (Fed, core banking, Plaid, OFAC list) behind small interfaces, so real ones can be swapped in.
 
 ## 8. Decisions log
 
 - **2026-11-07: Routing number box.** Ba: only error when the routing number isn't 9 digits; any 9 digits pass until real routing validation is written. (The transfer step still requires the 3-7-1 check digit, because the EOD file validator rejects a file containing a bad one.)
-- **Coming:** Ba's blueprint of the business-day life cycle for Origination and Receiving processing and posting. It will drive the redesign of both file processing and posting flows; this file gets updated from it.
+- **2026-11-08: Ba's blueprint built** (plan and Q1–Q10 in `docs/BLUEPRINT-PLAN.md`). Highlights: the hold stays at Confirm and the window re-checks (Q3); unknown accounts get NACHA's R03 after manual review; trusted Company IDs are a parameter; a new compliance login resolves OFAC hits.
+- **Spec errors found in Ba's sample files** (worth mentioning in an interview, since this is what a validator is for): batch numbers had 6 digits instead of 7; some amounts were 11–12 digits instead of 10; several batch control totals didn't match their entries (e.g. $26,750 stated vs $26,700 in the entries); one routing number (`031000030`) failed the 3-7-1 check digit (the right one is `031000037`). The samples were rebuilt with computed control records.
