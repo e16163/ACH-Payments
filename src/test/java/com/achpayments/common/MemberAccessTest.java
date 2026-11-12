@@ -4,6 +4,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -43,7 +44,8 @@ import tools.jackson.databind.json.JsonMapper;
 /** USE-CASES T7: members must pass MFA before the transfer APIs; admins and members stay in their own areas. */
 @WebMvcTest({MeController.class, TransferController.class, ParamController.class, ReceivingController.class,
         BackOfficeController.class, EodController.class, AppLogController.class, ExternalAccountController.class,
-        com.achpayments.inbound.ReceivingProcessingController.class, com.achpayments.origination.OriginationProcessingController.class})
+        com.achpayments.inbound.ReceivingProcessingController.class, com.achpayments.origination.OriginationProcessingController.class,
+        com.achpayments.rules.BusinessRuleController.class})
 @Import({SecurityConfig.class, MfaService.class, UnhandledErrorLogger.class, MemberAccessTest.Clocks.class})
 @TestPropertySource(properties = {"app.admin-password=admin-pw", "app.orig-password=orig-pw", "app.recv-password=recv-pw", "app.comp-password=comp-pw",
         "app.member-password=member-pw"})
@@ -107,6 +109,9 @@ class MemberAccessTest {
 
     @MockitoBean
     BankingCalendar calendar;
+
+    @MockitoBean
+    com.achpayments.rules.BusinessRules businessRules;
 
     @MockitoBean
     ParamRepository paramRepo;
@@ -252,13 +257,7 @@ class MemberAccessTest {
     }
 
     @Test
-    void failedRunResendAndReceiveAreNotLoggedAsInfo() throws Exception {
-        org.mockito.Mockito.when(eodFileJob.run(java.time.LocalDate.of(2026, 11, 5)))
-                .thenReturn(new EodFileJob.RunResult(null, "ERROR", "The file could not be built. See AppLog."));
-        mvc.perform(post("/api/eod/run").with(httpBasic("achorig", "orig-pw")).with(csrf())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"businessDate\":\"2026-11-05\"}")).andExpect(status().isOk());
-        org.mockito.Mockito.verify(appLog).log("ACH_ORIG", "ERROR", "User 'achorig' ran the EOD file for 2026-11-05: The file could not be built. See AppLog.");
-
+    void failedResendAndReceiveAreNotLoggedAsInfo() throws Exception {
         org.mockito.Mockito.when(eodFileJob.resend("F1")).thenReturn("ERROR");
         mvc.perform(post("/api/eod/files/F1/resend").with(httpBasic("achorig", "orig-pw")).with(csrf())).andExpect(status().isOk());
         org.mockito.Mockito.verify(appLog).log("ACH_ORIG", "ERROR", "User 'achorig' resent F1: ERROR");
@@ -283,13 +282,7 @@ class MemberAccessTest {
     }
 
     @Test
-    void runNowResendAndReceiveEachLogTheUser() throws Exception {
-        org.mockito.Mockito.when(eodFileJob.run(java.time.LocalDate.of(2026, 11, 5)))
-                .thenReturn(new EodFileJob.RunResult("F1", "SENT", "F1: SENT"));
-        mvc.perform(post("/api/eod/run").with(httpBasic("achorig", "orig-pw")).with(csrf())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"businessDate\":\"2026-11-05\"}")).andExpect(status().isOk());
-        org.mockito.Mockito.verify(appLog).log("ACH_ORIG", "INFO", "User 'achorig' ran the EOD file for 2026-11-05: F1: SENT");
-
+    void resendAndReceiveEachLogTheUser() throws Exception {
         org.mockito.Mockito.when(eodFileJob.resend("F1")).thenReturn("SENT");
         mvc.perform(post("/api/eod/files/F1/resend").with(httpBasic("achorig", "orig-pw")).with(csrf())).andExpect(status().isOk());
         org.mockito.Mockito.verify(appLog).log("ACH_ORIG", "INFO", "User 'achorig' resent F1: SENT");
@@ -416,11 +409,25 @@ class MemberAccessTest {
     }
 
     @Test
+    void onlyAdminsManageBusinessRules() throws Exception {
+        mvc.perform(get("/api/ach-business-rules?systemName=ACH_RCV").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
+        mvc.perform(get("/api/ach-business-rules?systemName=ACH_RCV").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
+        mvc.perform(post("/api/ach-business-rules").with(httpBasic("achorig", "orig-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
+        mvc.perform(put("/api/ach-business-rules/1").with(httpBasic(MEMBER, "member-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
+        org.mockito.Mockito.when(businessRules.save(1L, null, "R", null, "p", "{", "admin"))
+                .thenThrow(new IllegalArgumentException("The JSON rule isn't valid JSON."));
+        mvc.perform(put("/api/ach-business-rules/1").with(httpBasic("admin", "admin-pw")).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"ruleName\":\"R\",\"pseudoCode\":\"p\",\"ruleJson\":\"{\"}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("The JSON rule isn't valid JSON."));
+    }
+
+    @Test
     void adminsKeepTheirScreensButNotTheAchOnes() throws Exception {
         mvc.perform(get("/api/params/systems").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
         mvc.perform(get("/api/v1/admin/logs").with(httpBasic("admin", "admin-pw"))).andExpect(status().isOk());
         mvc.perform(get("/api/eod/status").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
-        mvc.perform(post("/api/eod/run").with(httpBasic("admin", "admin-pw")).with(csrf())).andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/ach/receiving/files").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/v1/ach/receiving/transactions").with(httpBasic("admin", "admin-pw"))).andExpect(status().isForbidden());
         mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("admin", "admin-pw")).with(csrf())
@@ -450,12 +457,9 @@ class MemberAccessTest {
     }
 
     @Test
-    void onlyAdminsAndAchorigCanRunTheEodFile() throws Exception {
+    void onlyAchorigSeesTheEodStatus() throws Exception {
         mvc.perform(get("/api/eod/status").with(httpBasic(MEMBER, "member-pw"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/eod/status").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
-        mvc.perform(post("/api/eod/run").with(httpBasic(MEMBER, "member-pw")).with(csrf())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"businessDate\":\"2026-11-05\"}"))
-                .andExpect(status().isForbidden());
         mvc.perform(get("/api/eod/status")).andExpect(status().isUnauthorized());
     }
 

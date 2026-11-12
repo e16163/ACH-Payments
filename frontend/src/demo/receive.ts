@@ -130,7 +130,7 @@ function returnFor(e: Row, core: Record<string, CoreAccount>): Return | null {
 }
 
 /** Steps 4-6 on one file's entries, in three passes as the server runs them. Returns the counts the server logs. */
-export function processEntries(rows: Row[], core: Record<string, CoreAccount>, trusted: string[], maxCents: number | null, now: string) {
+export function processEntries(rows: Row[], core: Record<string, CoreAccount>, earlyPosting: (e: Row) => boolean, maxCents: number | null, now: string) {
   let matched = 0, corrected = 0, review = 0, rejected = 0, posted = 0
   // Step 4: transaction code, then the account: exact, a known alias, or zero padding
   for (const e of rows) {
@@ -165,11 +165,11 @@ export function processEntries(rows: Row[], core: Record<string, CoreAccount>, t
       Object.assign(e, { processStatus: 'MANUAL_REVIEW', processReason: 'OVER_LIMIT' })
     }
   }
-  // Step 6: debits are held; credits are made available only from a trusted Company ID
+  // Step 6: debits are held; credits are made available only when a business rule sets earlyPosting
   for (const e of rows) {
     if (!['RECEIVED', 'AUTO_CORRECTED'].includes(e.processStatus) || e.coreTranCode === 'PRENOTE') continue
     const credit = e.creditFlag === 1
-    if (credit && !trusted.includes(e.companyID)) continue
+    if (credit && !earlyPosting(e)) continue
     const acct = core[e.correctedAcctNo ?? e.recvAcctID]
     const cents = Math.round(e.amount * 100)
     if (!credit && acct.cents < cents) {

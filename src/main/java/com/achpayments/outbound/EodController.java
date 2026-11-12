@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.achpayments.common.AppLogRepository;
@@ -27,9 +26,6 @@ import com.achpayments.param.ParamCache;
 /** API for the ACH Origination File page (USE-CASES E3). Only ROLE_ACH_ORIG_OPS gets here; see SecurityConfig. */
 @RestController
 public class EodController {
-
-    public record RunRequest(LocalDate businessDate) {
-    }
 
     public record FileRow(String fileID, String fileName, String fedStatus, LocalDate fileHeaderDt, int totalCreditCount,
             BigDecimal totalCreditAmt, LocalDateTime sendTm) {
@@ -83,17 +79,6 @@ public class EodController {
                         rs.getBigDecimal(6), rs.getObject(7, LocalDateTime.class)));
         return new Status(params.get("ACH_ORIG", "FED_FILE_CUTOFF_TIME").orElse(""), next.isBefore(today) ? today : next,
                 pending, java.util.stream.Stream.of(flagged, blocked, rejected).flatMap(List::stream).toList(), files);
-    }
-
-    /** Run now. Design step 2 allows a "scheduled business date", which is what lets a demo send a future-dated transfer. */
-    @PostMapping("/api/eod/run")
-    public EodFileJob.RunResult run(@RequestBody RunRequest body, Principal user) {
-        if (body.businessDate() == null) {
-            throw new IllegalArgumentException("Choose a business date.");
-        }
-        EodFileJob.RunResult result = job.run(body.businessDate());
-        appLog.log(ACH_ORIG, level(result.fedStatus()), "User '%s' ran the EOD file for %s: %s".formatted(user.getName(), body.businessDate(), result.message()));
-        return result;
     }
 
     @PostMapping("/api/eod/files/{fileID}/resend")

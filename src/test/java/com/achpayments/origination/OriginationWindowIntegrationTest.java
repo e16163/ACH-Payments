@@ -153,6 +153,27 @@ class OriginationWindowIntegrationTest {
     }
 
     @Test
+    void transactionsSearchByEffectiveDateAndShowTheWholeTransfer() {
+        LocalDate day = date;
+        String first = submit("JANE SMITH", "REC-20000103-0001");
+        String later = submit("JOHN DOE", "REC-20000103-0002");
+        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET effectiveDt = ? WHERE transferSerNo = ?", day.plusDays(7), later);
+
+        var oneDay = api.transactions(day, day, null, 1, 10).items().stream().map(OriginationProcessingController.Txn::transferId).toList();
+        assertTrue(oneDay.contains(first) && !oneDay.contains(later), oneDay.toString());
+        var week = api.transactions(day, day.plusDays(7), null, 1, 100).items().stream().map(OriginationProcessingController.Txn::transferId).toList();
+        assertTrue(week.containsAll(List.of(first, later)), week.toString()); // both ends included
+        assertEquals(0, api.transactions(day, day.plusDays(7), "NO_SUCH_STATUS", 1, 10).total());
+        assertThrows(IllegalArgumentException.class, () -> api.transactions(day.plusDays(1), day, null, 1, 10));
+
+        Map<String, Object> detail = api.transaction(first);
+        assertEquals("JANE SMITH", detail.get("recvName"));
+        assertEquals(new BigDecimal("100.00"), detail.get("transferAmt"));
+        assertEquals(day, detail.get("effectiveDt")); // a LocalDate, so the JSON says 2026-11-13
+        assertTrue(detail.containsKey("scheduleID") && detail.containsKey("feeAmt"), detail.keySet().toString()); // every column
+    }
+
+    @Test
     void aFrozenAccountRejectsTheTransferAndGivesTheHoldBack() {
         String serNo = submit("JANE SMITH");
         jdbc.update("UPDATE SimCoreAccount SET acctStatus = 'FROZEN' WHERE acctNo = ?", CHECKING);

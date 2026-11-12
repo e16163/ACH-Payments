@@ -50,7 +50,7 @@ Code: `nacha/AchFileParser`, `AchFileWriter`, `AchFileValidator`. A file must pa
 |---|---|---|
 | 06:00 | window: validate, extract, match accounts, returns, memo post | window: checks on transfers due today, `READY_TO_POST` |
 | 09:00, 12:00, 15:00 | same | same; ops can **Send to the Fed** a schedule's ready transfers in its own file |
-| 17:00 | | EOD: one last window, then the NACHA file of everything still ready |
+| next banking day 06:00 | | anything ready but not sent moves to the first window and goes in its file (no 5 PM file since 2026-11-12) |
 | 18:00 | last window | |
 | 19:00 | core posting file: final posting of everything memo posted or waiting | |
 
@@ -82,7 +82,7 @@ Not built yet: returns coming back to us, NOCs from RDFIs, reversals, Same Day w
 7. **No OFAC on received entries:** Ba's design screens once, at origination. (A real RDFI still answers for its own members, especially on IAT.)
 8. **Transcode and match** (`ReceivedEntryProcessor`, Ba's step 4): NACHA tran code → core code (`22`→`DDA_CR`, `27`→`DDA_DR`, `32`/`37` savings, prenotes). Find the account: exact; a **known alias** (`ACHRecvAcctSubs`, e.g. after a NOC or a merger); or **zero padding** (`982341` = `000982341`, only if exactly one account matches). Not found → `MANUAL_REVIEW`.
 9. **Returns** (step 5): not found **R03**, closed **R02**, frozen **R16**, deceased **R15**. Debits also: stop payment **R08**, blocked originator **R10** (consumer) or **R29** (corporate, CCD/CTX), no funds **R01**. A return is recorded in `ACHRecvReturn` as `PENDING`. Over `MAX_ENTRY_AMOUNT` isn't returned; it waits for a person.
-10. **Memo post** (step 6): **debits are held at once** (so the money can't be spent twice); **credits are available at once only from trusted Company IDs** (e.g. a known payroll), because a credit can still be returned or reversed. Other credits wait.
+10. **Memo post** (step 6): **debits are held at once** (so the money can't be spent twice); **credits are available at once only when an ACH Business Rule sets `earlyPosting`** (e.g. a known payroll's Company ID), because a credit can still be returned or reversed. Other credits wait. This is "early pay": the member sees a payroll before its settlement date, and the bank takes the risk that it's returned.
 11. **Final posting** (step 7, `CorePostingFileJob`): at 19:00 a pipe-delimited file (`H` header, `D` details, `T` totals) for the core; ledger balances change only here. Idempotent per date.
 
 Not built yet: sending returns to the Fed, NOCs we send, a manual-review screen.
@@ -101,7 +101,7 @@ Not built yet: sending returns to the Fed, NOCs we send, a manual-review screen.
 - **One DB transaction per state change** (insert + memo hold; file + batches + entries), so a crash can't leave half a payment.
 - **Immutable audit trail** enforced by the database, not just the code.
 - **Parameters, not hardcoded values,** for cutoffs, fees and limits (`AppParam`), since Nacha changes limits on known dates.
-- **Memo posting vs. final posting.** *Available* balance changes intraday (holds, trusted credits); *ledger* balance changes once, at end of day, from one file the core ingests. Two numbers, two moments.
+- **Memo posting vs. final posting.** *Available* balance changes intraday (holds, early-posted credits); *ledger* balance changes once, at end of day, from one file the core ingests. Two numbers, two moments.
 - **Re-check at the last responsible moment.** Origination checks at Confirm *and* in the window on the date: accounts get frozen, limits change, OFAC lists update daily.
 - **Separation of duties.** OFAC decisions need a compliance role the operations user doesn't have; every decision is stored with who and why.
 - **Simulated outside systems** (Fed, core banking, Plaid, OFAC list) behind small interfaces, so real ones can be swapped in.
@@ -111,4 +111,6 @@ Not built yet: sending returns to the Fed, NOCs we send, a manual-review screen.
 - **2026-11-07: Routing number box.** Ba: only error when the routing number isn't 9 digits; any 9 digits pass until real routing validation is written. (The transfer step still requires the 3-7-1 check digit, because the EOD file validator rejects a file containing a bad one.)
 - **2026-11-08: Ba's blueprint built** (plan and Q1–Q10 in `docs/BLUEPRINT-PLAN.md`). Highlights: the hold stays at Confirm and the window re-checks (Q3); unknown accounts get NACHA's R03 after manual review; trusted Company IDs are a parameter; a new compliance login resolves OFAC hits.
 - **2026-11-12: Ba's critique: processing screens.** ACH Origination File → **ACH Origination Processing**: today's date, pick a schedule, see the transactions that window made ready, **Send to the Fed** creates the file for them. ACH Receiving File → **ACH Receiving Processing**: receiving only delivers to the inbound folder; a window processes it; step 7's posting file is on the same screen. Ba: "you must pull data from the database", so the schedules and window runs became tables (V19), and `ACHOrigFile` got a `scheduleID`.
+- **2026-11-12: Ba's follow-up.** Ready but not sent goes in the next business day's 6 AM file, so the 5 PM catch-all file and its job are gone; on a weekend or holiday the processing screens show the next business day, view only, and the API refuses process/send/receive (`BankingCalendar.businessDate`, `requireBankingDay`). New search screens: **ACH Origination Transactions** and **ACH Receiving Transactions**, by effective date (start to end, today by default), view only.
+- **2026-11-12: ACH Business Rules.** A table (`ACHBusinessRule`, V20) of rules per app, each with pseudo code for people and a JSON rule for the machine: `{"when": {"all": [{field, op, value}]}, "then": [{set, value}]}`. A small evaluator (`rules/BusinessRules`, no library) runs them; receiving step 6 asks it for `earlyPosting`, which replaced the `TRUSTED_COMPANY_IDS` parameter. Rules are checked on save (unknown field or op → 400), so a typo can't break a processing window. Interview angle: business rules as data, so operations can change them without a deploy, with an audit trail (who, when).
 - **Spec errors found in Ba's sample files** (worth mentioning in an interview, since this is what a validator is for): batch numbers had 6 digits instead of 7; some amounts were 11–12 digits instead of 10; several batch control totals didn't match their entries (e.g. $26,750 stated vs $26,700 in the entries); one routing number (`031000030`) failed the 3-7-1 check digit (the right one is `031000037`). The samples were rebuilt with computed control records.

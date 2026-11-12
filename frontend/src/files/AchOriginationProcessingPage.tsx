@@ -8,7 +8,7 @@ type WindowRun = {
   hold_rejected: number; ready_to_post: number; run_by: string; started_at: string
 }
 type Schedule = { schedule_id: number; window_time: string; window_name: string; last_run: WindowRun | null }
-type Today = { business_date: string; schedules: Schedule[]; waiting_for_compliance: number }
+type Today = { business_date: string; banking_day: boolean; schedules: Schedule[]; waiting_for_compliance: number }
 type Ready = { transfer_id: string; recipient_name: string; routing_number: string; amount: number; effective_dt: string; ready_at: string }
 type Batch = {
   batch_id: string; batch_no: number; company_name: string; std_entry_code: string; company_entry_desc: string
@@ -122,7 +122,13 @@ export default function AchOriginationProcessingPage() {
   return (
     <>
       <h2>ACH Origination Processing</h2>
-      <p className="hint">{longDate(today.business_date)}. Anything ready that isn't sent from a schedule goes in the 5:00 PM file.</p>
+      <p className="hint">
+        {longDate(today.business_date)}. Anything ready that isn't sent from its schedule goes in the next business day's first window
+        ({today.schedules[0]?.window_name ?? '6:00 AM window'}).
+      </p>
+      {!today.banking_day && (
+        <p className="notice" role="status">Today isn't a banking day. This is the next business day, view only until it opens.</p>
+      )}
 
       {files.filter((f) => f.fed_status === 'ERROR').map((f) => (
         <p className="page-error" key={f.file_id}>
@@ -159,7 +165,7 @@ export default function AchOriginationProcessingPage() {
           ) : <p className="empty">Not processed yet today.</p>}
           <div className="toolbar">
             {run && <span className="hint">Processed at {time(run.started_at)} by {run.run_by} ({run.window_id})</span>}
-            <button disabled={busy} onClick={processWindow}>{run ? 'Process again' : 'Process window'}</button>
+            <button disabled={busy || !today.banking_day} onClick={processWindow}>{run ? 'Process again' : 'Process window'}</button>
           </div>
 
           <h3 className="section">Ready to be sent to the Fed ({ready.length})</h3>
@@ -183,10 +189,10 @@ export default function AchOriginationProcessingPage() {
             </table>
           )}
           <div className="toolbar">
-            <button className="primary" disabled={busy || ready.length === 0} onClick={sendToFed}>Send to the Fed</button>
+            <button className="primary" disabled={busy || !today.banking_day || ready.length === 0} onClick={sendToFed}>Send to the Fed</button>
           </div>
 
-          <h3 className="section">ACH origination files from this schedule today</h3>
+          <h3 className="section">ACH origination files from this schedule</h3>
           {files.length === 0 ? <p className="empty">No files yet.</p> : (
             <table aria-label="ACH origination files">
               <thead>
@@ -204,7 +210,7 @@ export default function AchOriginationProcessingPage() {
                     <td className="row-actions">
                       <button onClick={() => open(f.file_id, setViewing)}>View</button>
                       <button onClick={() => open(f.file_id, saveFile)}>Download</button>
-                      {f.fed_status === 'ERROR' && <button disabled={busy} onClick={() => resend(f.file_id)}>Resend</button>}
+                      {f.fed_status === 'ERROR' && <button disabled={busy || !today.banking_day} onClick={() => resend(f.file_id)}>Resend</button>}
                     </td>
                   </tr>,
                   ...f.batches.map((b) => (

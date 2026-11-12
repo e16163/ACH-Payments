@@ -7,11 +7,10 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,7 +21,9 @@ import com.achpayments.common.AppLogRepository;
 import com.achpayments.memo.MemoPostingEngine;
 import com.achpayments.nacha.AchFileValidator;
 import com.achpayments.param.ParamCache;
+import com.achpayments.rules.BusinessRules;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.annotation.JsonNaming;
 
@@ -76,15 +77,17 @@ public class ReceivedEntryProcessor {
     private final MemoPostingEngine memo;
     private final ParamCache params;
     private final AppLogRepository appLog;
+    private final BusinessRules businessRules;
     private final Clock clock;
     private final String recv;
 
-    public ReceivedEntryProcessor(JdbcTemplate jdbc, MemoPostingEngine memo, ParamCache params, AppLogRepository appLog, Clock clock,
-            @Value("${app.db.receiving}") String recv) {
+    public ReceivedEntryProcessor(JdbcTemplate jdbc, MemoPostingEngine memo, ParamCache params, AppLogRepository appLog,
+            BusinessRules businessRules, Clock clock, @Value("${app.db.receiving}") String recv) {
         this.jdbc = jdbc;
         this.memo = memo;
         this.params = params;
         this.appLog = appLog;
+        this.businessRules = businessRules;
         this.clock = clock;
         this.recv = recv;
     }
@@ -167,21 +170,20 @@ public class ReceivedEntryProcessor {
     }
 
     /**
-     * Step 6: debits are held at once; credits are made available at once only from a trusted Company ID
-     * (ACH_RCV/TRUSTED_COMPANY_IDS). Other credits wait for the end-of-day posting file. With eligibleOnly false, every entry
+     * Step 6: debits are held at once; credits are made available at once only when an ACH_RCV business rule sets
+     * earlyPosting (ACHBusinessRule). Other credits wait for the end-of-day posting file. With eligibleOnly false, every entry
      * is memo posted.
      */
     @Transactional
     public MemoResult memoPost(String fileID, boolean eligibleOnly) {
         requireFile(fileID);
-        Set<String> trusted = Arrays.stream(params.get("ACH_RCV", "TRUSTED_COMPANY_IDS").orElse("").split(","))
-                .map(String::trim).filter(s -> !s.isEmpty()).collect(Collectors.toSet());
+        List<JsonNode> rules = businessRules.load(ACH_RCV);
         List<Map<String, Object>> rows = entries(fileID, "processStatus IN ('RECEIVED', 'AUTO_CORRECTED') AND coreTranCode <> 'PRENOTE'");
         int eligible = 0, posted = 0;
         BigDecimal credits = BigDecimal.ZERO, debits = BigDecimal.ZERO;
         for (Map<String, Object> row : rows) {
             boolean credit = isCredit(row);
-            if (eligibleOnly && credit && !trusted.contains((String) row.get("companyID"))) {
+            if (eligibleOnly && credit && !earlyPosting(rules, row)) {
                 continue;
             }
             eligible++;
@@ -202,6 +204,16 @@ public class ReceivedEntryProcessor {
             }
         }
         return new MemoResult(fileID, eligible, posted, credits, debits, "MEMO_POST_COMPLETED");
+    }
+
+    /** Ba's ACH Business Rules: a credit a rule marks earlyPosting is made available at once, before settlement. */
+    private static boolean earlyPosting(List<JsonNode> rules, Map<String, Object> row) {
+        Map<String, Object> facts = new HashMap<>();
+        for (String field : List.of("companyID", "companyName", "amount", "stdEntryCode", "tranCode")) {
+            facts.put(field, row.get(field));
+        }
+        facts.put("creditIndicator", isCredit(row));
+        return Boolean.TRUE.equals(BusinessRules.results(rules, facts).get("earlyPosting"));
     }
 
     private Return returnFor(Map<String, Object> row) {

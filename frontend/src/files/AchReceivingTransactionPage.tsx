@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
-import type { ReceivedFile } from './AchReceivingProcessingPage'
+import { todayET } from './today'
 
 type Overview = {
   tranID: number; amount: number; creditFlag: number; originatorID: string; companyName: string; recvName: string
-  createTm: string; settlementDt: string | null; traceNo: string; processStatus: string; returnCode: string | null
+  createTm: string; effectiveDt: string; settlementDt: string | null; traceNo: string; processStatus: string; returnCode: string | null
 }
 type Page = { items: Overview[]; total: number; page: number; limit: number }
 type Detail = Record<string, string | number | null>
@@ -44,32 +44,32 @@ function fieldValue(name: string, d: Detail): string {
   return String(v)
 }
 
-/** UC-ACH-RCV-02 phase 2: the ACH Inbound Overview, for the file named in the address. */
+/**
+ * UC-ACH-RCV-02 phase 2, and Ba (2026-11-12): search received transactions by effective date, start to end (both today at first).
+ * View transactions on the processing screen opens it for one file instead (the file named in the address).
+ */
 export default function AchReceivingTransactionPage({ route, fileID }: { route: string; fileID: string }) {
-  const [files, setFiles] = useState<ReceivedFile[] | null>(null)
+  const [start, setStart] = useState(todayET)
+  const [end, setEnd] = useState(todayET)
   const [page, setPage] = useState(1)
   const [status, setStatus] = useState('')
   const [data, setData] = useState<Page | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [failed, setFailed] = useState(false)
+  const badRange = !fileID && (!start || !end || start > end)
 
-  useEffect(() => {
-    api<ReceivedFile[]>('/v1/ach/receiving/files').then(setFiles).catch(() => setFailed(true))
-  }, [])
-
-  const selected = fileID || files?.find((f) => f.entryCount > 0)?.fileID || files?.[0]?.fileID || ''
-
-  useEffect(() => setPage(1), [selected, status])
+  useEffect(() => setPage(1), [fileID, start, end, status])
 
   const load = useCallback(async () => {
-    if (!selected) return
+    if (badRange) return
     setFailed(false)
+    const filter = fileID ? `fileID=${encodeURIComponent(fileID)}` : `start=${start}&end=${end}`
     try {
-      setData(await api<Page>(`/v1/ach/receiving/transactions?fileID=${encodeURIComponent(selected)}${status ? `&status=${status}` : ''}&page=${page}&limit=${LIMIT}&sortBy=traceNo&sortDir=ASC`))
+      setData(await api<Page>(`/v1/ach/receiving/transactions?${filter}${status ? `&status=${status}` : ''}&page=${page}&limit=${LIMIT}&sortBy=traceNo&sortDir=ASC`))
     } catch {
       setFailed(true)
     }
-  }, [selected, status, page])
+  }, [fileID, start, end, badRange, status, page])
 
   useEffect(() => {
     load()
@@ -77,10 +77,10 @@ export default function AchReceivingTransactionPage({ route, fileID }: { route: 
 
   // EX-02: keeps retrying while the warning shows; the page stays usable and Refresh tries at once.
   useEffect(() => {
-    if (!failed || !selected) return
+    if (!failed) return
     const timer = setTimeout(load, RETRY_MS)
     return () => clearTimeout(timer)
-  }, [failed, selected, load])
+  }, [failed, load])
 
   async function select(tranID: number) {
     try {
@@ -94,35 +94,46 @@ export default function AchReceivingTransactionPage({ route, fileID }: { route: 
 
   return (
     <>
-      <h2>ACH Inbound Overview</h2>
-      {files && (
-        <div className="toolbar">
-          <label>
-            File
-            <select value={selected} onChange={(e) => { window.location.hash = `${route}/${encodeURIComponent(e.target.value)}` }}>
-              {files.map((f) => <option key={f.fileID} value={f.fileID}>{f.fileID} ({f.processStatus})</option>)}
-            </select>
-          </label>
-          <label>
-            Status
-            <select value={status} onChange={(e) => setStatus(e.target.value)}>
-              <option value="">All</option>
-              {STATUSES.map((s) => <option key={s} value={s}>{s === 'MANUAL_REVIEW' ? 'Manual review' : s}</option>)}
-            </select>
-          </label>
-        </div>
-      )}
+      <h2>ACH Receiving Transactions</h2>
+      <div className="toolbar">
+        {fileID ? (
+          <span className="hint">File {fileID}. <a href={route}>Search by effective date instead</a></span>
+        ) : (
+          <>
+            <label>
+              Start date
+              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+            </label>
+            <label>
+              End date
+              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+            </label>
+          </>
+        )}
+        <label>
+          Status
+          <select value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">All</option>
+            {STATUSES.map((s) => <option key={s} value={s}>{s === 'MANUAL_REVIEW' ? 'Manual review' : s}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className="hint">Search and view only. Files are processed on ACH Receiving Processing.</p>
 
-      {(data?.total === 0 || files?.length === 0) && (
-        <p className="notice" role="status">{status ? `No ${status} transactions in this file.` : 'No receiving transactions found in this file batch.'}</p>
+      {badRange && <p className="page-error">Choose a start date on or before the end date.</p>}
+      {!badRange && data?.total === 0 && (
+        <p className="notice" role="status">
+          {fileID ? 'No receiving transactions in this file' : 'No receiving transactions with an effective date in this range'}
+          {status ? ` with status ${status}` : ''}.
+        </p>
       )}
-      {data && data.total > 0 && (
+      {!badRange && data && data.total > 0 && (
         <>
           <table aria-label="Receiving transactions">
             <thead>
               <tr>
                 <th>Transaction Amount</th><th>Cr/Db Indicator</th><th>Originator Name</th><th>Company Name</th><th>Recipient Name</th>
-                <th>Received Date</th><th>Settlement Date</th><th>Trace No</th><th>Status</th><th>Action</th>
+                <th>Received Date</th><th>Effective Date</th><th>Settlement Date</th><th>Trace No</th><th>Status</th><th>Action</th>
               </tr>
             </thead>
             <tbody>
@@ -134,6 +145,7 @@ export default function AchReceivingTransactionPage({ route, fileID }: { route: 
                   <td>{t.companyName.slice(0, 16)}</td>
                   <td>{t.recvName.slice(0, 22)}</td>
                   <td>{dateTime(t.createTm)}</td>
+                  <td>{t.effectiveDt}</td>
                   <td>{t.settlementDt ?? '—'}</td>
                   <td className="code">{t.traceNo}</td>
                   <td>{t.processStatus}{t.returnCode ? ` ${t.returnCode}` : ''}</td>

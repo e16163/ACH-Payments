@@ -98,6 +98,7 @@ public class OriginationWindow {
     public Run run(LocalDate businessDate, String windowTime, String runBy) {
         LocalDateTime started = LocalDateTime.now(clock).withNano(0);
         String windowId = "WIN-" + businessDate.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" + windowTime.replace(":", "");
+        int carried = carryOver(businessDate, windowTime);
         List<String> due = extract(businessDate);
         Map<Outcome, Integer> n = new EnumMap<>(Outcome.class);
         for (String serNo : due) {
@@ -109,9 +110,23 @@ public class OriginationWindow {
                 + "limitRejectCnt, flaggedCnt, holdRejectCnt, readyCnt, runBy, startTm, endTm) VALUES (?, (SELECT scheduleID FROM " + orig
                 + ".ACHOrigSchedule WHERE windowTime = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", windowId, windowTime, businessDate, windowTime, run.extracted(), run.acctRejected(), run.limitRejected(), run.flagged(),
                 run.holdRejected(), run.ready(), runBy, started, LocalDateTime.now(clock).withNano(0));
-        appLog.log(ACH_ORIG, "INFO", "%s: %d transfer(s) due, %d ready to post, %d flagged by OFAC, %d rejected"
-                .formatted(windowId, due.size(), run.ready(), run.flagged(), run.rejected()));
+        appLog.log(ACH_ORIG, "INFO", "%s: %d transfer(s) due, %d ready to post, %d flagged by OFAC, %d rejected%s"
+                .formatted(windowId, due.size(), run.ready(), run.flagged(), run.rejected(),
+                        carried == 0 ? "" : ", %d carried over from an earlier day".formatted(carried)));
         return run;
+    }
+
+    /**
+     * Ba (2026-11-12): anything ready that no schedule sent goes in the next business day's first window (6 AM). Ready means
+     * READY_TO_POST on an earlier day, or made ready outside a window (no scheduleID).
+     */
+    private int carryOver(LocalDate businessDate, String windowTime) {
+        List<Window> windows = schedule();
+        if (windows.isEmpty() || !windows.get(0).windowTime().equals(windowTime)) {
+            return 0;
+        }
+        return jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET scheduleID = ? WHERE processStatus = ? AND transferVersion = 1 "
+                + "AND (scheduleID IS NULL OR processTm < ?)", windows.get(0).scheduleId(), READY_TO_POST, businessDate.atStartOfDay());
     }
 
     /** The active windows, in time order. */

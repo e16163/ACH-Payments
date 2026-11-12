@@ -119,6 +119,17 @@ V14 adds made-up rows only, with no table or column changes: returns, NOCs, subs
 
 The files and batches the screen lists are the design's own `ACHOrigFile`, `ACHOrigBatch` and `ACHOrigTransaction`, unchanged apart from `scheduleID`.
 
+### Changes for Ba's follow-up and business rules (V20, 2026-11-12; BLUEPRINT-PLAN.md §4B and §4C)
+
+| Change | Marked | Why |
+| --- | --- | --- |
+| `ACHBusinessRule` (main schema: `ruleID` PK, `systemName`, `ruleName`, `ruleDesc`, `pseudoCode`, `ruleJson JSON`, `lastModTm`, `lastModBy`; unique `systemName, ruleName`) | Adds (Ba) | Ba: "create a table to store ACH business rules", shown on ACH Business Rules Management. |
+| Seed rows: `ACH_RCV` earlyPosting rules for Company IDs `23416789` (Ba's sample) and `1900483920` | Adds | Ba's sample, plus the trusted ID the demo already uses. |
+| Delete `AppParam` row `ACH_RCV/TRUSTED_COMPANY_IDS` | Removes | The earlyPosting rules replace it (our own Q6 parameter, not Ba's). |
+| `IX_ACHOriginatorTransfer_EffectiveDt (effectiveDt)` | Adds | ACH Origination Transactions searches by effective date. `ACHRecvTransaction` already has that index. |
+
+There's no new column for the leftover-to-6 AM rule. The 6 AM window sets the existing `ACHOriginatorTransfer.scheduleID` on transfers left `READY_TO_POST` from an earlier day. `ACHOrigFile.scheduleID` is no longer NULL for new files, because the 5 PM file goes away.
+
 ---
 
 ## 1. The design's tables by component

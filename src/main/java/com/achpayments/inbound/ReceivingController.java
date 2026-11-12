@@ -39,7 +39,7 @@ public class ReceivingController {
     }
 
     public record Overview(long tranID, BigDecimal amount, int creditFlag, String originatorID, String companyName, String recvName,
-            LocalDateTime createTm, LocalDate settlementDt, String traceNo, String processStatus, String returnCode) {
+            LocalDateTime createTm, LocalDate effectiveDt, LocalDate settlementDt, String traceNo, String processStatus, String returnCode) {
     }
 
     public record Page(List<Overview> items, long total, int page, int limit) {
@@ -60,13 +60,17 @@ public class ReceivingController {
     private final JdbcTemplate jdbc;
     private final FedInboundSimulator fed;
     private final AppLogRepository appLog;
+    private final com.achpayments.common.BankingCalendar calendar;
+    private final java.time.Clock clock;
     private final String recv;
 
-    public ReceivingController(JdbcTemplate jdbc, FedInboundSimulator fed, AppLogRepository appLog,
-            @Value("${app.db.receiving}") String recv) {
+    public ReceivingController(JdbcTemplate jdbc, FedInboundSimulator fed, AppLogRepository appLog, com.achpayments.common.BankingCalendar calendar,
+            java.time.Clock clock, @Value("${app.db.receiving}") String recv) {
         this.jdbc = jdbc;
         this.fed = fed;
         this.appLog = appLog;
+        this.calendar = calendar;
+        this.clock = clock;
         this.recv = recv;
     }
 
@@ -94,6 +98,7 @@ public class ReceivingController {
         if (body.sample() == null) {
             throw new IllegalArgumentException("Choose a file to receive.");
         }
+        calendar.requireBankingDay(LocalDate.now(clock)); // the Fed doesn't deliver on a weekend or holiday
         fed.deliver(body.sample());
         String fileName = body.sample().name() + ".ach";
         appLog.log(ACH_RCV, "INFO", "User '%s' received sample %s: %s is waiting for the next processing window"
@@ -102,11 +107,12 @@ public class ReceivingController {
     }
 
     /**
-     * Steps 4-5, from the design's SQL. It filters by file, so the page's file comes as fileID; without one, every file is listed.
-     * status filters by the blueprint's processing status, e.g. MANUAL_REVIEW.
+     * Steps 4-5, from the design's SQL. Ba (2026-11-12): the ACH Receiving Transactions screen searches by effective date, start to
+     * end inclusive; fileID (View transactions on the processing screen) and status (e.g. MANUAL_REVIEW) narrow it further.
      */
     @GetMapping("/transactions")
     public Page transactions(@RequestParam(required = false) String fileID, @RequestParam(required = false) String status,
+            @RequestParam(required = false) LocalDate start, @RequestParam(required = false) LocalDate end,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "10") int limit, @RequestParam(defaultValue = "traceNo") String sortBy,
             @RequestParam(defaultValue = "ASC") String sortDir) {
@@ -123,10 +129,18 @@ public class ReceivingController {
             conditions.add("processStatus = ?");
             values.add(status);
         }
+        if ((start == null) != (end == null) || (start != null && start.isAfter(end))) {
+            throw new IllegalArgumentException("Choose a start date on or before the end date.");
+        }
+        if (start != null) {
+            conditions.add("effectiveDt BETWEEN ? AND ?");
+            values.add(start);
+            values.add(end);
+        }
         String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
         Object[] filter = values.toArray();
         Long total = jdbc.queryForObject("SELECT COUNT(*) FROM " + recv + ".ACHRecvTransaction" + where, Long.class, filter);
-        List<Overview> items = jdbc.query("SELECT tranID, amount, creditFlag, originatorID, companyName, recvName, createTm, settlementDt, traceNo, "
+        List<Overview> items = jdbc.query("SELECT tranID, amount, creditFlag, originatorID, companyName, recvName, createTm, effectiveDt, settlementDt, traceNo, "
                 + "processStatus, returnCode FROM " + recv + ".ACHRecvTransaction" + where + " ORDER BY traceNo " + sortDir + ", tranID LIMIT " + limit
                 + " OFFSET " + (page - 1L) * limit, new DataClassRowMapper<>(Overview.class), filter);
         return new Page(items, total == null ? 0 : total, page, limit);

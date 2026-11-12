@@ -31,7 +31,9 @@ The bank is a made-up **Demo Credit Union**, not Navy Federal. The member is you
 5. **EX-01 (invalid value):** click **Edit** on `EXTERNAL_XFER_FEE` (type DECIMAL) and type `abc` as the value. The form shows "Value must be a valid decimal number." and won't save.
 6. **Save:** change the value to `2.50` and click **Save Changes**. You see "Parameter updated successfully. Changes applied to system cache." **Modified by** is now the admin, and **Last modified** is now. The server sets both; the screen can't send them.
 7. **EX-02 (no permission):** a member who calls the parameter API gets 403, and the server writes a WARN row to AppLog. In the demo, the member simply never sees this menu.
-8. Click **Sign out** at the top right.
+8. **ACH Business Rules Management** (Ba, 2026-11-12): click it in the menu. It has the same **App** list. Choose **ACH Receiving UI (ACH_RCV)**: two rules show your columns (name, business description, pseudo code, JSON expression rule, last modified, modified by, **Edit**). The first is your sample: `If companyID = "23416789" && creditIndicator = true set earlyPosting = true`.
+9. Click **Edit** on it and change `"op": "eq"` to `"op": "~"`. **Save Changes** shows "Unknown op "~"; use one of [eq, gt, gte, in, lt, lte, ne]." Click **Cancel**. **Add New Rule** starts from your sample. Receiving runs these rules: a credit a rule marks `earlyPosting` is made available at once (Part 3B, step 6).
+10. Click **Sign out** at the top right.
 
 Keep the $2.50 fee; Part 2 uses it.
 
@@ -72,7 +74,7 @@ Keep the $2.50 fee; Part 2 uses it.
 1. **Review your transfer** shows the fee, the total and the estimated arrival:
    - **Fee $2.50**, from the parameter you changed in Part 1
    - **Total $1,502.50**
-   - **Estimated arrival** date: the next banking day after the transfer date, because the 5 PM file settles the next banking day
+   - **Estimated arrival** date: the next banking day after the transfer date (the demo doesn't promise Same Day settlement yet)
 2. Under **Fee disclosure and transfer terms**, **Confirm Transfer** stays disabled until you tick the box. Tick it and click **Confirm Transfer**.
 
 **Step 7 (confirmation):**
@@ -97,7 +99,7 @@ Keep the $2.50 fee; Part 2 uses it.
 
 ## Part 3: ACH Origination Processing (UC-ACH-EOD-01, Ba's critique of 2026-11-12)
 
-From your blueprint: on the transfer's date, processing windows at 6 AM, 9 AM, 12 PM and 3 PM Eastern (the `ACHOrigSchedule` table) check each transfer again (account, limits, OFAC, hold) and mark it `READY_TO_POST`. **Send to the Fed** puts that schedule's ready transfers in an ACH origination file. Anything ready that no schedule sent goes in the 5 PM file (`FED_FILE_CUTOFF_TIME`), which builds by itself.
+From your blueprint: on the transfer's date, processing windows at 6 AM, 9 AM, 12 PM and 3 PM Eastern (the `ACHOrigSchedule` table) check each transfer again (account, limits, OFAC, hold) and mark it `READY_TO_POST`. **Send to the Fed** puts that schedule's ready transfers in an ACH origination file. Anything ready that isn't sent from its schedule moves to the next business day's 6:00 AM window and goes in that file (Ba, 2026-11-12; there's no 5 PM file any more). On a weekend or holiday the screen shows the next business day, view only, and its buttons are off.
 
 The demo starts with 3 sample transfers from Savings dated today (on a banking day), so the screen has work. Your transfer from Part 2 is dated the next banking day or later, so it shows on that day's screen.
 
@@ -109,6 +111,8 @@ The demo starts with 3 sample transfers from Savings dated today (on a banking d
 6. **EX-02 (the Fed is down):** in a fresh tab (so the sample transfers are back), sign in as **admin** and, in **System Configuration**, set `FED_SIM_FAIL_ATTEMPTS` to `3`. As **achorig**, process a schedule and click **Send to the Fed**: the file ends in **ERROR** with an **Operations alert**. As **admin**, set the parameter back to `0`; as **achorig**, click **Resend**: **SENT**. The full app waits 1 second, then 2, between its 3 tries.
 
 In the full app, every value on this screen comes from the database: `ACHOrigSchedule`, `ACHOrigWindowRun` (one row per window run, with each step's count), `ACHOriginatorTransfer.scheduleID`, and `ACHOrigFile` (with its new `scheduleID`) and `ACHOrigBatch`. A transfer's `processStatus` goes `PENDING_BATCH` at Confirm, `READY_TO_POST` after a window, `PROCESSED` once in a file.
+
+7. **ACH Origination Transactions** (Ba, 2026-11-12): click it in the menu. **Start date** and **End date** are today; the table lists the transfers whose effective date is in that range, with their status, OFAC result and window. Set **End date** a week ahead to see your Part 2 transfer. **Select** shows every column of the transfer, the window that made it ready and the file it went out in. The screen only searches; files are made on ACH Origination Processing.
 
 To see a recurring series, make a Weekly transfer with 3 payments in Part 2. Each payment is its own row with its own date and hold. If the money isn't there on a payment's date, the window rejects that one and the series continues.
 
@@ -128,19 +132,19 @@ From your blueprint, the Fed delivers files to the inbound folder, and the engin
 
 1. Sign out and sign in as **achrecv**. **ACH Receiving Processing** opens with today's date and the 5 schedules.
 2. In **Simulate a file from the Fed**, choose **Sample 1: payroll (valid)** and click **Receive file**. It's under **Waiting for a window: PAYROLL.ach**, and not yet in **Files received**. Click **9:00 AM window**, then **Process window**: steps 2–6 show 1 file, 50 entries, 47 matched / 2 auto-corrected, 1 manual review, 3 returned, 47 memo posted. **Files received** shows it **VALIDATED**, $129,450.00. Do the same with **Sample 2: retail (valid)**: 50 entries, $71,840.00 credits and $1,144.90 debits.
-3. Click **View transactions** on Sample 1. The **ACH Inbound Overview** shows your 9 columns, 10 rows a page, sorted by trace number. Click **Next**.
+3. Click **View transactions** on Sample 1. **ACH Receiving Transactions** shows that file's entries, 10 rows a page, sorted by trace number. Click **Next**. Click **Search by effective date instead**, or the menu item, to search every file by **Start date** and **End date** (today by default, Ba 2026-11-12).
 4. Click **Select** on a row to see all 24 fields.
 5. Back in **ACH Receiving Processing**, try your exceptions (receive, then process a window, each time):
    - **EX-03:** receive Sample 1 again: **DUPLICATE**, no new entries.
    - **EX-02:** choose **Sample 1 with a wrong batch total**: **OUT_OF_BALANCE**, nothing saved, and a rejection notice for the Fed.
-   - **EX-01:** choose **Sample 1 changed in transit**: **REJECTED_SIG_FAIL**, nothing saved, and a Security Operations alert. **View transactions** on it shows "No receiving transactions found in this file batch."
+   - **EX-01:** choose **Sample 1 changed in transit**: **REJECTED_SIG_FAIL**, nothing saved, and a Security Operations alert. **View transactions** on it shows "No receiving transactions in this file."
 
 6. **Processing (your blueprint, steps 4–6).** Each entry's **Status** column shows what happened to it. Use the **Status** filter, and **Select** an entry to see its **Processing** section. In Sample 1:
-   - most entries are **MEMO_POSTED**: the account was found and, as payroll from the trusted Company ID `1900483920` (`TRUSTED_COMPANY_IDS`), the money is available at once;
+   - most entries are **MEMO_POSTED**: the account was found and, as payroll from Company ID `1900483920`, which an **ACH Business Rule** marks `earlyPosting`, the money is available at once;
    - James Thomas (account `987654329019`) is **AUTO_CORRECTED** to `0987654329019` (zero padding), and Laura Anderson (`987654328019`) to `555000328019` (a known alias);
    - three are **REJECTED** with a return code: **R03** (no such account), **R16** (frozen) and **R02** (closed).
 7. In Sample 2, the debits are held (**MEMO_POSTED**) unless they're returned: **R10** (blocked originator), **R08** (stop payment), and the same **R02**, **R16** and **R03** accounts as Sample 1. Credits from other companies stay **RECEIVED** until the end-of-day posting file.
-   - **R01 (no funds)** needs Sample 2 *before* Sample 1 (in the online demo, a fresh tab): then Supplier Kappa's $19.99 debit meets a $5.00 balance. After Sample 1, Kappa already has an $8,500 payment from a trusted company, available at once, so the debit goes through. That's memo posting doing its job.
+   - **R01 (no funds)** needs Sample 2 *before* Sample 1 (in the online demo, a fresh tab): then Supplier Kappa's $19.99 debit meets a $5.00 balance. After Sample 1, Kappa already has an $8,500 payment from an early-posting company, available at once, so the debit goes through. That's memo posting doing its job.
 
 8. **Step 7, the core posting file.** It's written by itself at 7 PM (`CORE_POSTING_TIME`); **Generate now** writes it at once. The screen then shows its name, entry count and totals. It's written once a day.
 
@@ -228,7 +232,7 @@ What's in the database today:
 ## What isn't built yet
 
 The transfer now reaches the (simulated) Fed. The rest of the back office from your System Design isn't built yet:
-- Same Day windows (the processing windows from your blueprint are built; the file still goes once, at 5 PM)
+- Same Day settlement (the processing windows and per-schedule files are built; the effective date is still the next banking day)
 - sending the returns to the Fed (they're recorded, waiting as `PENDING`)
 - the engines and actions behind NOCs, reversals and resubmissions (their screens are read-only)
 - a screen for the receiving manual-review queue

@@ -128,7 +128,7 @@ public class OriginationProcessingController {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record Today(LocalDate businessDate, List<Schedule> schedules, int waitingForCompliance) {
+    public record Today(LocalDate businessDate, boolean bankingDay, List<Schedule> schedules, int waitingForCompliance) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -163,10 +163,12 @@ public class OriginationProcessingController {
     private final AppLogRepository appLog;
     private final Clock clock;
     private final com.achpayments.outbound.EodFileJob fileJob;
+    private final com.achpayments.common.BankingCalendar calendar;
     private final String orig;
 
     public OriginationProcessingController(OriginationWindow window, TransferService transfers, OfacScreening ofac, JdbcTemplate jdbc,
-            AppLogRepository appLog, Clock clock, com.achpayments.outbound.EodFileJob fileJob, @Value("${app.db.origination}") String orig) {
+            AppLogRepository appLog, Clock clock, com.achpayments.outbound.EodFileJob fileJob, com.achpayments.common.BankingCalendar calendar,
+            @Value("${app.db.origination}") String orig) {
         this.window = window;
         this.transfers = transfers;
         this.ofac = ofac;
@@ -174,6 +176,7 @@ public class OriginationProcessingController {
         this.appLog = appLog;
         this.clock = clock;
         this.fileJob = fileJob;
+        this.calendar = calendar;
         this.orig = orig;
     }
 
@@ -184,16 +187,17 @@ public class OriginationProcessingController {
         if (time == null || !time.matches("\\d{2}:\\d{2}")) {
             throw new IllegalArgumentException("window_time must be a time like 12:00.");
         }
+        calendar.requireBankingDay(LocalDate.now(clock));
         appLog.log(ACH_ORIG, "INFO", "User '%s' triggered origination window %s".formatted(user.getName(), time));
         OriginationWindow.Run run = window.run(LocalDate.now(clock), time, user.getName());
         return new WindowResponse(run.windowId(), "COMPLETED", "ACH processing window %s: %d due, %d ready to post, %d flagged, %d rejected."
                 .formatted(time, run.extracted(), run.ready(), run.flagged(), run.rejected()), 0);
     }
 
-    /** The screen: today's date, the schedule, each window's last run today, and step 5's queue. */
+    /** The screen: today's date (the next banking day on a weekend or holiday), the schedule, each window's last run, and step 5's queue. */
     @GetMapping("/api/v1/ach/processing/windows")
     public Today windows() {
-        LocalDate today = LocalDate.now(clock);
+        LocalDate today = calendar.businessDate(LocalDate.now(clock));
         Map<String, WindowRun> last = new java.util.HashMap<>();
         for (Map<String, Object> r : window.runs(today)) { // in run order, so the last one wins
             last.put((String) r.get("windowTime"), new WindowRun((String) r.get("windowID"), n(r, "extractedCnt"), n(r, "acctRejectCnt"),
@@ -204,7 +208,7 @@ public class OriginationProcessingController {
                 .map(w -> new Schedule(w.scheduleId(), w.windowTime(), w.windowName(), last.get(w.windowTime()))).toList();
         Integer waiting = jdbc.queryForObject("SELECT COUNT(*) FROM " + orig + ".ACHOriginatorTransfer WHERE ofacStatus = 'FLAGGED' "
                 + "AND transferVersion = 1", Integer.class);
-        return new Today(today, schedules, waiting == null ? 0 : waiting);
+        return new Today(today, calendar.isBankingDay(LocalDate.now(clock)), schedules, waiting == null ? 0 : waiting);
     }
 
     /** The transactions ready to be sent to the Fed for today and the schedule: the ones that window made READY_TO_POST. */
@@ -215,7 +219,7 @@ public class OriginationProcessingController {
                 + "AND a.recvAcctVersion = t.recvAcctVersion WHERE t.processStatus = 'READY_TO_POST' AND t.scheduleID = ? "
                 + "AND t.effectiveDt <= ? AND t.transferVersion = 1 ORDER BY t.transferSerNo",
                 (rs, i) -> new Ready(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBigDecimal(4), rs.getObject(5, LocalDate.class),
-                        rs.getObject(6, LocalDateTime.class)), scheduleId, LocalDate.now(clock));
+                        rs.getObject(6, LocalDateTime.class)), scheduleId, calendar.businessDate(LocalDate.now(clock)));
     }
 
     /** Send to the Fed: creates the ACH origination file of that schedule's ready transactions, and sends it. */
@@ -224,6 +228,7 @@ public class OriginationProcessingController {
         OriginationWindow.Window w = window.schedule().stream().filter(x -> body.scheduleId() != null && x.scheduleId() == body.scheduleId())
                 .findFirst().orElseThrow(() -> new IllegalArgumentException("Choose a schedule."));
         LocalDate today = LocalDate.now(clock);
+        calendar.requireBankingDay(today);
         String windowId = "WIN-" + today.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" + w.windowTime().replace(":", "");
         var result = fileJob.sendNow(today, windowId, w.scheduleId());
         appLog.log(ACH_ORIG, "ERROR".equals(result.fedStatus()) ? "ERROR" : "INFO", "User '%s' sent the %s schedule to the Fed: %s"
@@ -238,7 +243,7 @@ public class OriginationProcessingController {
                 + "FROM " + orig + ".ACHOrigFile WHERE scheduleID = ? AND fileHeaderDt = ? ORDER BY fileID",
                 (rs, i) -> new FileRow(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getObject(4, LocalDate.class),
                         rs.getObject(5, java.time.LocalTime.class), rs.getInt(6), rs.getBigDecimal(7), rs.getString(8),
-                        rs.getObject(9, LocalDateTime.class), batches(rs.getString(1))), scheduleId, LocalDate.now(clock));
+                        rs.getObject(9, LocalDateTime.class), batches(rs.getString(1))), scheduleId, calendar.businessDate(LocalDate.now(clock)));
     }
 
     private List<Batch> batches(String fileID) {
@@ -246,6 +251,59 @@ public class OriginationProcessingController {
                 + "FROM " + orig + ".ACHOrigBatch WHERE fileID = ? ORDER BY batchNo",
                 (rs, i) -> new Batch(rs.getString(1), rs.getInt(2), rs.getString(3), rs.getString(4), rs.getString(5),
                         rs.getObject(6, LocalDate.class), rs.getInt(7), rs.getBigDecimal(8)), fileID);
+    }
+
+    // ---- Ba (2026-11-12): the ACH Origination Transactions screen. Search and view only; files are made on the processing screen. ----
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record Txn(String transferId, String memberNo, String recipientName, String routingNumber, BigDecimal amount, LocalDate effectiveDt,
+            String processStatus, String ofacStatus, String windowName, LocalDateTime createdAt) {
+    }
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record TxnPage(List<Txn> items, long total, int page, int limit) {
+    }
+
+    /** Transfers whose effective date is from start to end (inclusive); status narrows it to one processStatus. */
+    @GetMapping("/api/v1/ach/origination/transactions")
+    public TxnPage transactions(@RequestParam LocalDate start, @RequestParam LocalDate end, @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "10") int limit) {
+        if (start.isAfter(end)) {
+            throw new IllegalArgumentException("Choose a start date on or before the end date.");
+        }
+        if (page < 1 || limit < 1 || limit > 100) {
+            throw new IllegalArgumentException("Invalid page or limit.");
+        }
+        boolean byStatus = status != null && !status.isBlank();
+        String where = " WHERE t.transferVersion = 1 AND t.effectiveDt BETWEEN ? AND ?" + (byStatus ? " AND t.processStatus = ?" : "");
+        Object[] args = byStatus ? new Object[] {start, end, status} : new Object[] {start, end};
+        Long total = jdbc.queryForObject("SELECT COUNT(*) FROM " + orig + ".ACHOriginatorTransfer t" + where, Long.class, args);
+        List<Txn> items = jdbc.query("SELECT t.transferSerNo, t.memberNo, a.acctOwner, a.routingNo, t.transferAmt, t.effectiveDt, t.processStatus, "
+                + "t.ofacStatus, s.windowName, t.createTm FROM " + orig + ".ACHOriginatorTransfer t JOIN " + orig + ".ACHOrigRecvAccount a "
+                + "ON a.recvAcctSerNo = t.recvAcctSerNo AND a.recvAcctVersion = t.recvAcctVersion LEFT JOIN " + orig + ".ACHOrigSchedule s "
+                + "ON s.scheduleID = t.scheduleID" + where + " ORDER BY t.effectiveDt, t.transferSerNo LIMIT " + limit + " OFFSET " + (page - 1L) * limit,
+                (rs, i) -> new Txn(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getBigDecimal(5),
+                        rs.getObject(6, LocalDate.class), rs.getString(7), rs.getString(8), rs.getString(9), rs.getObject(10, LocalDateTime.class)),
+                args);
+        return new TxnPage(items, total == null ? 0 : total, page, limit);
+    }
+
+    /**
+     * One transfer: every ACHOriginatorTransfer column (t.*, so a column added later shows without a code change), its recipient,
+     * its window, and the file it went out in.
+     */
+    @GetMapping("/api/v1/ach/origination/transactions/{transferId}")
+    public Map<String, Object> transaction(@PathVariable String transferId) {
+        return jdbc.queryForList("SELECT t.*, a.acctOwner AS recvName, a.routingNo AS recvRoutingNo, a.acctNo AS recvAcctNo, "
+                + "s.windowName, (SELECT MAX(x.fileID) FROM " + orig + ".ACHOrigTransaction x WHERE x.transferSerNo = t.transferSerNo) AS fileID "
+                + "FROM " + orig + ".ACHOriginatorTransfer t JOIN " + orig + ".ACHOrigRecvAccount a ON a.recvAcctSerNo = t.recvAcctSerNo "
+                + "AND a.recvAcctVersion = t.recvAcctVersion LEFT JOIN " + orig + ".ACHOrigSchedule s ON s.scheduleID = t.scheduleID "
+                + "WHERE t.transferSerNo = ? AND t.transferVersion = 1", transferId).stream().findFirst()
+                .map(row -> {
+                    row.replaceAll((k, v) -> v instanceof java.sql.Date d ? d.toLocalDate() : v); // a DATE as 2026-11-06, not a UTC instant
+                    return row;
+                })
+                .orElseThrow(() -> new IllegalArgumentException("No such transfer " + transferId + "."));
     }
 
     private static int n(Map<String, Object> row, String column) {

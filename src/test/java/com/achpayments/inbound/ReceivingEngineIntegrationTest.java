@@ -166,7 +166,7 @@ class ReceivingEngineIntegrationTest {
     @Test
     void mapsAnEntryAsInTheFieldList() throws IOException {
         Result r = receive(Sample.PAYROLL);
-        Page page = controller.transactions(r.fileID(), null, 1, 10, "traceNo", "ASC");
+        Page page = controller.transactions(r.fileID(), null, null, null, 1, 10, "traceNo", "ASC");
         Detail d = controller.transaction(page.items().get(0).tranID());
         assertTrue(d.transferSerNo().matches("TRF-\\d{8}-\\d{4}"), d.transferSerNo());
         assertEquals(1, d.transferVersion());
@@ -327,7 +327,7 @@ class ReceivingEngineIntegrationTest {
         deliverText("EMPTY.ach", text.toString().replaceFirst("0830A", "0831D"));
         Result r = only(engine.ingestAll());
         assertEquals("VALIDATED", r.processStatus());
-        Page page = controller.transactions(r.fileID(), null, 1, 10, "traceNo", "ASC");
+        Page page = controller.transactions(r.fileID(), null, null, null, 1, 10, "traceNo", "ASC");
         assertEquals(0, page.total());
         assertTrue(page.items().isEmpty());
     }
@@ -361,32 +361,44 @@ class ReceivingEngineIntegrationTest {
     @Test
     void pagesAreTenRowsSortedByTraceNumber() throws IOException {
         Result r = receive(Sample.PAYROLL);
-        Page first = controller.transactions(r.fileID(), null, 1, 10, "traceNo", "ASC");
+        Page first = controller.transactions(r.fileID(), null, null, null, 1, 10, "traceNo", "ASC");
         assertEquals(50, first.total());
         assertEquals(10, first.items().size());
         assertEquals("198765430000001", first.items().get(0).traceNo());
         assertEquals("198765430000010", first.items().get(9).traceNo());
-        Page fifth = controller.transactions(r.fileID(), null, 5, 10, "traceNo", "ASC");
+        Page fifth = controller.transactions(r.fileID(), null, null, null, 5, 10, "traceNo", "ASC");
         assertEquals("198765430000041", fifth.items().get(0).traceNo());
         assertEquals("198765430000050", fifth.items().get(9).traceNo());
-        assertTrue(controller.transactions(r.fileID(), null, 6, 10, "traceNo", "ASC").items().isEmpty());
-        assertEquals("198765430000050", controller.transactions(r.fileID(), null, 1, 10, "traceNo", "DESC").items().get(0).traceNo());
+        assertTrue(controller.transactions(r.fileID(), null, null, null, 6, 10, "traceNo", "ASC").items().isEmpty());
+        assertEquals("198765430000050", controller.transactions(r.fileID(), null, null, null, 1, 10, "traceNo", "DESC").items().get(0).traceNo());
+    }
+
+    @Test
+    void transactionsSearchByEffectiveDateStartToEndInclusive() throws IOException {
+        Result r = receive(Sample.PAYROLL);
+        LocalDate effective = controller.transaction(controller.transactions(r.fileID(), null, null, null, 1, 10, "traceNo", "ASC")
+                .items().get(0).tranID()).effectiveDt();
+        assertEquals(50, controller.transactions(r.fileID(), null, effective, effective, 1, 10, "traceNo", "ASC").total());
+        assertEquals(50, controller.transactions(r.fileID(), null, effective.minusDays(3), effective, 1, 10, "traceNo", "ASC").total());
+        assertEquals(0, controller.transactions(r.fileID(), null, effective.plusDays(1), effective.plusDays(9), 1, 10, "traceNo", "ASC").total());
+        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, effective, effective.minusDays(1), 1, 10, "traceNo", "ASC"));
+        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, effective, null, 1, 10, "traceNo", "ASC"));
     }
 
     @Test
     void transactionsOnlyListTheFileAskedFor() throws IOException {
         Result payroll = receive(Sample.PAYROLL);
         receive(Sample.RETAIL);
-        assertEquals(50, controller.transactions(payroll.fileID(), null, 1, 10, "traceNo", "ASC").total());
-        assertTrue(controller.transactions(null, null, 1, 10, "traceNo", "ASC").total() >= 100);
+        assertEquals(50, controller.transactions(payroll.fileID(), null, null, null, 1, 10, "traceNo", "ASC").total());
+        assertTrue(controller.transactions(null, null, null, null, 1, 10, "traceNo", "ASC").total() >= 100);
     }
 
     @Test
     void badPagingAndUnknownIdsAreRefused() {
-        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, 0, 10, "traceNo", "ASC"));
-        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, 1, 101, "traceNo", "ASC"));
-        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, 1, 10, "amount; DROP TABLE x", "ASC"));
-        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, 1, 10, "traceNo", "sideways"));
+        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, null, null, 0, 10, "traceNo", "ASC"));
+        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, null, null, 1, 101, "traceNo", "ASC"));
+        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, null, null, 1, 10, "amount; DROP TABLE x", "ASC"));
+        assertThrows(IllegalArgumentException.class, () -> controller.transactions(null, null, null, null, 1, 10, "traceNo", "sideways"));
         assertThrows(EmptyResultDataAccessException.class, () -> controller.transaction(-1));
     }
 

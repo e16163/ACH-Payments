@@ -115,6 +115,14 @@ class EodFileJobIntegrationTest {
                 count, "RENT")).transferSerNo();
     }
 
+    /** A business day without the 5 PM file: the first window (6 AM, which also takes leftovers), then Send to the Fed for it. */
+    private EodFileJob.RunResult run(LocalDate day) {
+        var first = window.schedule().get(0);
+        window.run(day, first.windowTime());
+        // "EOD-0-…" sorts before the send attempts' "EOD-<timestamp>-A1" IDs, so actions() lists FILE_QUEUED first
+        return job.sendNow(day, "EOD-0-" + day.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE), first.scheduleId());
+    }
+
     private String status(String serNo) {
         return jdbc.queryForObject("SELECT processStatus FROM " + orig + ".ACHOriginatorTransfer WHERE transferSerNo = ?", String.class, serNo);
     }
@@ -142,7 +150,7 @@ class EodFileJobIntegrationTest {
     void aTransferEndsProcessedAndSentInAValidFile() throws IOException {
         String serNo = submit("Jane Smith", "1500.00", "Rent");
 
-        EodFileJob.RunResult result = job.run(date);
+        EodFileJob.RunResult result = run(date);
 
         assertEquals("SENT", result.fedStatus());
         assertEquals(1, count("SELECT COUNT(*) FROM AppLog WHERE systemID = 'ACH_ORIG' AND logLevel = 'INFO' AND logMesg = ?",
@@ -180,7 +188,7 @@ class EodFileJobIntegrationTest {
     void onlyTransfersDueByTheBusinessDateGoInTheFile() {
         String due = submit("Jane Smith", "10.00", "Rent");
         jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET effectiveDt = DATE_ADD(effectiveDt, INTERVAL 7 DAY) WHERE transferSerNo = ?", due);
-        assertNull(job.run(date).fileID());
+        assertNull(run(date).fileID());
         assertEquals("PENDING_BATCH", status(due));
     }
 
@@ -189,7 +197,7 @@ class EodFileJobIntegrationTest {
         submit("Jane Smith", "10.00", "Rent");
         submit("Bob Jones", "20.00", "Rent");
         submit("Amy Lee", "30.00", null);
-        AchFile sent = sentFile(job.run(date).fileID());
+        AchFile sent = sentFile(run(date).fileID());
         assertEquals(2, sent.batches().size());
         assertEquals("RENT", sent.batches().get(0).header().companyEntryDescription());
         assertEquals(2, sent.batches().get(0).entries().size());
@@ -201,7 +209,7 @@ class EodFileJobIntegrationTest {
     @Test
     void aMemoThatIsAReservedNachaWordIsNotSentAsTheEntryDescription() throws IOException {
         submit("Jane Smith", "10.00", "Reversal");
-        AchFile sent = sentFile(job.run(date).fileID());
+        AchFile sent = sentFile(run(date).fileID());
         assertEquals("TRANSFER", sent.batches().get(0).header().companyEntryDescription());
     }
 
@@ -209,12 +217,12 @@ class EodFileJobIntegrationTest {
     void notABankingDayBuildsNoFile() {
         submit("Jane Smith", "10.00", "Rent");
         LocalDate saturday = date.with(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.SATURDAY));
-        assertNull(job.run(saturday).fileID());
+        assertNull(run(saturday).fileID());
     }
 
     @Test
     void nothingDueBuildsNoFile() {
-        assertNull(job.run(date).fileID());
+        assertNull(run(date).fileID());
     }
 
     // ---- idempotency ----
@@ -222,8 +230,8 @@ class EodFileJobIntegrationTest {
     @Test
     void runningTwiceDuplicatesNothing() {
         String serNo = submit("Jane Smith", "10.00", "Rent");
-        String fileID = job.run(date).fileID();
-        assertNull(job.run(date).fileID());
+        String fileID = run(date).fileID();
+        assertNull(run(date).fileID());
         assertEquals(1, count("SELECT COUNT(*) FROM " + orig + ".ACHOrigTransaction WHERE transferSerNo = ?", serNo));
         assertEquals(List.of("FILE_QUEUED", "FED_SEND"), actions(fileID));
     }
@@ -235,11 +243,33 @@ class EodFileJobIntegrationTest {
         String fileID = store.compile(date, "EOD-TEST-INTERRUPTED").orElseThrow(); // the job died before sending
         String expected = store.fileText(fileID);
 
-        assertNull(job.run(date).fileID());
+        assertNull(run(date).fileID());
 
         assertEquals("SENT", store.fedStatus(fileID));
         assertEquals(expected, Files.readString(Path.of(outbound, fileID + ".ach")));
         assertEquals(1, count("SELECT COUNT(*) FROM " + orig + ".ACHOrigTransaction WHERE transferSerNo = ?", serNo));
+    }
+
+    // ---- Ba (2026-11-12): ready but not sent goes at the next business day's 6 AM ----
+
+    @Test
+    void aTransferReadyButNotSentGoesInTheNextBusinessDaysSixAmFile() {
+        String leftover = submit("Jane Smith", "10.00", "Rent");
+        window.run(date, "15:00"); // ready in the 3 PM window, but nobody pressed Send to the Fed
+        String today = submit("Bob Jones", "20.00", "Rent");
+        LocalDate next = calendar.nextBankingDay(date);
+        window.run(next, "09:00"); // not the first window: it carries nothing over
+        // processTm is the database's NOW(); put each where its window would have been on those days
+        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processTm = ? WHERE transferSerNo = ?", date.atTime(15, 0), leftover);
+        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processTm = ? WHERE transferSerNo = ?", next.atTime(9, 0), today);
+        assertEquals(1, count("SELECT COUNT(*) FROM " + orig + ".ACHOriginatorTransfer t JOIN " + orig + ".ACHOrigSchedule s "
+                + "ON s.scheduleID = t.scheduleID WHERE t.transferSerNo = ? AND s.windowTime = '15:00'", leftover));
+
+        String fileID = run(next).fileID(); // 6 AM, then Send to the Fed for it
+
+        assertEquals("PROCESSED", status(leftover));
+        assertEquals("READY_TO_POST", status(today)); // the 9 AM window's, not a leftover yet
+        assertEquals(1, count("SELECT COUNT(*) FROM " + orig + ".ACHOrigTransaction WHERE fileID = ?", fileID));
     }
 
     // ---- EX-01 ----
@@ -248,7 +278,7 @@ class EodFileJobIntegrationTest {
     void aFlaggedItemStaysOutAndTheCleanOnesProceed() throws IOException {
         String clean = submit("Jane Smith", "10.00", "Rent");
         String flagged = submit("Blocked Test Person", "20.00", "Rent");
-        AchFile sent = sentFile(job.run(date).fileID());
+        AchFile sent = sentFile(run(date).fileID());
         assertEquals(1, sent.batches().get(0).entries().size());
         assertEquals("PROCESSED", status(clean));
         assertEquals("PENDING", status(flagged));
@@ -259,7 +289,7 @@ class EodFileJobIntegrationTest {
     void aNameListedAfterSubmitIsCaughtDuringCompilation() {
         String serNo = submit("Later Listed Person", "10.00", "Rent");
         jdbc.update("INSERT INTO OfacSdnName (sdnName, program) VALUES ('LATER LISTED PERSON', 'DEMO')");
-        assertNull(job.run(date).fileID());
+        assertNull(run(date).fileID());
         assertEquals("PENDING", status(serNo));
         assertEquals("FLAGGED", jdbc.queryForObject("SELECT ofacStatus FROM " + orig + ".ACHOriginatorTransfer WHERE transferSerNo = ?", String.class, serNo));
     }
@@ -270,7 +300,7 @@ class EodFileJobIntegrationTest {
     void twoFailuresThenSuccessEndsSent() {
         submit("Jane Smith", "10.00", "Rent");
         failures(2);
-        EodFileJob.RunResult r = job.run(date);
+        EodFileJob.RunResult r = run(date);
         assertEquals("SENT", r.fedStatus());
         assertEquals(List.of("FILE_QUEUED", "FED_SEND_FAILED", "FED_SEND_FAILED", "FED_SEND"), actions(r.fileID()).stream().sorted(
                 java.util.Comparator.comparingInt(List.of("FILE_QUEUED", "FED_SEND_FAILED", "FED_SEND")::indexOf)).toList());
@@ -280,13 +310,13 @@ class EodFileJobIntegrationTest {
     void threeFailuresEndInErrorWithAFatalLog_andAResendWorks() {
         submit("Jane Smith", "10.00", "Rent");
         failures(3);
-        EodFileJob.RunResult r = job.run(date);
+        EodFileJob.RunResult r = run(date);
         assertEquals("ERROR", r.fedStatus());
         assertEquals("ERROR", store.fedStatus(r.fileID()));
         assertEquals(1, count("SELECT COUNT(*) FROM AppLog WHERE logLevel = 'FATAL' AND logMesg LIKE ?", "%" + r.fileID() + " could not be sent%"));
         assertTrue(actions(r.fileID()).contains("FILE_ERROR"));
 
-        assertNull(job.run(date).fileID()); // a rerun doesn't touch a file in ERROR
+        assertNull(run(date).fileID()); // a rerun doesn't touch a file in ERROR
         assertEquals("ERROR", store.fedStatus(r.fileID()));
 
         failures(0);
@@ -299,7 +329,7 @@ class EodFileJobIntegrationTest {
     @Test
     void theAuditTrailCannotBeChanged() {
         submit("Jane Smith", "10.00", "Rent");
-        String fileID = job.run(date).fileID();
+        String fileID = run(date).fileID();
         assertThrows(DataAccessException.class, () -> jdbc.update("UPDATE " + orig + ".ACHOrigFedAction SET lastModBy = 'hacker' WHERE fileID = ?", fileID));
         assertThrows(DataAccessException.class, () -> jdbc.update("DELETE FROM " + orig + ".ACHOrigFedAction WHERE fileID = ?", fileID));
     }
@@ -309,7 +339,7 @@ class EodFileJobIntegrationTest {
     @Test
     void eachPaymentOfASeriesIsItsOwnRowAndEntry() {
         String first = submitSeries("WEEKLY", 3);
-        assertEquals("SENT", job.run(date).fedStatus());
+        assertEquals("SENT", run(date).fedStatus());
 
         var second = jdbc.queryForMap("SELECT transferSerNo, transferReqNo, transferReqRemaining, effectiveDt, memoStatus FROM " + orig
                 + ".ACHOriginatorTransfer WHERE pTransferSerNo = ?", first);
@@ -320,13 +350,13 @@ class EodFileJobIntegrationTest {
 
         LocalDate nextDate = ((java.sql.Date) second.get("effectiveDt")).toLocalDate();
         assertEquals(dates.occurrence(date, "WEEKLY", 1), nextDate);
-        assertEquals("SENT", job.run(nextDate).fedStatus());
+        assertEquals("SENT", run(nextDate).fedStatus());
         assertEquals(new BigDecimal("19800.00"), available());
         assertEquals("PROCESSED", status((String) second.get("transferSerNo")));
         assertEquals("R", jdbc.queryForObject("SELECT transactionDiscData FROM " + orig + ".ACHOrigTransaction WHERE transferSerNo = ?", String.class, first));
 
         LocalDate thirdDate = dates.occurrence(date, "WEEKLY", 2);
-        job.run(thirdDate);
+        run(thirdDate);
         assertEquals(3, count("SELECT COUNT(*) FROM " + orig + ".ACHOriginatorTransfer WHERE memberNo = ?", MEMBER)); // and no fourth
         assertEquals(0, count("SELECT COUNT(*) FROM " + orig + ".ACHOriginatorTransfer WHERE memberNo = ? AND processStatus = 'PENDING_BATCH'", MEMBER));
     }
@@ -334,17 +364,17 @@ class EodFileJobIntegrationTest {
     @Test
     void shortFundsRejectThatPaymentAndTheSeriesContinues() {
         String first = submitSeries("WEEKLY", 3);
-        job.run(date);
+        run(date);
         String second = jdbc.queryForObject("SELECT transferSerNo FROM " + orig + ".ACHOriginatorTransfer WHERE pTransferSerNo = ?", String.class, first);
         jdbc.update("UPDATE SimCoreAccount SET availBal = 50.00 WHERE acctNo = ?", CHECKING);
 
-        assertNull(job.run(dates.occurrence(date, "WEEKLY", 1)).fileID());
+        assertNull(run(dates.occurrence(date, "WEEKLY", 1)).fileID());
 
         assertEquals("REJECTED", status(second));
         assertEquals(new BigDecimal("50.00"), available());
         assertEquals(0, count("SELECT COUNT(*) FROM " + orig + ".ACHOrigTransaction WHERE transferSerNo = ?", second));
         jdbc.update("UPDATE SimCoreAccount SET availBal = 500.00 WHERE acctNo = ?", CHECKING);
-        assertEquals("SENT", job.run(dates.occurrence(date, "WEEKLY", 2)).fedStatus());
+        assertEquals("SENT", run(dates.occurrence(date, "WEEKLY", 2)).fedStatus());
     }
 
     @Test

@@ -169,6 +169,28 @@ class ReceivingBlueprintIntegrationTest {
     }
 
     @Test
+    void aCreditFromBasEarlyPostingCompanyIsMadeAvailableAtOnce() throws IOException {
+        fed.deliver(Sample.RETAIL);
+        String raw = Files.readString(inbound.resolve("RETAIL.ach"));
+        Files.delete(inbound.resolve("RETAIL.ach"));
+        Files.delete(inbound.resolve("RETAIL.ach.sig"));
+        String fileID = api.validate(new ValidateRequest(null, raw, true)).fileId();
+        api.extract(new FileRequest(fileID, null));
+        api.transcodes(new FileRequest(fileID, null));
+        api.rejections(new FileRequest(fileID, null));
+        // the GLOBAL B2B AR credit, as if it came from Company ID 23416789 (Ba's sample rule, seeded in V20)
+        jdbc.update("UPDATE " + recv + ".ACHRecvTransaction SET companyID = '23416789' WHERE fileID = ? AND stdEntryCode = 'CCD' "
+                + "AND recvAcctID = '987654501019'", fileID);
+
+        api.memoPost(new FileRequest(fileID, true));
+
+        Map<String, Object> credit = jdbc.queryForMap("SELECT processStatus, memoPostedTm, creditFlag FROM " + recv
+                + ".ACHRecvTransaction WHERE fileID = ? AND recvAcctID = '987654501019'", fileID);
+        assertEquals("MEMO_POSTED", credit.get("processStatus"));
+        assertTrue(credit.get("memoPostedTm") != null);
+    }
+
+    @Test
     void thePostingFilePostsReadyEntriesOnceAndSkipsRejectedOnes() throws IOException {
         String fileID = receive(Sample.RETAIL);
 

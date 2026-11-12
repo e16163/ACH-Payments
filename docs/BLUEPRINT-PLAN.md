@@ -171,6 +171,91 @@ Decisions (asked and answered 2026-11-12):
 | Screens | `AchOriginationProcessingPage.tsx`, `AchReceivingProcessingPage.tsx` (routes `#/ach-origination-processing`, `#/ach-receiving-processing`) |
 | Tests | `OriginationWindowIntegrationTest.aScheduleListsAndSendsOnlyTheTransfersItMadeReady`, `ReceivingBlueprintIntegrationTest.aReceivedFileWaitsForAWindowAndTheWindowRunIsKept`, the demo's `server.test.ts` |
 
+### 4B. Ba's follow-up (2026-11-12, after 4A): ✅ built
+
+Ba asked for four things:
+1. "Anything ready that isn't sent in the schedule, it will be sent next business day at 6AM"
+2. "If today is a holiday or weekend, display next business day"
+3. A new **ACH Origination Transactions** screen. You choose a start date and an end date, both today by default, and it lists the ACH origination transactions in that range with their details. You can't send from it: the file is still made on ACH Origination Processing.
+4. The same for receiving: ACH Receiving Transactions, beside ACH Receiving Processing.
+
+What changes, smallest first:
+
+| # | Change | Where | DB |
+| --- | --- | --- | --- |
+| 1 | **Leftovers go at 6 AM.** When the 6 AM window runs, every transfer still `READY_TO_POST` from an earlier day gets the 6 AM `scheduleID`. It then shows in the 6 AM ready list and goes in that file. The 5 PM sweep stops making a file (see Q1). | `OriginationWindow.run` (one UPDATE), `EodScheduler`/`EodFileJob.run`, the page hint | none |
+| 2 | **Next business day.** On a weekend or holiday, both processing screens show `calendar.nextBankingDay(today)`, plus a line saying today isn't a banking day (see Q2 for the buttons). | `OriginationProcessingController.windows`, `ReceivingProcessingController.windows` (`business_date`), both pages | none |
+| 3 | **ACH Origination Transactions.** `GET /api/v1/ach/origination/transactions?start=&end=&status=&page=&limit=`, paged like the receiving one. A detail route returns the full `ACHOriginatorTransfer` row. A new page has two date pickers (default today), a status filter, a table and a detail panel, with the same layout as `AchReceivingTransactionPage`. | new controller method, new `AchOriginationTransactionPage.tsx`, nav link, route, demo server | `IX_ACHOriginatorTransfer_EffectiveDt` (V20), if Q3 = effective date |
+| 4 | **ACH Receiving Transactions by date.** The existing page swaps its file picker for start/end dates (default today). `GET …/receiving/transactions` takes `start`/`end`; `fileID` stays, so "View transactions" on the processing screen still works. | `ReceivingController.transactions`, `AchReceivingTransactionPage.tsx`, demo server | none (`IX_ACHRecvTransaction_EffectiveDt` exists) |
+
+Checks: an integration test for each of 1 (a leftover moves to 6 AM, and nothing else does) and 3/4 (the range is inclusive; start after end is a 400; the default is today). A Clock-fixed test for 2 on a Saturday. Then the frontend and demo tests, and a browser click-through on local Tomcat.
+
+Not doing: CSV export, a range limit (paging covers it), and any send or process button on the transaction screens.
+
+Decisions (answered 2026-11-12):
+- **Q1, leftovers:** the 5 PM file goes away. The next business day's 6 AM window moves leftovers into its ready list, and the operator presses **Send to the Fed** as for any other schedule. `/eod/run` and `EodScheduler` go away along with it.
+- **Q2, weekend or holiday:** the screens show the next business day as view only. Process window, Send to the Fed and Receive file are disabled until that day, and the API refuses them on a non-banking day.
+- **Q3, date field:** both transaction screens search on the **effective date** (`effectiveDt`). V20 adds `IX_ACHOriginatorTransfer_EffectiveDt`.
+
+### 4C. Ba: ACH Business Rules Management (2026-11-12): ✅ built
+
+Ba: a new admin page beside System Configuration, called **ACH Business Rules Management**. It shows the same app list as System Configuration and a table with these columns: ACH Business Rule Name, Business Description, Pseudo Code, JSON Expression Rule, Last Modified, Modified By, and an Edit button. Store the rules in a new table, and seed JSON samples, starting with `If companyID = "23416789" && creditIndicator = true set earlyPosting = true`.
+
+**Table (V20, main schema beside `AppParam`):**
+
+```sql
+CREATE TABLE ACHBusinessRule (
+    ruleID       BIGINT AUTO_INCREMENT NOT NULL,
+    systemName   VARCHAR(30)  NOT NULL,          -- the app, as in AppParam (ParamApps)
+    ruleName     VARCHAR(100) NOT NULL,          -- ACH Business Rule Name
+    ruleDesc     VARCHAR(500) NULL,              -- Business Description
+    pseudoCode   VARCHAR(2000) NOT NULL,         -- Pseudo Code
+    ruleJson     JSON NOT NULL,                  -- JSON Expression Rule; MySQL rejects invalid JSON
+    lastModTm    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    lastModBy    VARCHAR(50) NOT NULL,
+    CONSTRAINT PK_ACHBusinessRule PRIMARY KEY (ruleID),
+    CONSTRAINT UQ_ACHBusinessRule_Name UNIQUE (systemName, ruleName)
+);
+```
+
+**Sample JSON** (Ba's rule, in `ACH_RCV`):
+
+```json
+{
+  "when": { "all": [
+    { "field": "companyID",       "op": "eq", "value": "23416789" },
+    { "field": "creditIndicator", "op": "eq", "value": true }
+  ]},
+  "then": [ { "set": "earlyPosting", "value": true } ]
+}
+```
+
+Decisions (answered 2026-11-12): **the rules run**. Admins get **Edit** and **New**, but no delete. The JSON uses the simple **when/then** format above.
+
+**What earlyPosting means:** receiving step 6 already does it. A credit from a trusted Company ID is memo posted at once, so the money is available before settlement, and the other credits wait for the posting file. Today the trusted list is our own parameter `ACH_RCV/TRUSTED_COMPANY_IDS` (decision Q6, section 6), not Ba's. The plan is to **replace that parameter with the rules**. In `ReceivedEntryProcessor.memoPost`, a credit is posted at once when an active `ACH_RCV` rule sets `earlyPosting = true` for it. Two rules are seeded:
+- Ba's `23416789`
+- `1900483920`, the ID now in the parameter, so the demo's payroll file behaves as it does today
+
+V20 deletes the parameter row.
+
+**Evaluator** (`rules/BusinessRuleEngine.java`, about 40 lines, with no library):
+- `when` takes `all` or `any` over `{field, op, value}`.
+- `op` is one of `eq`, `ne`, `in`, `gt`, `gte`, `lt`, `lte`.
+- `then` is a list of `{set, value}`.
+- Facts are built from an entry: `companyID`, `creditIndicator` (`creditFlag = 1`), `amount`, `stdEntryCode`, `companyEntryDesc` and `tranCode`.
+
+The PUT/POST runs the same parser, so an unknown field, op or shape is a 400 before it's saved. A rule that fails to load at run time is logged FATAL and skipped. Rules of the other apps are stored and edited only, since nothing reads them yet.
+
+**Pieces:**
+- **API (SYS_ADMIN):** `GET /api/ach-business-rules?systemName=`, `POST /api/ach-business-rules` and `PUT /api/ach-business-rules/{ruleID}`. The app list reuses `GET /api/params/systems`. A save writes an AppLog line, like a parameter save.
+- **Page:** `rules/BusinessRulePage.tsx`, built from `ParameterPage`. It has an app dropdown, search, the table, and New/Edit in a modal with textareas.
+- **Also:** the admin nav link, the route `#/ach-business-rules`, the demo server (its memo-post step reads the rules too), DB-MODEL.md, and DEMO.md (the trusted-ID line).
+
+**Checks:**
+- Unit tests for the evaluator: Ba's sample matches a credit from `23416789` and not a debit, plus each op and a bad shape.
+- An integration test: a save round-trips, bad JSON is a 400, a non-admin gets a 403, and a receiving run memo posts a credit from `23416789` at once.
+- A page test, then a browser click-through.
+
 ## 5. Notes
 
 `docs/ACH-NOTES.md` gets each finished piece:
@@ -211,3 +296,19 @@ Each step ends with the full test suite passing.
 11. Steps 6–7 and EOD picking up `READY_TO_POST`. → verify: member transfer → window → 5 PM file, end to end in the browser.
 12. Online demo (Q9).
 13. USE-CASES.md, DEMO.md, ACH-NOTES.md. → verify: every step in DEMO.md followed once.
+
+## 7A. Build order for §4B and §4C (✅ all 10 steps built 2026-11-12)
+
+Each step ends with the full Java and frontend suites passing.
+
+1. **V20 migration**: `ACHBusinessRule`, its seeds, removing `TRUSTED_COMPANY_IDS`, and the `effectiveDt` index. → verify: migrations run on an empty DB and on a copy of the local DB.
+2. **Leftovers to 6 AM** (§4B #1): the 6 AM window takes earlier days' `READY_TO_POST` transfers. Remove the 5 PM file (`EodScheduler`, `EodFileJob.run`, `/eod/run`) and the page hint. → verify: a test where yesterday's ready transfer shows in today's 6 AM ready list and is sent with it, and a 9 AM transfer from today is left alone.
+3. **Next business day** (§4B #2): both `windows` endpoints return the next banking day, plus `banking_day: false`. The buttons are disabled, and the process, send and receive endpoints refuse on a non-banking day. → verify: Clock-fixed tests on a Saturday and on a holiday.
+4. **Receiving Transactions by date** (§4B #4): `start`/`end` on `GET …/receiving/transactions`, and date pickers in place of the file picker. → verify: the range includes both ends, start after end is a 400, the default is today, and View transactions from the processing screen still filters by file.
+5. **Origination Transactions** (§4B #3): the endpoint, the detail endpoint, the page, the nav and the route. → verify: the same range tests, and the detail shows the full transfer row.
+6. **Rule engine** (§4C): `BusinessRuleEngine` parse and evaluate. → verify: unit tests for Ba's sample (a credit from 23416789 matches, a debit doesn't), each op, and bad shapes.
+7. **Receiving uses the rules** (§4C): `memoPost` asks the engine for `earlyPosting` instead of reading the parameter. → verify: the existing memo-post tests still pass, and a credit from 23416789 is memo posted at once.
+8. **Business Rules API and page** (§4C): GET, POST and PUT (SYS_ADMIN), `BusinessRulePage.tsx`, the admin nav and the route. → verify: a save round-trips, bad JSON is a 400, a non-admin gets a 403, and a page test passes.
+9. **Online demo**: `frontend/src/demo/server.ts` gets the same changes (6 AM leftovers, next business day, both search endpoints, the rules table and rule-based memo posting). → verify: `server.test.ts` passes.
+10. **Docs**: DEMO.md, USE-CASES.md, DB-MODEL.md (turn "Planned for V20" into "Changes"), and ACH-NOTES.md (early posting, a non-banking-day rollover). → verify: every DEMO.md step followed once in the browser on local Tomcat.
+

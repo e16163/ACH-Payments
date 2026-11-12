@@ -3,6 +3,7 @@ import { api, ApiError, DEMO, logout } from './api'
 import BackOfficePage from './backoffice/BackOfficePage'
 import { SCREENS } from './backoffice/screens'
 import AchOriginationProcessingPage from './files/AchOriginationProcessingPage'
+import AchOriginationTransactionPage from './files/AchOriginationTransactionPage'
 import AchReceivingProcessingPage from './files/AchReceivingProcessingPage'
 import AchReceivingTransactionPage from './files/AchReceivingTransactionPage'
 import LoginPage from './LoginPage'
@@ -12,6 +13,7 @@ import ExternalTransferPage from './member/ExternalTransferPage'
 import MfaPage from './member/MfaPage'
 import AppLogPage from './logs/AppLogPage'
 import ParameterPage from './params/ParameterPage'
+import BusinessRulePage from './rules/BusinessRulePage'
 import OfacReviewPage from './compliance/OfacReviewPage'
 import './app.css'
 
@@ -25,10 +27,12 @@ type Me = { username: string; roles: string[]; mfaVerified: boolean; memberNo: s
 
 const ROUTES = {
   params: '#/system-configuration',
+  businessRules: '#/ach-business-rules',
   appLogs: '#/system-audit-app-logs',
   coreApi: '#/open-core-banking-api',
   achApi: '#/ach-payments-api',
   originationProcessing: '#/ach-origination-processing',
+  originationTransactions: '#/ach-origination-transactions',
   receivingProcessing: '#/ach-receiving-processing',
   receivingTransactions: '#/ach-receiving-transactions',
   ofacReview: '#/ofac-review',
@@ -96,16 +100,18 @@ export default function App() {
   const onTransferPay = hash === ROUTES.external || hash === ROUTES.externalAccounts
 
   const onTransactions = hash.startsWith(ROUTES.receivingTransactions)
-  const adminElsewhere = hash === ROUTES.appLogs || hash === ROUTES.coreApi || hash === ROUTES.achApi
+  const adminElsewhere = hash === ROUTES.appLogs || hash === ROUTES.coreApi || hash === ROUTES.achApi || hash === ROUTES.businessRules
   const myScreens = SCREENS.filter((s) => me?.roles.includes(s.role))
   const screen = myScreens.find((s) => s.route === hash)
 
   let page = null
   if (signedOut) page = <LoginPage onSignedIn={loadMe} />
   else if (isAdmin && hash === ROUTES.appLogs) page = <AppLogPage />
+  else if (isAdmin && hash === ROUTES.businessRules) page = <BusinessRulePage />
   else if (isAdmin && hash === ROUTES.coreApi) page = <ApiSpecPage key={hash} page="core" />
   else if (isAdmin && hash === ROUTES.achApi) page = <ApiSpecPage key={hash} page="ach" />
   else if (screen) page = <BackOfficePage key={screen.route} screen={screen} />
+  else if (isOrigOps && hash === ROUTES.originationTransactions) page = <AchOriginationTransactionPage />
   else if (isOrigOps) page = <AchOriginationProcessingPage />
   else if (isRecvOps && onTransactions) {
     page = <AchReceivingTransactionPage route={ROUTES.receivingTransactions} fileID={decodeURIComponent(hash.slice(ROUTES.receivingTransactions.length + 1))} />
@@ -144,13 +150,21 @@ export default function App() {
           {isAdmin && (
             <>
               <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
+              <a className={hash === ROUTES.businessRules ? 'active' : ''} href={ROUTES.businessRules}>ACH Business Rules Management</a>
               <a className={hash === ROUTES.appLogs ? 'active' : ''} href={ROUTES.appLogs}>System Audit &amp; App Logs</a>
               <a className={hash === ROUTES.coreApi ? 'active' : ''} href={ROUTES.coreApi}>Open Core Banking API</a>
               <a className={hash === ROUTES.achApi ? 'active' : ''} href={ROUTES.achApi}>ACH Payments API</a>
             </>
           )}
           {isOrigOps && (
-            <a className={!screen ? 'active' : ''} href={ROUTES.originationProcessing}>ACH Origination Processing</a>
+            <>
+              <a className={!screen && hash !== ROUTES.originationTransactions ? 'active' : ''} href={ROUTES.originationProcessing}>
+                ACH Origination Processing
+              </a>
+              <a className={hash === ROUTES.originationTransactions ? 'active' : ''} href={ROUTES.originationTransactions}>
+                ACH Origination Transactions
+              </a>
+            </>
           )}
           {isCompliance && <a className="active" href={ROUTES.ofacReview}>OFAC Review</a>}
           {isRecvOps && (

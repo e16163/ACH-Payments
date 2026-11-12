@@ -40,7 +40,7 @@ public class SecurityConfig {
         http
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
-                        .requestMatchers("/api/params/**", "/api/v1/admin/**").hasRole("SYS_ADMIN")
+                        .requestMatchers("/api/params/**", "/api/ach-business-rules/**", "/api/v1/admin/**").hasRole("SYS_ADMIN")
                         .requestMatchers("/api/eod/**").hasRole("ACH_ORIG_OPS")
                         .requestMatchers("/api/v1/ach/back-office/origination/**").hasRole("ACH_ORIG_OPS")
                         .requestMatchers("/api/v1/ach/back-office/receiving/**").hasRole("ACH_RECV_OPS")

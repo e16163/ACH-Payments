@@ -53,4 +53,14 @@ class BankingCalendarTest {
     void rejectsZeroOrNegativeDays() {
         assertThrows(IllegalArgumentException.class, () -> cal.addBankingDays(LocalDate.parse("2026-11-04"), 0));
     }
+
+    @Test
+    void theProcessingScreensShowTheNextBankingDayOnAWeekendOrHoliday() {
+        assertEquals(LocalDate.parse("2026-11-04"), cal.businessDate(LocalDate.parse("2026-11-04"))); // a Wednesday is itself
+        assertEquals(LocalDate.parse("2026-11-09"), cal.businessDate(LocalDate.parse("2026-11-07"))); // Saturday -> Monday
+        assertEquals(LocalDate.parse("2026-11-27"), cal.businessDate(LocalDate.parse("2026-11-26"))); // Thanksgiving -> Friday
+        cal.requireBankingDay(LocalDate.parse("2026-11-04"));
+        var e = assertThrows(IllegalArgumentException.class, () -> cal.requireBankingDay(LocalDate.parse("2026-11-07")));
+        assertEquals("Today isn't a banking day. Processing opens on 2026-11-09.", e.getMessage());
+    }
 }

@@ -11,6 +11,7 @@ import retailSample from '../../../src/main/resources/fed-samples/sample2-retail
 import outOfBalanceSample from '../../../src/main/resources/fed-samples/sample3-out-of-balance.ach?raw'
 import { validateDesc, validateName, validateValue, PARAM_TYPES } from '../params/validation'
 import { isValidRouting } from '../member/rules'
+import { parseRule, results, type Rule } from './rules'
 
 type Role = 'MEMBER' | 'SYS_ADMIN' | 'ACH_ORIG_OPS' | 'ACH_RECV_OPS' | 'COMPLIANCE'
 const USERS: Record<string, { password: string; role: Role }> = {
@@ -75,7 +76,7 @@ type BatchRow = {
 }
 type AchFileRow = {
   fileID: string; fileName: string; fedStatus: string; fileHeaderDt: string; fileHeaderTm: string; totalCreditCount: number
-  totalCreditAmt: number; sendTm: string | null; content: string; scheduleId: number | null; batches: BatchRow[]
+  totalCreditAmt: number; sendTm: string | null; content: string; scheduleId: number; batches: BatchRow[]
 }
 // ACHOrigWindowRun and ACHRecvWindowRun (V19), with the screens' field names
 type OrigRun = {
@@ -95,6 +96,7 @@ type RecvFile = {
 }
 type RecvRow = RecvEntry & Processing & { tranID: number; transferSerNo: string; transferVersion: number; fileID: string; batchID: string; fedStatus: string; sourceID: string; createTm: string }
 type ExternalAccount = { recvAcctSerNo: string; routingNo: string; acctNo: string; acctType: string; acctOwner: string; acctStatus: string }
+type BusinessRule = { ruleID: number; systemName: string; ruleName: string; ruleDesc: string | null; pseudoCode: string; ruleJson: string; lastModTm: string; lastModBy: string }
 type LogRow = { logAppId: number; systemID: string | null; logLevel: string; logMesg: string; logExceptionData: string | null; logTm: string }
 type State = {
   user: string | null
@@ -114,9 +116,10 @@ type State = {
   inbound: string[] // the sample files waiting in fed/inbound for a receiving window
   recvRuns: RecvRun[]
   postingJobs: PostingJob[] // ACHRecvPostingJob
+  rules: BusinessRule[] // ACHBusinessRule (V20)
 }
 
-const KEY = 'ach-demo-state-7' // new name: state saved by an older demo has no schedules or window runs
+const KEY = 'ach-demo-state-8' // new name: state saved by an older demo has no business rules
 const MEMBER_NO = 'M10982347'
 // The ACHOrigSchedule and ACHRecvSchedule rows (V19)
 const slot = (schedule_id: number, window_time: string, window_name: string) => ({ schedule_id, window_time, window_name })
@@ -146,7 +149,6 @@ function freshState(): State {
       { systemName: 'ACH_ORIG', paramName: 'FED_IMMEDIATE_DEST', paramDesc: 'Routing number of the Federal Reserve office that receives our files', paramRawType: 'STRING', paramRawValue: '011000015', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'ORIG_COMPANY_NAME', paramDesc: 'Company name in NACHA batch headers (16 characters at most)', paramRawType: 'STRING', paramRawValue: 'DEMO CU', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_RCV', paramName: 'CORE_POSTING_TIME', paramDesc: 'Time the end-of-day core posting file is generated (Eastern)', paramRawType: 'STRING', paramRawValue: '19:00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
-      { systemName: 'ACH_RCV', paramName: 'TRUSTED_COMPANY_IDS', paramDesc: 'Originator Company IDs whose credits are memo posted at once (comma-separated)', paramRawType: 'STRING', paramRawValue: '1900483920', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_RCV', paramName: 'MAX_ENTRY_AMOUNT', paramDesc: 'A received entry above this amount waits for manual review', paramRawType: 'DECIMAL', paramRawValue: '25000.00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'FED_SIM_FAIL_ATTEMPTS', paramDesc: 'Fed simulator: how many send attempts fail, to demo EX-02 (0 = none)', paramRawType: 'INTEGER', paramRawValue: '0', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
     ],
@@ -174,9 +176,20 @@ function freshState(): State {
     inbound: [],
     recvRuns: [],
     postingJobs: [],
+    // The V20 seeds: Ba's sample, and the Company ID the old TRUSTED_COMPANY_IDS parameter held
+    rules: [earlyPostingRule(1, '23416789', 'Company 23416789 credits', 'Credits'), earlyPostingRule(2, '1900483920', 'payroll from Company 1900483920', 'Payroll credits')],
   }
   seedToday(s)
   return s
+}
+
+function earlyPostingRule(ruleID: number, companyID: string, name: string, what: string): BusinessRule {
+  return {
+    ruleID, systemName: 'ACH_RCV', ruleName: `Early posting: ${name}`, ruleDesc: `${what} from Company ID ${companyID} are made available at once, before settlement.`,
+    pseudoCode: `If companyID = "${companyID}" && creditIndicator = true\nset earlyPosting = true`,
+    ruleJson: JSON.stringify({ then: [{ set: 'earlyPosting', value: true }], when: { all: [{ op: 'eq', field: 'companyID', value: companyID }, { op: 'eq', field: 'creditIndicator', value: true }] } }),
+    lastModTm: '2026-11-12T12:00:00', lastModBy: 'SYS_ADMIN',
+  }
 }
 
 /**
@@ -237,6 +250,11 @@ function nextBankingDay(iso: string): string {
 }
 
 const earliest = () => nextBankingDay(isoDate(new Date()))
+/** BankingCalendar.businessDate and requireBankingDay: the processing screens work on the next banking day on a weekend or holiday. */
+const businessDate = (iso: string) => (isBankingDay(iso) ? iso : nextBankingDay(iso))
+function requireBankingDay(iso: string) {
+  if (!isBankingDay(iso)) fail(400, `Today isn't a banking day. Processing opens on ${nextBankingDay(iso)}.`)
+}
 
 /** TransferDates.occurrence: payment `index` of a series, counted from the first date, so Jan 31 → Feb 28 → Mar 31. */
 function occurrence(first: string, frequency: string, index: number): string {
@@ -362,9 +380,17 @@ function route(s: State, method: string, path: string, body: Body): unknown {
     if (role !== 'SYS_ADMIN') denied()
     return params(s, method, path, body)
   }
+  if (path.startsWith('/ach-business-rules')) {
+    if (role !== 'SYS_ADMIN') denied()
+    return businessRules(s, method, path, body)
+  }
+  if (path.startsWith('/v1/ach/origination/transactions')) {
+    if (role !== 'ACH_ORIG_OPS') denied()
+    return originationTransactions(s, path.slice('/v1/ach/origination/transactions'.length))
+  }
   if (path.startsWith('/eod')) {
     if (role !== 'ACH_ORIG_OPS') denied()
-    return eod(s, method, path, body)
+    return eod(s, method, path)
   }
   if (path.startsWith('/v1/ach/processing/')) {
     if (role !== 'ACH_ORIG_OPS') denied()
@@ -465,6 +491,56 @@ function params(s: State, method: string, path: string, body: Body) {
     return row
   }
   fail(404, 'Not found')
+}
+
+// ---- ACH Business Rules Management (BusinessRuleController, BusinessRules) ----
+
+function businessRules(s: State, method: string, path: string, body: Body) {
+  const list = /^\/ach-business-rules\?systemName=(.*)$/.exec(path)
+  if (list && method === 'GET') {
+    const system = decodeURIComponent(list[1])
+    return s.rules.filter((r) => r.systemName === system).sort((a, b) => a.ruleName.localeCompare(b.ruleName, 'en', { sensitivity: 'base' }))
+  }
+  const one = /^\/ach-business-rules\/(\d+)$/.exec(path)
+  if (!(path === '/ach-business-rules' && method === 'POST') && !(one && method === 'PUT')) fail(404, 'Not found')
+  const existing = one ? s.rules.find((r) => r.ruleID === Number(one[1])) ?? fail(400, `No such business rule ${one[1]}.`) : null
+  const app = existing ? existing.systemName : String(body.systemName ?? '')
+  const text = (k: string) => (typeof body[k] === 'string' ? (body[k] as string) : '')
+  const name = text('ruleName').trim()
+  const desc = text('ruleDesc').trim()
+  if (!APPS.some(([n]) => n === app)) fail(400, 'Choose an app.')
+  if (!name || name.length > 100) fail(400, 'The rule name is required, up to 100 characters.')
+  if (!text('pseudoCode').trim() || text('pseudoCode').length > 2000) fail(400, 'The pseudo code is required, up to 2000 characters.')
+  if (desc.length > 500) fail(400, 'The business description can be up to 500 characters.')
+  try {
+    parseRule(text('ruleJson'), app)
+  } catch (e) {
+    fail(400, (e as Error).message)
+  }
+  if (s.rules.some((r) => r !== existing && r.systemName === app && r.ruleName === name)) fail(400, `${app} already has a rule named "${name}".`)
+  const row: BusinessRule = {
+    ruleID: existing?.ruleID ?? Math.max(0, ...s.rules.map((r) => r.ruleID)) + 1, systemName: app, ruleName: name, ruleDesc: desc || null,
+    pseudoCode: text('pseudoCode'), ruleJson: JSON.stringify(JSON.parse(text('ruleJson'))), lastModTm: isoDateTime(new Date()), lastModBy: s.user!,
+  }
+  s.rules = s.rules.filter((r) => r !== existing).concat(row)
+  log(s, app, 'INFO', `User '${s.user}' saved business rule ${app}/${name}`)
+  return row
+}
+
+/** ReceivedEntryProcessor.earlyPosting: a credit an ACH_RCV rule marks earlyPosting is made available at once. */
+function earlyPosting(s: State): (e: RecvEntry) => boolean {
+  const rules: Rule[] = []
+  for (const r of s.rules.filter((x) => x.systemName === 'ACH_RCV')) {
+    try {
+      rules.push(parseRule(r.ruleJson, 'ACH_RCV'))
+    } catch (e) {
+      log(s, 'ACH_RCV', 'FATAL', `Business rule '${r.ruleName}' skipped: ${(e as Error).message}`)
+    }
+  }
+  return (e) => results(rules, {
+    companyID: e.companyID, companyName: e.companyName, amount: e.amount, stdEntryCode: e.stdEntryCode, tranCode: e.tranCode,
+    creditIndicator: e.creditFlag === 1,
+  }).earlyPosting === true
 }
 
 // ---- External ACH Transfer (TransferService) ----
@@ -622,21 +698,23 @@ function receiving(s: State, method: string, path: string, body: Body) {
   if (path === '/files/receive' && method === 'POST') { // the Fed delivers it to fed/inbound; a window processes it
     const sample = String(body.sample ?? '')
     if (!SAMPLES[sample] && sample !== 'TAMPERED') fail(400, 'Choose a file to receive.')
+    requireBankingDay(isoDate(new Date())) // the Fed doesn't deliver on a weekend or holiday
     const fileName = `${sample}.ach`
     if (!s.inbound.includes(sample)) s.inbound = [...s.inbound, sample].sort()
     log(s, 'ACH_RCV', 'INFO', `User '${s.user}' received sample ${sample}: ${fileName} is waiting for the next processing window`)
     return { fileName, message: `${fileName} is in fed/inbound, waiting for the next processing window.` }
   }
   if (path === '/windows' && method === 'GET') {
-    const today = isoDate(new Date())
+    const today = businessDate(isoDate(new Date()))
     return {
-      business_date: today, schedules: RECV_SCHEDULE, waiting_files: s.inbound.map((x) => `${x}.ach`),
+      business_date: today, banking_day: isBankingDay(isoDate(new Date())), schedules: RECV_SCHEDULE, waiting_files: s.inbound.map((x) => `${x}.ach`),
       runs: s.recvRuns.filter((r) => r.business_date === today).map(({ business_date: _d, ...rest }) => rest),
       posting_file: s.postingJobs.find((j) => j.business_date === today) ?? null,
     }
   }
   const trigger = /^\/trigger\/(\d{4})$/.exec(path)
   if (trigger && method === 'POST') {
+    requireBankingDay(isoDate(new Date()))
     const w = RECV_SCHEDULE.find((x) => x.window_time.replace(':', '') === trigger[1])
       ?? fail(400, `Unknown processing window ${trigger[1]}; use one of [${RECV_SCHEDULE.map((x) => x.window_time.replace(':', '')).join(', ')}].`)
     log(s, 'ACH_RCV', 'INFO', `User '${s.user}' triggered processing window ${w.window_time}`)
@@ -651,7 +729,10 @@ function receiving(s: State, method: string, path: string, body: Body) {
     const page = Number(q.get('page') ?? 1)
     const limit = Number(q.get('limit') ?? 10)
     const status = q.get('status')
-    const rows = s.receivedEntries.filter((e) => e.fileID === q.get('fileID') && (!status || e.processStatus === status)).sort((a, b) => a.traceNo.localeCompare(b.traceNo) || a.tranID - b.tranID)
+    const [fileID, start, end] = [q.get('fileID'), q.get('start'), q.get('end')]
+    if (!start !== !end || (start && end && start > end)) fail(400, 'Choose a start date on or before the end date.')
+    const rows = s.receivedEntries.filter((e) => (!fileID || e.fileID === fileID) && (!start || (e.effectiveDt >= start && e.effectiveDt <= end!))
+      && (!status || e.processStatus === status)).sort((a, b) => a.traceNo.localeCompare(b.traceNo) || a.tranID - b.tranID)
     return { items: rows.slice((page - 1) * limit, page * limit), total: rows.length, page, limit }
   }
   const m = /^\/transactions\/(\d+)$/.exec(path)
@@ -684,8 +765,8 @@ function receiveSample(s: State, sample: string) {
     })))
     // Ba's blueprint, steps 4-6, as the window that picks the file up runs them
     const rcv = (name: string) => s.params.find((p) => p.systemName === 'ACH_RCV' && p.paramName === name)?.paramRawValue ?? ''
-    const n = processEntries(s.receivedEntries.filter((e) => e.fileID === fileID), s.core,
-      rcv('TRUSTED_COMPANY_IDS').split(',').map((x) => x.trim()).filter(Boolean), toCents(rcv('MAX_ENTRY_AMOUNT')), isoDateTime(new Date()))
+    const n = processEntries(s.receivedEntries.filter((e) => e.fileID === fileID), s.core, earlyPosting(s), toCents(rcv('MAX_ENTRY_AMOUNT')),
+      isoDateTime(new Date()))
     log(s, 'ACH_RCV', 'INFO', `${fileID} processed: ${n.matched} matched, ${n.corrected} auto-corrected, ${n.review} for manual review, ${n.rejected} rejected, ${n.posted} memo posted`)
     return { fileID, fileName, processStatus: row.processStatus, message: r.message, counts: { entries: r.entries.length, ...n } }
   }
@@ -752,11 +833,13 @@ const param = (s: State, name: string) => s.params.find((p) => p.systemName === 
 // ---- ACH Origination Processing (OriginationProcessingController) ----
 
 function processing(s: State, method: string, path: string, body: Body) {
-  const today = isoDate(new Date())
+  const calendarToday = isoDate(new Date())
+  const today = businessDate(calendarToday) // the next banking day on a weekend or holiday
   const scheduleId = () => Number(new URLSearchParams(path.split('?')[1]).get('schedule_id'))
   if (path === '/trigger-window' && method === 'POST') {
     const time = String(body.window_time ?? '')
     if (!/^\d{2}:\d{2}$/.test(time)) fail(400, 'window_time must be a time like 12:00.')
+    requireBankingDay(calendarToday)
     log(s, 'ACH_ORIG', 'INFO', `User '${s.user}' triggered origination window ${time}`)
     const r = runWindow(s, today, time, s.user!)
     const rejected = r.account_rejected + r.limit_rejected + r.hold_rejected
@@ -769,6 +852,7 @@ function processing(s: State, method: string, path: string, body: Body) {
     const runs = s.origRuns.filter((r) => r.business_date === today)
     return {
       business_date: today,
+      banking_day: isBankingDay(calendarToday),
       schedules: ORIG_SCHEDULE.map((w) => {
         const r = runs.filter((x) => x.window_time === w.window_time).pop()
         return { ...w, last_run: r ? (({ window_time: _t, business_date: _d, ...rest }) => rest)(r) : null }
@@ -784,7 +868,8 @@ function processing(s: State, method: string, path: string, body: Body) {
   }
   if (path === '/send-to-fed' && method === 'POST') {
     const w = ORIG_SCHEDULE.find((x) => x.schedule_id === body.schedule_id) ?? fail(400, 'Choose a schedule.')
-    const result = send(s, today, false, w.schedule_id)
+    requireBankingDay(calendarToday)
+    const result = send(s, today, w.schedule_id)
     log(s, 'ACH_ORIG', result.fedStatus === 'ERROR' ? 'ERROR' : 'INFO', `User '${s.user}' sent the ${w.window_time} schedule to the Fed: ${result.message}`)
     return result
   }
@@ -798,15 +883,8 @@ function processing(s: State, method: string, path: string, body: Body) {
   fail(404, 'Not found')
 }
 
-function eod(s: State, method: string, path: string, body: Body) {
+function eod(s: State, method: string, path: string) {
   if (path === '/eod/status' && method === 'GET') return eodStatus(s)
-  if (path === '/eod/run' && method === 'POST') {
-    const date = typeof body.businessDate === 'string' ? body.businessDate : ''
-    if (!date) fail(400, 'Choose a business date.')
-    const result = runEod(s, date)
-    log(s, 'ACH_ORIG', result.fedStatus === 'ERROR' ? 'ERROR' : 'INFO', `User '${s.user}' ran the EOD file for ${date}: ${result.message}`)
-    return result
-  }
   const m = /^\/eod\/files\/([^/]+)\/(resend|content)$/.exec(path)
   const file = m && s.files.find((f) => f.fileID === decodeURIComponent(m[1]))
   if (!file) fail(404, 'No such file.')
@@ -864,6 +942,11 @@ function runWindow(s: State, businessDate: string, windowTime: string, runBy: st
     window_id: `WIN-${businessDate.replace(/-/g, '')}-${windowTime.replace(':', '')}`, window_time: windowTime, business_date: businessDate,
     extracted: 0, account_rejected: 0, limit_rejected: 0, ofac_flagged: 0, hold_rejected: 0, ready_to_post: 0, run_by: runBy, started_at: started,
   }
+  if (windowTime === ORIG_SCHEDULE[0].window_time) { // Ba: anything ready that no schedule sent goes in the next business day's first window
+    for (const t of s.transfers) {
+      if (t.processStatus === 'READY_TO_POST' && (t.scheduleId === null || (t.readyTm ?? '') < businessDate)) t.scheduleId = ORIG_SCHEDULE[0].schedule_id
+    }
+  }
   const due = s.transfers.filter((t) => t.processStatus === 'PENDING_BATCH' && t.effectiveDt <= businessDate)
     .sort((a, b) => a.transferSerNo.localeCompare(b.transferSerNo))
   run.extracted = due.length
@@ -909,6 +992,39 @@ function reject(s: State, t: Transfer, reason: string) {
   scheduleNext(s, t)
 }
 
+// ---- ACH Origination Transactions (OriginationProcessingController.transactions) ----
+
+function originationTransactions(s: State, path: string) {
+  const window = (t: Transfer) => ORIG_SCHEDULE.find((w) => w.schedule_id === t.scheduleId)?.window_name ?? null
+  if (path.startsWith('?')) {
+    const q = new URLSearchParams(path.slice(1))
+    const [start, end, status] = [q.get('start') ?? '', q.get('end') ?? '', q.get('status')]
+    const page = Number(q.get('page') ?? 1)
+    const limit = Number(q.get('limit') ?? 10)
+    if (!start || !end) fail(400, 'start and end are required.')
+    if (start > end) fail(400, 'Choose a start date on or before the end date.')
+    const rows = s.transfers.filter((t) => t.effectiveDt >= start && t.effectiveDt <= end && (!status || t.processStatus === status))
+      .sort((a, b) => a.effectiveDt.localeCompare(b.effectiveDt) || a.transferSerNo.localeCompare(b.transferSerNo))
+    return {
+      items: rows.slice((page - 1) * limit, page * limit).map((t) => ({
+        transfer_id: t.transferSerNo, member_no: MEMBER_NO, recipient_name: t.recvName, routing_number: t.routingNo, amount: t.amount / 100,
+        effective_dt: t.effectiveDt, process_status: t.processStatus, ofac_status: t.ofacStatus, window_name: window(t), created_at: t.submitted,
+      })),
+      total: rows.length, page, limit,
+    }
+  }
+  const id = decodeURIComponent(path.slice(1))
+  const t = s.transfers.find((x) => x.transferSerNo === id) ?? fail(400, `No such transfer ${id}.`)
+  const file = s.files.find((f) => f.content.includes(t.transferSerNo.replace(/-/g, '')))
+  return {
+    transferSerNo: t.transferSerNo, transferVersion: 1, memberNo: MEMBER_NO, pTransferSerNo: t.firstSerNo, origAcctNo: t.fromAcctNo,
+    origAcctType: t.fromAcctType, recvName: t.recvName, recvRoutingNo: t.routingNo, recvAcctNo: t.acctNo, transferAmt: t.amount / 100,
+    feeAmt: t.fee / 100, effectiveDt: t.effectiveDt, pmtFrequency: t.frequency, transferReqNo: t.reqNo, transferReqRemaining: t.remaining,
+    companyEntryDesc: t.memo, processStatus: t.processStatus, processTm: t.readyTm, ofacStatus: t.ofacStatus, ofacTm: t.ofacTm,
+    memoStatus: t.memoStatus, scheduleID: t.scheduleId, windowName: window(t), fileID: file?.fileID ?? null, createTm: t.submitted,
+  }
+}
+
 // ---- OFAC Review (OriginationProcessingController, OriginationWindow.resolve) ----
 
 function flagged(s: State) {
@@ -935,15 +1051,11 @@ function resolve(s: State, body: Body) {
   return { transfer_id: id, previous_status: 'FLAGGED', current_status: t.ofacStatus, updated_at: t.ofacTm }
 }
 
-/** The 5 PM file: one last window, then everything ready (EodFileJob.run). */
-const runEod = (s: State, businessDate: string) => send(s, businessDate, true, null)
-
-/** EodFileJob.send: the 5 PM file (sweep), or Send to the Fed for one schedule's ready transactions. */
-function send(s: State, businessDate: string, sweep: boolean, scheduleId: number | null) {
+/** EodFileJob.sendNow: Send to the Fed for one schedule's ready transactions. */
+function send(s: State, businessDate: string, scheduleId: number) {
   if (!isBankingDay(businessDate)) return { fileID: null, fedStatus: null, message: `${businessDate} isn't a banking day, so no file was built.` }
-  if (sweep) runWindow(s, businessDate, 'EOD', 'EOD_BATCH')
   const due = s.transfers
-    .filter((t) => t.processStatus === 'READY_TO_POST' && t.effectiveDt <= businessDate && (scheduleId === null || t.scheduleId === scheduleId))
+    .filter((t) => t.processStatus === 'READY_TO_POST' && t.effectiveDt <= businessDate && t.scheduleId === scheduleId)
     .sort((a, b) => a.transferSerNo.localeCompare(b.transferSerNo))
   if (due.length === 0) return { fileID: null, fedStatus: null, message: `Nothing is due for ${businessDate}.` }
 

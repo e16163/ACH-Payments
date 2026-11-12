@@ -40,6 +40,18 @@ public class BankingCalendar {
         return addBankingDays(date, 1);
     }
 
+    /** The day the processing screens work on: the date itself, or the next banking day on a weekend or holiday. */
+    public LocalDate businessDate(LocalDate date) {
+        return isBankingDay(date) ? date : nextBankingDay(date);
+    }
+
+    /** For the actions a processing screen offers: none on a weekend or holiday. */
+    public void requireBankingDay(LocalDate date) {
+        if (!isBankingDay(date)) {
+            throw new IllegalArgumentException("Today isn't a banking day. Processing opens on " + nextBankingDay(date) + ".");
+        }
+    }
+
     /** The Federal Reserve holidays, e.g. for the Transfer UI date picker. */
     public Set<LocalDate> holidays() {
         return holidays;

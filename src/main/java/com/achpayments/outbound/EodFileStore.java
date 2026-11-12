@@ -100,7 +100,7 @@ public class EodFileStore {
         return compile(businessDate, processID, null);
     }
 
-    /** scheduleID: only the transfers that window made ready, and the file records it; null for every ready transfer (5 PM). */
+    /** scheduleID: only the transfers that window made ready, and the file records it; null for every ready transfer. */
     @Transactional
     public Optional<String> compile(LocalDate businessDate, String processID, Integer scheduleID) {
         alertOnFlaggedItems(businessDate);

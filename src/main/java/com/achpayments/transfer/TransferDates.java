@@ -28,8 +28,8 @@ public class TransferDates {
     }
 
     /**
-     * UC-ACH-EOD-01 E1: a transfer goes in the 5 PM file on its effective date, after the last Same Day deadline,
-     * so it settles the next banking day.
+     * UC-ACH-EOD-01 E1: a transfer is sent on its effective date, and Same Day settlement isn't offered yet,
+     * so it's promised for the next banking day.
      */
     public LocalDate estimatedArrival(LocalDate effectiveDt) {
         return calendar.nextBankingDay(effectiveDt);

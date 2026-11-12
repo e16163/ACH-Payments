@@ -16,7 +16,7 @@ type WindowRun = {
 type PostingFile = {
   posting_job_id: string; total_records_posted: number; total_debit_volume: number; total_credit_volume: number; posting_file_name: string
 }
-type Today = { business_date: string; schedules: Schedule[]; waiting_files: string[]; runs: WindowRun[]; posting_file: PostingFile | null }
+type Today = { business_date: string; banking_day: boolean; schedules: Schedule[]; waiting_files: string[]; runs: WindowRun[]; posting_file: PostingFile | null }
 
 const SAMPLES = [
   ['PAYROLL', 'Sample 1: payroll (valid)'],
@@ -100,6 +100,9 @@ export default function AchReceivingProcessingPage({ transactionsRoute }: { tran
     <>
       <h2>ACH Receiving Processing</h2>
       <p className="hint">{longDate(today.business_date)}. Files from the Fed wait in the inbound folder until a window processes them.</p>
+      {!today.banking_day && (
+        <p className="notice" role="status">Today isn't a banking day. This is the next business day, view only until it opens.</p>
+      )}
 
       {alerts.map((f) => <p className="page-error" key={f.fileID}>{f.fileID}: {FAILED[f.processStatus]}</p>)}
       {error && <p className="page-error">{error}</p>}
@@ -112,7 +115,7 @@ export default function AchReceivingProcessingPage({ transactionsRoute }: { tran
             {SAMPLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
         </label>
-        <button disabled={busy} onClick={receive}>Receive file</button>
+        <button disabled={busy || !today.banking_day} onClick={receive}>Receive file</button>
       </div>
       <p className="hint">
         Waiting for a window: {today.waiting_files.length === 0 ? 'none' : today.waiting_files.join(', ')}
@@ -142,7 +145,7 @@ export default function AchReceivingProcessingPage({ transactionsRoute }: { tran
           ) : <p className="empty">Not processed yet today.</p>}
           <div className="toolbar">
             {run && <span className="hint">Processed at {time(run.started_at)} by {run.run_by} ({run.execution_id})</span>}
-            <button className="primary" disabled={busy} onClick={processWindow}>{run ? 'Process again' : 'Process window'}</button>
+            <button className="primary" disabled={busy || !today.banking_day} onClick={processWindow}>{run ? 'Process again' : 'Process window'}</button>
           </div>
         </>
       )}
@@ -179,7 +182,7 @@ export default function AchReceivingProcessingPage({ transactionsRoute }: { tran
       ) : (
         <div className="toolbar">
           <span className="hint">Not written yet today.</span>
-          <button disabled={busy} onClick={generatePostingFile}>Generate now</button>
+          <button disabled={busy || !today.banking_day} onClick={generatePostingFile}>Generate now</button>
         </div>
       )}
     </>

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../api'
 import { SCREENS } from '../backoffice/screens'
 import { demoApi, demoLogin, demoLogout } from './server'
@@ -228,6 +228,12 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
     return (await files())[0]
   }
   const page = (fileID: string, n = 1) => demoApi<Page>(`${BASE}/transactions?fileID=${fileID}&page=${n}&limit=10&sortBy=traceNo&sortDir=ASC`)
+  // The Fed delivers on banking days only, so these run on one: Thursday 2026-11-12, 9:30 AM
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-12T09:30:00'))
+  })
+  afterEach(() => void vi.useRealTimers())
 
   it("starts with the sample file for operators, and keeps admins and members out", async () => {
     await asOperator()
@@ -380,7 +386,13 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     files: { fileID: string; fedStatus: string; totalCreditCount: number; totalCreditAmt: number }[]
   }
   const status = () => demoApi<Status>('/eod/status')
-  const run = (businessDate: string) => post('/eod/run', { businessDate }) as Promise<{ fileID: string | null; fedStatus: string; message: string }>
+  /** A business day without the 5 PM file: on that day, the 6 AM window (which also takes leftovers), then Send to the Fed for it. */
+  const run = async (businessDate: string) => {
+    vi.setSystemTime(new Date(`${businessDate}T06:30:00`))
+    await post('/v1/ach/processing/trigger-window', { window_time: '06:00' })
+    return post('/v1/ach/processing/send-to-fed', { schedule_id: 1 }) as Promise<{ fileID: string | null; fedStatus: string; message: string }>
+  }
+  afterEach(() => void vi.useRealTimers())
   const asOrigOps = async () => {
     await demoLogout()
     await demoLogin('achorig', 'achorig123')
@@ -394,9 +406,13 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   let seedFiles = 0
   beforeEach(async () => {
     await asOrigOps()
-    await post('/v1/ach/processing/trigger-window', { window_time: '06:00' })
-    seedFiles = (await post('/v1/ach/processing/send-to-fed', { schedule_id: 1 }) as { fileID: string | null }).fileID ? 1 : 0
+    const today = await demoApi<{ banking_day: boolean }>('/v1/ach/processing/windows')
+    if (today.banking_day) {
+      await post('/v1/ach/processing/trigger-window', { window_time: '06:00' })
+      seedFiles = (await post('/v1/ach/processing/send-to-fed', { schedule_id: 1 }) as { fileID: string | null }).fileID ? 1 : 0
+    }
     await demoLogout()
+    vi.useFakeTimers({ toFake: ['Date'] })
   })
 
   it('only lets achorig in', async () => {
@@ -404,7 +420,7 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     expect((await error(demoApi('/eod/status'))).status).toBe(403)
     await demoLogin('admin', 'admin123')
     expect((await error(demoApi('/eod/status'))).status).toBe(403)
-    expect((await error(run('2030-01-07'))).status).toBe(403)
+    expect((await error(post('/v1/ach/processing/trigger-window', { window_time: '06:00' }))).status).toBe(403)
   })
 
   it('sends a valid file, marks the transfer Processed, and a rerun adds nothing', async () => {
@@ -517,9 +533,34 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     expect(await available()).toBe(8500 - 20) // the $20 is held at the window after Clear; the blocked $30 was never held
   })
 
-  it('builds no file on a day that is not a banking day', async () => {
+  it('processes and sends nothing on a day that is not a banking day', async () => {
     await asOrigOps()
-    expect((await run('2030-01-05')).message).toBe("2030-01-05 isn't a banking day, so no file was built.")
+    vi.setSystemTime(new Date('2030-01-05T06:30:00')) // a Saturday
+    const t = await demoApi<{ business_date: string; banking_day: boolean }>('/v1/ach/processing/windows')
+    expect(t).toMatchObject({ business_date: '2030-01-07', banking_day: false }) // the next business day, view only
+    expect((await error(post('/v1/ach/processing/trigger-window', { window_time: '06:00' }))).message)
+      .toBe("Today isn't a banking day. Processing opens on 2030-01-07.")
+    expect((await error(post('/v1/ach/processing/send-to-fed', { schedule_id: 1 }))).message)
+      .toBe("Today isn't a banking day. Processing opens on 2030-01-07.")
+  })
+
+  it("Ba: a transfer ready but not sent goes in the next business day's 6 AM file", async () => {
+    await memberWithMfa()
+    const { holidays } = await demoApi<{ holidays: string[] }>('/transfers/dates')
+    const t = await post('/transfers', await transfer({ amount: '10.00' })) as { transferSerNo: string; effectiveDt: string }
+    await asOrigOps()
+    vi.setSystemTime(new Date(`${t.effectiveDt}T15:05:00`))
+    await post('/v1/ach/processing/trigger-window', { window_time: '15:00' }) // ready, but nobody presses Send to the Fed
+    const ready = (id: number) => demoApi<{ transfer_id: string }[]>(`/v1/ach/processing/ready?schedule_id=${id}`)
+    expect((await ready(4)).map((r) => r.transfer_id)).toEqual([t.transferSerNo])
+
+    const day = new Date(`${t.effectiveDt}T12:00:00`) // the next banking day
+    do day.setDate(day.getDate() + 1)
+    while ([0, 6].includes(day.getDay()) || holidays.includes(day.toLocaleDateString('en-CA')))
+    const r = await run(day.toLocaleDateString('en-CA'))
+    expect(r.fedStatus).toBe('SENT')
+    const { content } = await demoApi<{ content: string }>(`/eod/files/${r.fileID}/content`)
+    expect(content).toContain(t.transferSerNo.replace(/-/g, ''))
   })
 })
 
@@ -538,8 +579,7 @@ describe("demo ACH Origination Processing (Ba's critique, 2026-11-12)", () => {
 
   it("sends only the selected schedule's ready transactions, in a file with its batches", async (ctx) => {
     await demoLogin('achorig', 'achorig123')
-    const probe = await post('/v1/ach/processing/send-to-fed', { schedule_id: 1 }) as { message: string }
-    if (probe.message.includes("isn't a banking day")) ctx.skip() // no sample transfers then
+    if (!(await demoApi<{ banking_day: boolean }>('/v1/ach/processing/windows')).banking_day) ctx.skip() // no sample transfers then
     const ready = (id: number) => demoApi<{ transfer_id: string }[]>(`/v1/ach/processing/ready?schedule_id=${id}`)
     expect(await ready(2)).toEqual([])
     const r = await post('/v1/ach/processing/trigger-window', { window_time: '09:00' }) as { window_id: string; message: string }
@@ -556,6 +596,68 @@ describe("demo ACH Origination Processing (Ba's critique, 2026-11-12)", () => {
     expect(files).toEqual([expect.objectContaining({ file_id: sent.fileID, schedule_id: 2, total_credit_count: 3 })])
     expect(files[0].batches.map((b) => [b.company_entry_desc, b.entry_count])).toEqual([['RENT', 1], ['TUITION', 1], ['UTILITIES', 1]])
     expect(await demoApi('/v1/ach/processing/files?schedule_id=3')).toEqual([])
+  })
+})
+
+describe("demo transaction searches and business rules (Ba, 2026-11-12)", () => {
+  afterEach(() => void vi.useRealTimers())
+
+  it('searches ACH origination transactions by effective date, start to end, and shows one in full', async () => {
+    await memberWithMfa()
+    const t = await post('/transfers', await transfer({ amount: '10.00' })) as { transferSerNo: string; effectiveDt: string }
+    await demoLogin('achrecv', 'achrecv123')
+    expect((await error(demoApi(`/v1/ach/origination/transactions?start=${t.effectiveDt}&end=${t.effectiveDt}`))).status).toBe(403)
+    await demoLogin('achorig', 'achorig123')
+    type Page = { items: { transfer_id: string; process_status: string }[]; total: number }
+    const search = (start: string, end: string, status = '') =>
+      demoApi<Page>(`/v1/ach/origination/transactions?start=${start}&end=${end}${status ? `&status=${status}` : ''}&page=1&limit=10`)
+    expect((await search(t.effectiveDt, t.effectiveDt)).items.map((x) => x.transfer_id)).toContain(t.transferSerNo)
+    expect((await search(t.effectiveDt, t.effectiveDt, 'PROCESSED')).items.map((x) => x.transfer_id)).not.toContain(t.transferSerNo)
+    expect((await search('2030-01-01', '2030-01-31')).total).toBe(0)
+    expect((await error(search(t.effectiveDt, '2020-01-01'))).message).toBe('Choose a start date on or before the end date.')
+    expect(await demoApi(`/v1/ach/origination/transactions/${t.transferSerNo}`)).toMatchObject({
+      transferSerNo: t.transferSerNo, transferAmt: 10, recvName: 'JOHN DOE', processStatus: 'PENDING_BATCH', fileID: null,
+    })
+  })
+
+  it('searches received transactions by effective date, and keeps the file filter', async () => {
+    await demoLogin('achrecv', 'achrecv123')
+    const search = (q: string) => demoApi<{ total: number }>(`/v1/ach/receiving/transactions?${q}&page=1&limit=10&sortBy=traceNo&sortDir=ASC`)
+    expect((await search('start=2026-11-03&end=2026-11-05')).total).toBe(2) // the two V7/V14 samples
+    expect((await search('start=2026-11-04&end=2026-11-05')).total).toBe(1)
+    expect((await search('fileID=ACHFILE-88392')).total).toBe(2)
+    expect((await error(search('start=2026-11-05&end=2026-11-03'))).message).toBe('Choose a start date on or before the end date.')
+  })
+
+  it('lets only admins manage business rules, checks them, and receiving follows them', async () => {
+    type Rule = { ruleID: number; ruleName: string; ruleJson: string; lastModBy: string }
+    await demoLogin('achrecv', 'achrecv123')
+    expect((await error(demoApi('/ach-business-rules?systemName=ACH_RCV'))).status).toBe(403)
+    await demoLogin('admin', 'admin123')
+    const rules = await demoApi<Rule[]>('/ach-business-rules?systemName=ACH_RCV')
+    expect(rules.map((r) => r.ruleName)).toEqual(['Early posting: Company 23416789 credits', 'Early posting: payroll from Company 1900483920'])
+    expect(await demoApi<{ paramName: string }[]>('/params?systemName=ACH_RCV')).not.toContainEqual(expect.objectContaining({ paramName: 'TRUSTED_COMPANY_IDS' }))
+
+    const save = (r: Rule, ruleJson: string) => demoApi<Rule>(`/ach-business-rules/${r.ruleID}`, {
+      method: 'PUT', body: JSON.stringify({ ruleName: r.ruleName, pseudoCode: 'p', ruleJson }),
+    })
+    expect((await error(save(rules[1], '{not json'))).message).toBe("The JSON rule isn't valid JSON.")
+    expect((await error(save(rules[1], rules[1].ruleJson.replace('companyID', 'colour')))).message).toMatch(/^Unknown field "colour"/)
+    expect((await save(rules[1], rules[1].ruleJson.replace('1900483920', '1111111111'))).lastModBy).toBe('admin') // payroll no longer early
+    const added = await post('/ach-business-rules', { systemName: 'ACH_ORIG', ruleName: 'Any field here', pseudoCode: 'p', ruleJson: rules[0].ruleJson.replace('companyID', 'anything') }) as Rule
+    expect(added.ruleID).toBe(3)
+    expect((await error(post('/ach-business-rules', { systemName: 'ACH_ORIG', ruleName: 'Any field here', pseudoCode: 'p', ruleJson: added.ruleJson }))).message)
+      .toBe('ACH_ORIG already has a rule named "Any field here".')
+
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-12T09:30:00'))
+    await demoLogin('achrecv', 'achrecv123')
+    await post('/v1/ach/receiving/files/receive', { sample: 'PAYROLL' })
+    await post('/v1/ach/receiving/trigger/0900', {})
+    const fileID = (await demoApi<{ fileID: string }[]>('/v1/ach/receiving/files'))[0].fileID
+    const john = (await demoApi<{ items: { recvAcctID: string; processStatus: string }[] }>(`/v1/ach/receiving/transactions?fileID=${fileID}&page=1&limit=100&sortBy=traceNo&sortDir=ASC`))
+      .items.find((x) => x.recvAcctID === '987654321019')
+    expect(john?.processStatus).toBe('RECEIVED') // a payroll credit waits for the posting file now
   })
 })
 

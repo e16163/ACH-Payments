@@ -174,7 +174,8 @@ mvn test
 - [x] Design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/ACH Payments System Design/](docs/ACH%20Payments%20System%20Design/))
 - [x] Database schema: all 30 designed tables exactly as written, plus approved additions (V1–V15), with the sample data
 - [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
-- [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, `achorig` ACH Origination Processing page
+- [x] ACH origination file (UC-ACH-EOD-01): Send to the Fed per schedule (leftovers go at the next business day's 6 AM), NACHA file, simulated Fed, retries, audit trail, `achorig` ACH Origination Processing and Transactions pages
+- [x] ACH Business Rules Management (`ACHBusinessRule`): rules per app, checked on save; receiving uses them for early posting
 - [x] Inbound FedACH ingestion (UC-ACH-RCV-01): the 6 AM pickup, signature, control totals, EX-01 to EX-03, audit trail
 - [x] ACH Receiving Transaction UI (UC-ACH-RCV-02): files by day, 10 per page by trace number, all 24 fields
 - [x] Back-office screens (UC-ACH-BO): read-only Return, Reversal, Resubmission and NOC screens, guessed from the table design

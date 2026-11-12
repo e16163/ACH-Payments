@@ -336,7 +336,8 @@ We log one row per business action, not one per SQL statement. OWASP's logging g
 | Transfer submitted | INFO | `ACH_ORIG` |
 | Transfer refused, by kind only | WARN | `ACH_ORIG` |
 | Run now, Resend | INFO | `ACH_ORIG` |
-| File sent to the Fed, by a user or the 5 PM job | INFO | `ACH_ORIG` |
+| File sent to the Fed (Send to the Fed, Resend) | INFO | `ACH_ORIG` |
+| Business rule saved; a stored rule that fails the check is skipped | INFO; FATAL | The rule's app |
 | Receive file | INFO | `ACH_RCV` |
 | Any failed Run now, Resend or Receive file | ERROR or WARN | As above |
 | MFA, EOD and ingestion rows that already existed | As before | `ACH_ORIG` or `ACH_RCV` |
@@ -364,3 +365,6 @@ We log one row per business action, not one per SQL statement. OWASP's logging g
 3. **UC-ACH-EOD-01.** ✅ Built.
 4. **UC-ACH-RCV-01, UC-ACH-RCV-02.** ✅ Built.
 5. **Ba's blueprint: Receiving and Origination redesign.** ✅ Built 2026-11-08 (BLUEPRINT-PLAN.md §7, all 13 steps).
+6. **Ba's processing screens (2026-11-12).** ✅ Built (BLUEPRINT-PLAN.md §4A).
+7. **Ba's follow-up: 6 AM leftovers, next business day, transaction search screens.** ✅ Built 2026-11-12 (BLUEPRINT-PLAN.md §4B, §7A).
+8. **ACH Business Rules Management.** ✅ Built 2026-11-12 (BLUEPRINT-PLAN.md §4C, §7A).
