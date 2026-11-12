@@ -62,13 +62,18 @@ public class CorePostingFileJob {
         this.postingDir = Path.of(postingDir);
     }
 
+    /** The day's posting file, if it was written. */
+    public java.util.Optional<Result> find(LocalDate businessDate) {
+        return jdbc.query("SELECT postingJobID, businessDt, recordCount, totalDebitAmt, totalCreditAmt, fileName FROM " + recv
+                + ".ACHRecvPostingJob WHERE businessDt = ?", (rs, i) -> new Result(rs.getString(1), rs.getDate(2).toLocalDate(),
+                rs.getInt(3), rs.getBigDecimal(4), rs.getBigDecimal(5), rs.getString(6), READY), businessDate).stream().findFirst();
+    }
+
     @Transactional
     public Result generate(LocalDate businessDate) {
-        List<Result> done = jdbc.query("SELECT postingJobID, businessDt, recordCount, totalDebitAmt, totalCreditAmt, fileName FROM " + recv
-                + ".ACHRecvPostingJob WHERE businessDt = ?", (rs, i) -> new Result(rs.getString(1), rs.getDate(2).toLocalDate(),
-                rs.getInt(3), rs.getBigDecimal(4), rs.getBigDecimal(5), rs.getString(6), READY), businessDate);
-        if (!done.isEmpty()) {
-            return done.get(0);
+        java.util.Optional<Result> done = find(businessDate);
+        if (done.isPresent()) {
+            return done.get();
         }
         String jobID = "JOB-POST-" + businessDate.format(DAY) + "-EOD";
         String fileName = "CORE_ACH_POSTING_" + businessDate.format(DAY) + ".DAT";

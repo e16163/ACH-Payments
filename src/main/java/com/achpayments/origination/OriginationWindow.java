@@ -5,7 +5,9 @@ import static com.achpayments.common.AppLogRepository.ACH_ORIG;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -38,7 +40,21 @@ public class OriginationWindow {
     public static final String WINDOW_USER = "ORIG_WINDOW";
     public static final String CLEAR_RESOLUTION = "CLEARED_FALSE_POSITIVE", BLOCK_RESOLUTION = "BLOCKED_CONFIRMED_MATCH";
 
-    public record Run(String windowId, String windowTime, int extracted, int ready, int flagged, int rejected) {
+    /** One window run: what each step did (V19, ACHOrigWindowRun). */
+    public record Run(String windowId, String windowTime, int extracted, int ready, int flagged, int acctRejected, int limitRejected,
+            int holdRejected) {
+        public int rejected() {
+            return acctRejected + limitRejected + holdRejected;
+        }
+    }
+
+    /** One row of the processing schedule (V19, ACHOrigSchedule). */
+    public record Window(int scheduleId, String windowTime, String windowName) {
+    }
+
+    /** Where a transfer's run through steps 2-7 ended. */
+    enum Outcome {
+        READY, FLAGGED, ACCOUNT, LIMIT, HOLD, SKIPPED
     }
 
     public record Resolution(String transferId, String previousStatus, String currentStatus) {
@@ -73,24 +89,41 @@ public class OriginationWindow {
         this.orig = orig;
     }
 
-    /** Steps 1-7 for every transfer due by the business date. Each transfer is its own DB transaction. */
+    /** A scheduled window. */
     public Run run(LocalDate businessDate, String windowTime) {
+        return run(businessDate, windowTime, "SCHEDULER");
+    }
+
+    /** Steps 1-7 for every transfer due by the business date. Each transfer is its own DB transaction. */
+    public Run run(LocalDate businessDate, String windowTime, String runBy) {
+        LocalDateTime started = LocalDateTime.now(clock).withNano(0);
         String windowId = "WIN-" + businessDate.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" + windowTime.replace(":", "");
         List<String> due = extract(businessDate);
-        int ready = 0, flagged = 0, rejected = 0;
+        Map<Outcome, Integer> n = new EnumMap<>(Outcome.class);
         for (String serNo : due) {
-            String outcome = transaction.execute(s -> process(serNo));
-            switch (outcome) {
-                case READY_TO_POST -> ready++;
-                case FLAGGED -> flagged++;
-                case REJECTED -> rejected++;
-                default -> {
-                }
-            }
+            n.merge(transaction.execute(s -> process(serNo, windowTime)), 1, Integer::sum);
         }
+        Run run = new Run(windowId, windowTime, due.size(), n.getOrDefault(Outcome.READY, 0), n.getOrDefault(Outcome.FLAGGED, 0),
+                n.getOrDefault(Outcome.ACCOUNT, 0), n.getOrDefault(Outcome.LIMIT, 0), n.getOrDefault(Outcome.HOLD, 0));
+        jdbc.update("INSERT INTO " + orig + ".ACHOrigWindowRun (windowID, scheduleID, businessDt, windowTime, extractedCnt, acctRejectCnt, "
+                + "limitRejectCnt, flaggedCnt, holdRejectCnt, readyCnt, runBy, startTm, endTm) VALUES (?, (SELECT scheduleID FROM " + orig
+                + ".ACHOrigSchedule WHERE windowTime = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", windowId, windowTime, businessDate, windowTime, run.extracted(), run.acctRejected(), run.limitRejected(), run.flagged(),
+                run.holdRejected(), run.ready(), runBy, started, LocalDateTime.now(clock).withNano(0));
         appLog.log(ACH_ORIG, "INFO", "%s: %d transfer(s) due, %d ready to post, %d flagged by OFAC, %d rejected"
-                .formatted(windowId, due.size(), ready, flagged, rejected));
-        return new Run(windowId, windowTime, due.size(), ready, flagged, rejected);
+                .formatted(windowId, due.size(), run.ready(), run.flagged(), run.rejected()));
+        return run;
+    }
+
+    /** The active windows, in time order. */
+    public List<Window> schedule() {
+        return jdbc.query("SELECT scheduleID, windowTime, windowName FROM " + orig + ".ACHOrigSchedule WHERE status = 'ACTIVE' "
+                + "ORDER BY windowTime", (rs, i) -> new Window(rs.getInt(1), rs.getString(2), rs.getString(3)));
+    }
+
+    /** The window runs for a business date, in order, for the ACH Origination Processing screen. */
+    public List<Map<String, Object>> runs(LocalDate businessDate) {
+        return jdbc.queryForList("SELECT windowID, windowTime, extractedCnt, acctRejectCnt, limitRejectCnt, flaggedCnt, holdRejectCnt, "
+                + "readyCnt, runBy, startTm FROM " + orig + ".ACHOrigWindowRun WHERE businessDt = ? ORDER BY runID", businessDate);
     }
 
     /** Step 1: submitted transfers, and later payments of a series, whose effective date has come. */
@@ -99,24 +132,26 @@ public class OriginationWindow {
                 + "AND transferVersion = 1 AND effectiveDt <= ? ORDER BY transferSerNo", String.class, PENDING_BATCH, businessDate);
     }
 
-    /** Steps 2-7 for one transfer. Returns its new processStatus, or FLAGGED. */
-    String process(String serNo) {
+    /** Steps 2-7 for one transfer. */
+    Outcome process(String serNo, String windowTime) {
         Transfer t = load(serNo, true).orElse(null);
         if (t == null || !t.processStatus().equals(PENDING_BATCH)) {
-            return "SKIPPED"; // changed since it was extracted
+            return Outcome.SKIPPED; // changed since it was extracted
         }
         Optional<String> problem = accountProblem(t);
-        if (problem.isEmpty()) {
-            problem = transfers.limitProblem(t.memberNo(), t.acctType(), BigDecimal.ZERO).map(m -> "LIMIT_EXCEEDED: " + m);
-        }
         if (problem.isPresent()) {
             reject(t, problem.get());
-            return REJECTED;
+            return Outcome.ACCOUNT;
+        }
+        problem = transfers.limitProblem(t.memberNo(), t.acctType(), BigDecimal.ZERO).map(m -> "LIMIT_EXCEEDED: " + m);
+        if (problem.isPresent()) {
+            reject(t, problem.get());
+            return Outcome.LIMIT;
         }
         if (!t.ofacStatus().equals(CLEARED)) {
             if (ofac.isHit(t.recvName())) {
                 flag(t);
-                return FLAGGED;
+                return Outcome.FLAGGED;
             }
             jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET ofacStatus = ?, ofacTm = NOW() WHERE transferSerNo = ? "
                     + "AND transferVersion = 1", OFAC_PASSED, serNo);
@@ -124,11 +159,11 @@ public class OriginationWindow {
         Optional<String> hold = placeHold(t);
         if (hold.isPresent()) {
             reject(t, hold.get());
-            return REJECTED;
+            return Outcome.HOLD;
         }
-        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processStatus = ?, processTm = NOW() WHERE transferSerNo = ? "
-                + "AND transferVersion = 1", READY_TO_POST, serNo);
-        return READY_TO_POST;
+        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET processStatus = ?, processTm = NOW(), scheduleID = (SELECT scheduleID FROM "
+                + orig + ".ACHOrigSchedule WHERE windowTime = ?) WHERE transferSerNo = ? AND transferVersion = 1", READY_TO_POST, windowTime, serNo);
+        return Outcome.READY;
     }
 
     /** Step 2: the funding account must be active and, if no hold is placed yet, cover the amount and fee. */

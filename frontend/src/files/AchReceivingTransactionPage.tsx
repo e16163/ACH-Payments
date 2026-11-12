@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
-import type { ReceivedFile } from './AchReceivingFilePage'
+import type { ReceivedFile } from './AchReceivingProcessingPage'
 
 type Overview = {
   tranID: number; amount: number; creditFlag: number; originatorID: string; companyName: string; recvName: string

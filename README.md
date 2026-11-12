@@ -135,8 +135,8 @@ The app opens on a **Sign in** page, and **Sign out** is at the top right. These
 | User | Role | Can use |
 | --- | --- | --- |
 | `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, System Audit & App Logs, Open Core Banking API, ACH Payments API |
-| `achorig` (or `APP_ORIG_USERNAME`) | ACH origination back office (`ACH_ORIG_OPS`) | ACH Origination File, Return, Reversal, Resubmission, NOC |
-| `achrecv` (or `APP_RECV_USERNAME`) | ACH receiving back office (`ACH_RECV_OPS`) | ACH Receiving File, ACH Receiving Transactions, Return, Reversal, NOC |
+| `achorig` (or `APP_ORIG_USERNAME`) | ACH origination back office (`ACH_ORIG_OPS`) | ACH Origination Processing, Return, Reversal, Resubmission, NOC |
+| `achrecv` (or `APP_RECV_USERNAME`) | ACH receiving back office (`ACH_RECV_OPS`) | ACH Receiving Processing, ACH Receiving Transactions, Return, Reversal, NOC |
 | `member` | Member: the sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay (Add ACH Transfer, External Bank Accounts). After the password, enter the 6-digit code shown on screen (simulated MFA). |
 
 Scripts and tests can still send HTTP Basic credentials, but a browser never gets the Basic login popup.
@@ -174,7 +174,7 @@ mvn test
 - [x] Design doc and DB model reviewed ([docs/DB-MODEL.md](docs/DB-MODEL.md), source in [docs/ACH Payments System Design/](docs/ACH%20Payments%20System%20Design/))
 - [x] Database schema: all 30 designed tables exactly as written, plus approved additions (V1–V15), with the sample data
 - [x] ACH Origination Transfer UI (UC-ACH-ORG-01): member login with MFA, external transfer, limits, OFAC, memo hold
-- [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, `achorig` ACH Origination File page
+- [x] End-of-day ACH file (UC-ACH-EOD-01): the 5 PM job, NACHA file, simulated Fed, retries, audit trail, `achorig` ACH Origination Processing page
 - [x] Inbound FedACH ingestion (UC-ACH-RCV-01): the 6 AM pickup, signature, control totals, EX-01 to EX-03, audit trail
 - [x] ACH Receiving Transaction UI (UC-ACH-RCV-02): files by day, 10 per page by trace number, all 24 fields
 - [x] Back-office screens (UC-ACH-BO): read-only Return, Reversal, Resubmission and NOC screens, guessed from the table design

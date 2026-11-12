@@ -11,7 +11,6 @@ import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -59,17 +58,13 @@ public class ReceivingController {
     }
 
     private final JdbcTemplate jdbc;
-    private final ReceivingEngine engine;
-    private final ReceivedEntryProcessor processor;
     private final FedInboundSimulator fed;
     private final AppLogRepository appLog;
     private final String recv;
 
-    public ReceivingController(JdbcTemplate jdbc, ReceivingEngine engine, ReceivedEntryProcessor processor, FedInboundSimulator fed, AppLogRepository appLog,
+    public ReceivingController(JdbcTemplate jdbc, FedInboundSimulator fed, AppLogRepository appLog,
             @Value("${app.db.receiving}") String recv) {
         this.jdbc = jdbc;
-        this.engine = engine;
-        this.processor = processor;
         this.fed = fed;
         this.appLog = appLog;
         this.recv = recv;
@@ -87,20 +82,23 @@ public class ReceivingController {
                 + "ORDER BY f.fileHeaderDt DESC, f.fileID DESC", new DataClassRowMapper<>(FileRow.class));
     }
 
-    /** Simulates the Fed delivering a file, then processes it as a window would (steps 2-6), so a demo needn't wait for one. */
+    public record Delivered(String fileName, String message) {
+    }
+
+    /**
+     * Simulates the Fed delivering a file to fed/inbound. As in Ba's blueprint, nothing happens to it until a processing window
+     * picks it up (step 1); the ACH Receiving Processing screen can run one now.
+     */
     @PostMapping("/files/receive")
-    public List<ReceivingEngine.Result> receive(@RequestBody ReceiveRequest body, Principal user) throws IOException {
+    public Delivered receive(@RequestBody ReceiveRequest body, Principal user) throws IOException {
         if (body.sample() == null) {
             throw new IllegalArgumentException("Choose a file to receive.");
         }
         fed.deliver(body.sample());
-        List<ReceivingEngine.Result> results = engine.ingestAll();
-        results.stream().filter(r -> r.processStatus().equals(ReceivingEngine.VALIDATED)).forEach(r -> processor.process(r.fileID()));
-        String outcome = results.stream().map(r -> r.fileID() + " " + r.processStatus()).collect(Collectors.joining(", "));
-        boolean validated = !results.isEmpty() && results.stream().allMatch(r -> r.processStatus().equals(ReceivingEngine.VALIDATED));
-        appLog.log(ACH_RCV, validated ? "INFO" : "WARN", "User '%s' received sample %s: %s"
-                .formatted(user.getName(), body.sample(), results.isEmpty() ? "no file finished" : outcome));
-        return results;
+        String fileName = body.sample().name() + ".ach";
+        appLog.log(ACH_RCV, "INFO", "User '%s' received sample %s: %s is waiting for the next processing window"
+                .formatted(user.getName(), body.sample(), fileName));
+        return new Delivered(fileName, fileName + " is in fed/inbound, waiting for the next processing window.");
     }
 
     /**

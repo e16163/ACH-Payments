@@ -97,9 +97,15 @@ public class EodFileStore {
      */
     @Transactional
     public Optional<String> compile(LocalDate businessDate, String processID) {
+        return compile(businessDate, processID, null);
+    }
+
+    /** scheduleID: only the transfers that window made ready, and the file records it; null for every ready transfer (5 PM). */
+    @Transactional
+    public Optional<String> compile(LocalDate businessDate, String processID, Integer scheduleID) {
         alertOnFlaggedItems(businessDate);
         Map<BatchKey, List<Due>> groups = new TreeMap<>();
-        for (Due d : dueTransfers(businessDate)) {
+        for (Due d : dueTransfers(businessDate, scheduleID)) {
             if (readyForFile(d)) {
                 String desc = d.memo() == null || RESERVED_ENTRY_DESC.contains(d.memo()) ? DEFAULT_ENTRY_DESC : d.memo();
                 groups.computeIfAbsent(new BatchKey(SEC_CODE, d.originatorID(), d.odfiRouting(), d.effectiveDt(), desc),
@@ -111,7 +117,7 @@ public class EodFileStore {
             return Optional.empty();
         }
 
-        String fileID = insertFile(processID, groups);
+        String fileID = insertFile(processID, scheduleID, groups);
         int batchNo = 0;
         for (Map.Entry<BatchKey, List<Due>> group : groups.entrySet()) {
             insertBatch(fileID, ++batchNo, processID, group.getKey(), group.getValue());
@@ -133,7 +139,7 @@ public class EodFileStore {
                 .forEach(serNo -> appLog.log(ACH_ORIG, "WARN", "Compliance alert: " + serNo + " is flagged by OFAC and left out of the EOD file"));
     }
 
-    private List<Due> dueTransfers(LocalDate businessDate) {
+    private List<Due> dueTransfers(LocalDate businessDate, Integer scheduleID) {
         return jdbc.query("SELECT t.transferSerNo, COALESCE(t.pTransferSerNo, t.transferSerNo) AS firstSerNo, "
                 + "t.transferAmt, t.memoStatus, t.ofacStatus, t.companyEntryDesc, t.effectiveDt, t.originatorID, o.routingNo AS odfiRouting, "
                 + "t.sourceID, t.recurringFlag, a.acctOwner, a.routingNo, a.acctNo, a.acctType "
@@ -141,13 +147,13 @@ public class EodFileStore {
                 + "JOIN " + orig + ".ACHOrigRecvAccount a ON a.recvAcctSerNo = t.recvAcctSerNo AND a.recvAcctVersion = t.recvAcctVersion "
                 + "JOIN " + orig + ".ACHOriginator o ON o.originatorID = t.originatorID "
                 + "WHERE t.processStatus = 'READY_TO_POST' AND t.ofacStatus IN ('OFAC_PASSED', 'CLEARED') AND t.transferVersion = 1 "
-                + "AND t.effectiveDt <= ? ORDER BY t.transferSerNo FOR UPDATE",
+                + "AND t.effectiveDt <= ? AND (? IS NULL OR t.scheduleID = ?) ORDER BY t.transferSerNo FOR UPDATE",
                 (rs, i) -> new Due(rs.getString("transferSerNo"), rs.getString("firstSerNo"),
                         rs.getBigDecimal("transferAmt"), rs.getString("memoStatus"), rs.getString("ofacStatus"),
                         rs.getString("companyEntryDesc"), rs.getObject("effectiveDt", LocalDate.class), rs.getString("originatorID"),
                         rs.getString("odfiRouting"), rs.getString("sourceID"), rs.getBoolean("recurringFlag"),
                         rs.getString("acctOwner"), rs.getString("routingNo"), rs.getString("acctNo"), rs.getString("acctType")),
-                businessDate);
+                businessDate, scheduleID, scheduleID);
     }
 
     /**
@@ -168,7 +174,7 @@ public class EodFileStore {
         return true;
     }
 
-    private String insertFile(String processID, Map<BatchKey, List<Due>> groups) {
+    private String insertFile(String processID, Integer scheduleID, Map<BatchKey, List<Due>> groups) {
         LocalDate today = LocalDate.now(clock);
         String day = "FILE_" + today.format(DateTimeFormatter.BASIC_ISO_DATE) + "_";
         String max = jdbc.queryForObject("SELECT MAX(fileID) FROM " + orig + ".ACHOrigFile WHERE fileID LIKE ?", String.class, day + "%");
@@ -180,9 +186,9 @@ public class EodFileStore {
         List<Due> all = groups.values().stream().flatMap(List::stream).toList();
         BigDecimal credits = all.stream().map(Due::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
         String origin = all.get(0).odfiRouting();
-        jdbc.update("INSERT INTO " + orig + ".ACHOrigFile (fileID, processID, fileIDModifier, fileName, fileHeaderDt, fileHeaderTm, "
-                + "totalCreditCount, totalCreditAmt, fedStatus, immedDest, immedOrigin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?)",
-                fileID, processID, String.valueOf(MODIFIERS.charAt(seq - 1)), fileID + ".ach", today,
+        jdbc.update("INSERT INTO " + orig + ".ACHOrigFile (fileID, processID, scheduleID, fileIDModifier, fileName, fileHeaderDt, fileHeaderTm, "
+                + "totalCreditCount, totalCreditAmt, fedStatus, immedDest, immedOrigin) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'QUEUED', ?, ?)",
+                fileID, processID, scheduleID, String.valueOf(MODIFIERS.charAt(seq - 1)), fileID + ".ach", today,
                 LocalTime.now(clock).withSecond(0).withNano(0), all.size(), credits, param("FED_IMMEDIATE_DEST"), origin);
         return fileID;
     }

@@ -43,20 +43,31 @@ public class EodFileJob {
         this.backoffMillis = backoffMillis;
     }
 
-    /** Idempotency note: files left QUEUED by an interrupted run go first, then anything newly due. */
+    /** The 5 PM file: a last window, then everything ready that no operator sent from a window. */
     public synchronized RunResult run(java.time.LocalDate businessDate) {
+        return send(businessDate, true, processID(), null);
+    }
+
+    /** Send to the Fed, from the ACH Origination Processing screen: a file of the transfers that schedule made ready. */
+    public synchronized RunResult sendNow(java.time.LocalDate businessDate, String windowId, int scheduleID) {
+        return send(businessDate, false, windowId, scheduleID);
+    }
+
+    /** Idempotency note: files left QUEUED by an interrupted run go first, then anything newly due. */
+    private RunResult send(java.time.LocalDate businessDate, boolean sweep, String processID, Integer scheduleID) {
         if (!calendar.isBankingDay(businessDate)) {
             appLog.log(ACH_ORIG, "INFO", "EOD file: " + businessDate + " is not a banking day");
             return new RunResult(null, null, businessDate + " isn't a banking day, so no file was built.");
         }
         store.queuedFiles().forEach(this::transmit);
-        // A last origination window first (Ba's blueprint steps 1-7), so a transfer cleared by compliance after 3 PM, or a
-        // business date chosen with Run now, is made ready to post.
-        window.run(businessDate, "EOD");
-        String processID = processID();
+        if (sweep) {
+            // A last origination window first (Ba's blueprint steps 1-7), so a transfer cleared by compliance after 3 PM, or a
+            // business date chosen with Run now, is made ready to post.
+            window.run(businessDate, "EOD", "EOD_BATCH");
+        }
         Optional<String> fileID;
         try {
-            fileID = store.compile(businessDate, processID);
+            fileID = store.compile(businessDate, processID, scheduleID);
         } catch (RuntimeException e) {
             appLog.log(ACH_ORIG, "FATAL", "EOD file could not be built: " + e.getMessage(), e);
             return new RunResult(null, "ERROR", "The file could not be built. See AppLog.");

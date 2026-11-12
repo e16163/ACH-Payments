@@ -7,7 +7,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
-import java.util.Arrays;
 import java.util.List;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -21,7 +20,7 @@ import com.achpayments.param.ParamCache;
 
 /**
  * Ba's blueprint, ACH Receiving Processing steps 1 and 7: on banking days, runs the latest processing window that has
- * passed (ACH_RCV/RECV_WINDOW_TIMES) once, then the core posting file at ACH_RCV/CORE_POSTING_TIME. Checks once a minute,
+ * passed (ACHRecvSchedule) once, then the core posting file at ACH_RCV/CORE_POSTING_TIME. Checks once a minute,
  * like EodScheduler, so a parameter change needs no restart. After a restart only the latest window runs; it picks up
  * every waiting file, so nothing is missed.
  */
@@ -67,14 +66,13 @@ public class ReceivingScheduler {
         List<LocalTime> windows;
         LocalTime postingTime;
         try {
-            windows = Arrays.stream(params.get("ACH_RCV", "RECV_WINDOW_TIMES").orElse("").split(","))
-                    .map(String::trim).map(LocalTime::parse).sorted().toList();
+            windows = window.schedule().stream().map(w -> LocalTime.parse(w.windowTime())).sorted().toList();
             postingTime = LocalTime.parse(params.get("ACH_RCV", "CORE_POSTING_TIME").orElse(""));
         } catch (DateTimeParseException e) {
             if (!today.equals(lastAlert)) { // one alert a day, not one a minute
                 lastAlert = today;
-                appLog.log(ACH_RCV, "FATAL", "Inbound processing not run: RECV_WINDOW_TIMES or CORE_POSTING_TIME isn't a list of "
-                        + "times like 06:00,09:00 (" + e.getParsedString() + ")");
+                appLog.log(ACH_RCV, "FATAL", "Inbound processing not run: ACHRecvSchedule or CORE_POSTING_TIME has a time "
+                        + "that isn't like 06:00 (" + e.getParsedString() + ")");
             }
             return;
         }

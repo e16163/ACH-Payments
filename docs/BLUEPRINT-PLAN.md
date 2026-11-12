@@ -150,6 +150,27 @@ Decisions made while building, where Ba's text is silent:
 - **Any rejection releases the hold** (a `RELEASE` row in `ACHMemoPost`, `memoStatus RELEASED`) and schedules the next payment of a recurring series.
 - **The trigger answers when the window is done** (`COMPLETED`), as on Receiving.
 
+### 4A. Ba's critique (2026-11-12): processing screens
+
+Ba: "ACH origination file → ACH origination processing; ACH receiving file → ACH receiving processing", with the flow *achorig login → ACH Origination Processing → today's date → select a schedule (6 AM, 9 AM, 12 PM, 3 PM) → the transactions ready to be sent to the Fed for today and that schedule → Send to the Fed → create the ACH origination file for them*, and "you must pull data from the database … your database model is very important".
+
+Decisions (asked and answered 2026-11-12):
+- **Pipeline screens**, not a rename only: each screen shows the blueprint's steps for a window.
+- **Schedules and runs are tables** (V19): `ACHOrigSchedule`, `ACHRecvSchedule`, `ACHOrigWindowRun`, `ACHRecvWindowRun`. They replace the `ORIG_WINDOW_TIMES` and `RECV_WINDOW_TIMES` parameters.
+- **`ACHOrigFile.scheduleID`** (Ba) records the schedule a file was sent from; NULL is the 5 PM file. **`ACHOriginatorTransfer.scheduleID`** (added, beyond Ba's ask) records the window that made a transfer ready, so a schedule lists and sends its own transactions only.
+- **Process, then list:** picking a schedule shows its last run today; **Process window** runs it. There are no per-step buttons.
+- **The date is today**, read-only. The online demo seeds 3 transfers dated today.
+- **The 5 PM file stays** as the catch-all for anything ready that no schedule sent.
+- **Receiving:** **Receive file** only delivers the file to `fed/inbound`; a window (scheduled, or **Process window**) runs steps 2–6 on every waiting file. Step 7's posting file shows on the same screen, with **Generate now**.
+
+| Piece | Where |
+| --- | --- |
+| Migration | `V19__processing_window_runs.sql` |
+| Origination | `OriginationWindow.run` records the run and sets `scheduleID`; `EodFileJob.sendNow` / `EodFileStore.compile(…, scheduleID)`; `OriginationProcessingController`: `GET /api/v1/ach/processing/windows`, `GET …/ready?schedule_id=`, `POST …/send-to-fed`, `GET …/files?schedule_id=` |
+| Receiving | `ReceivingWindow.run` records the run; `ReceivingController.receive` only delivers; `GET /api/v1/ach/receiving/windows` |
+| Screens | `AchOriginationProcessingPage.tsx`, `AchReceivingProcessingPage.tsx` (routes `#/ach-origination-processing`, `#/ach-receiving-processing`) |
+| Tests | `OriginationWindowIntegrationTest.aScheduleListsAndSendsOnlyTheTransfersItMadeReady`, `ReceivingBlueprintIntegrationTest.aReceivedFileWaitsForAWindowAndTheWindowRunIsKept`, the demo's `server.test.ts` |
+
 ## 5. Notes
 
 `docs/ACH-NOTES.md` gets each finished piece:

@@ -106,6 +106,19 @@ V14 adds made-up rows only, with no table or column changes: returns, NOCs, subs
 - `sample3-out-of-balance.ach` is Sample 1 with the wrong $26,750 kept and modifier `C`, to show EX-02.
 - the design's spec lists Immediate Destination at 03-12 and Amount at 30-41. Nacha's are 04-13 and 30-39, which the code uses.
 
+### Changes for the processing screens (V19, Ba's critique of 2026-11-12)
+
+| Change | Marked | Why |
+| --- | --- | --- |
+| `ach_origination.ACHOrigSchedule` (`scheduleID`, `windowTime` unique, `windowName`, `status`, `lastModBy`, `lastModTm`), seeded 06:00, 09:00, 12:00, 15:00 | Adds | Ba: "you shall have tables for the schedule". Replaces the `ORIG_WINDOW_TIMES` parameter. |
+| `ach_receiving.ACHRecvSchedule`, same columns, seeded 06:00 … 18:00 | Adds | The receiving windows. Replaces `RECV_WINDOW_TIMES`. |
+| `ACHOrigFile.scheduleID INT NULL`, FK to `ACHOrigSchedule` | Adds (Ba) | The schedule the file was sent from; NULL is the 5 PM file. |
+| `ACHOriginatorTransfer.scheduleID INT NULL`, FK to `ACHOrigSchedule` | Adds | The window that made the transfer `READY_TO_POST`, so a schedule lists and sends only its own transactions. |
+| `ACHOrigWindowRun` (`runID`, `windowID`, `scheduleID`, `businessDt`, `windowTime`, a count per step 1–7, `runBy`, `startTm`, `endTm`) | Adds | One row per window run, read by the ACH Origination Processing screen. The 5 PM sweep is a row with `windowTime 'EOD'` and no schedule. |
+| `ACHRecvWindowRun` (`runID`, `executionID`, `scheduleID`, `businessDt`, `windowTime`, file and entry counts for steps 2–6, `runBy`, `startTm`, `endTm`) | Adds | The same for ACH Receiving Processing. |
+
+The files and batches the screen lists are the design's own `ACHOrigFile`, `ACHOrigBatch` and `ACHOrigTransaction`, unchanged apart from `scheduleID`.
+
 ---
 
 ## 1. The design's tables by component
@@ -238,6 +251,9 @@ erDiagram
   ACHOrigNOC ||--o{ ACHOrigNOCAction : log
   ACHOrigFile ||--o{ ACHOrigFedAction : log
   Action ||--o{ ACHOrigNOCAction : "what"
+  ACHOrigSchedule |o--o{ ACHOrigFile : "sent from (V19)"
+  ACHOrigSchedule |o--o{ ACHOriginatorTransfer : "made ready by (V19)"
+  ACHOrigSchedule |o--o{ ACHOrigWindowRun : "runs (V19)"
 
   ACHRecvFile ||--o{ ACHRecvBatch : contains
   ACHRecvBatch ||--o{ ACHRecvTransaction : contains
@@ -247,6 +263,7 @@ erDiagram
   ACHRecvTransaction ||--o{ ACHRecvAction : "operator actions"
   ACHRecvTransaction ||--o| ACHRecvReturnRequest : "recall"
   ACHRecvAcctSubs }o--|| ACHRecvAccount : "old acct -> current"
+  ACHRecvSchedule |o--o{ ACHRecvWindowRun : "runs (V19)"
 ```
 
 ---

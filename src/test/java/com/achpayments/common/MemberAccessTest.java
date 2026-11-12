@@ -263,10 +263,10 @@ class MemberAccessTest {
         mvc.perform(post("/api/eod/files/F1/resend").with(httpBasic("achorig", "orig-pw")).with(csrf())).andExpect(status().isOk());
         org.mockito.Mockito.verify(appLog).log("ACH_ORIG", "ERROR", "User 'achorig' resent F1: ERROR");
 
-        org.mockito.Mockito.when(receivingEngine.ingestAll()).thenReturn(java.util.List.of());
         mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("achrecv", "recv-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}")).andExpect(status().isOk());
-        org.mockito.Mockito.verify(appLog).log("ACH_RCV", "WARN", "User 'achrecv' received sample PAYROLL: no file finished");
+        org.mockito.Mockito.verify(appLog).log("ACH_RCV", "INFO",
+                "User 'achrecv' received sample PAYROLL: PAYROLL.ach is waiting for the next processing window");
     }
 
     @Test
@@ -294,11 +294,10 @@ class MemberAccessTest {
         mvc.perform(post("/api/eod/files/F1/resend").with(httpBasic("achorig", "orig-pw")).with(csrf())).andExpect(status().isOk());
         org.mockito.Mockito.verify(appLog).log("ACH_ORIG", "INFO", "User 'achorig' resent F1: SENT");
 
-        org.mockito.Mockito.when(receivingEngine.ingestAll())
-                .thenReturn(java.util.List.of(new ReceivingEngine.Result("R1", "s.ach", "VALIDATED", "ok")));
         mvc.perform(post("/api/v1/ach/receiving/files/receive").with(httpBasic("achrecv", "recv-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content("{\"sample\":\"PAYROLL\"}")).andExpect(status().isOk());
-        org.mockito.Mockito.verify(appLog).log("ACH_RCV", "INFO", "User 'achrecv' received sample PAYROLL: R1 VALIDATED");
+        org.mockito.Mockito.verify(appLog).log("ACH_RCV", "INFO",
+                "User 'achrecv' received sample PAYROLL: PAYROLL.ach is waiting for the next processing window");
     }
 
     @Test
@@ -317,8 +316,9 @@ class MemberAccessTest {
         String trigger = "{\"window_time\":\"12:00\"}";
         mvc.perform(post("/api/v1/ach/processing/trigger-window").with(httpBasic("achcomp", "comp-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(trigger)).andExpect(status().isForbidden());
-        org.mockito.Mockito.when(originationWindow.run(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("12:00")))
-                .thenReturn(new com.achpayments.origination.OriginationWindow.Run("WIN-20261106-1200", "12:00", 0, 0, 0, 0));
+        org.mockito.Mockito.when(originationWindow.run(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("12:00"),
+                org.mockito.ArgumentMatchers.eq("achorig")))
+                .thenReturn(new com.achpayments.origination.OriginationWindow.Run("WIN-20261106-1200", "12:00", 0, 0, 0, 0, 0, 0));
         mvc.perform(post("/api/v1/ach/processing/trigger-window").with(httpBasic("achorig", "orig-pw")).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON).content(trigger)).andExpect(status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.window_id").value("WIN-20261106-1200"));
@@ -326,7 +326,7 @@ class MemberAccessTest {
 
     @Test
     void onlyReceivingOpsRunBlueprintSteps() throws Exception {
-        org.mockito.Mockito.when(receivingWindow.run("09:00", null)).thenReturn(new com.achpayments.inbound.ReceivingWindow.Run(
+        org.mockito.Mockito.when(receivingWindow.run("09:00", null, "achrecv")).thenReturn(new com.achpayments.inbound.ReceivingWindow.Run(
                 "EXEC-REC-20261106-0900", "COMPLETED", "09:00", java.time.OffsetDateTime.parse("2026-11-06T14:00:00Z"), java.util.List.of()));
         mvc.perform(post("/api/v1/ach/receiving/trigger/0900").with(httpBasic("achorig", "orig-pw")).with(csrf()))
                 .andExpect(status().isForbidden());

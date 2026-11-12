@@ -2,8 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { api, ApiError, DEMO, logout } from './api'
 import BackOfficePage from './backoffice/BackOfficePage'
 import { SCREENS } from './backoffice/screens'
-import AchOriginationFilePage from './files/AchOriginationFilePage'
-import AchReceivingFilePage from './files/AchReceivingFilePage'
+import AchOriginationProcessingPage from './files/AchOriginationProcessingPage'
+import AchReceivingProcessingPage from './files/AchReceivingProcessingPage'
 import AchReceivingTransactionPage from './files/AchReceivingTransactionPage'
 import LoginPage from './LoginPage'
 import AccountsPage from './member/AccountsPage'
@@ -28,8 +28,8 @@ const ROUTES = {
   appLogs: '#/system-audit-app-logs',
   coreApi: '#/open-core-banking-api',
   achApi: '#/ach-payments-api',
-  originationFile: '#/ach-origination-file',
-  receivingFile: '#/ach-receiving-file',
+  originationProcessing: '#/ach-origination-processing',
+  receivingProcessing: '#/ach-receiving-processing',
   receivingTransactions: '#/ach-receiving-transactions',
   ofacReview: '#/ofac-review',
   accounts: '#/accounts',
@@ -106,11 +106,11 @@ export default function App() {
   else if (isAdmin && hash === ROUTES.coreApi) page = <ApiSpecPage key={hash} page="core" />
   else if (isAdmin && hash === ROUTES.achApi) page = <ApiSpecPage key={hash} page="ach" />
   else if (screen) page = <BackOfficePage key={screen.route} screen={screen} />
-  else if (isOrigOps) page = <AchOriginationFilePage />
+  else if (isOrigOps) page = <AchOriginationProcessingPage />
   else if (isRecvOps && onTransactions) {
     page = <AchReceivingTransactionPage route={ROUTES.receivingTransactions} fileID={decodeURIComponent(hash.slice(ROUTES.receivingTransactions.length + 1))} />
   } else if (isRecvOps) {
-    page = <AchReceivingFilePage transactionsRoute={ROUTES.receivingTransactions} />
+    page = <AchReceivingProcessingPage transactionsRoute={ROUTES.receivingTransactions} />
   } else if (isCompliance) page = <OfacReviewPage />
   else if (isAdmin) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
@@ -150,12 +150,12 @@ export default function App() {
             </>
           )}
           {isOrigOps && (
-            <a className={!screen ? 'active' : ''} href={ROUTES.originationFile}>ACH Origination File</a>
+            <a className={!screen ? 'active' : ''} href={ROUTES.originationProcessing}>ACH Origination Processing</a>
           )}
           {isCompliance && <a className="active" href={ROUTES.ofacReview}>OFAC Review</a>}
           {isRecvOps && (
             <>
-              <a className={!onTransactions && !screen ? 'active' : ''} href={ROUTES.receivingFile}>ACH Receiving File</a>
+              <a className={!onTransactions && !screen ? 'active' : ''} href={ROUTES.receivingProcessing}>ACH Receiving Processing</a>
               <a className={onTransactions ? 'active' : ''} href={ROUTES.receivingTransactions}>ACH Receiving Transactions</a>
             </>
           )}

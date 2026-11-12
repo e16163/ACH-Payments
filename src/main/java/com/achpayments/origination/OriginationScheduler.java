@@ -7,7 +7,6 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
-import java.util.Arrays;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Configuration;
@@ -16,11 +15,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 
 import com.achpayments.common.AppLogRepository;
 import com.achpayments.common.BankingCalendar;
-import com.achpayments.param.ParamCache;
 
 /**
  * Ba's blueprint, ACH Origination Processing: on banking days, runs the latest window that has passed
- * (ACH_ORIG/ORIG_WINDOW_TIMES) once. Checks once a minute, like ReceivingScheduler; the file itself goes at the EOD cutoff.
+ * (ACHOrigSchedule) once. Checks once a minute, like ReceivingScheduler; the file itself goes at the EOD cutoff.
  */
 @Configuration
 @EnableScheduling
@@ -28,16 +26,14 @@ import com.achpayments.param.ParamCache;
 public class OriginationScheduler {
 
     private final OriginationWindow window;
-    private final ParamCache params;
     private final BankingCalendar calendar;
     private final AppLogRepository appLog;
     private final Clock clock;
     private LocalDateTime lastWindow;
     private LocalDate lastAlert;
 
-    public OriginationScheduler(OriginationWindow window, ParamCache params, BankingCalendar calendar, AppLogRepository appLog, Clock clock) {
+    public OriginationScheduler(OriginationWindow window, BankingCalendar calendar, AppLogRepository appLog, Clock clock) {
         this.window = window;
-        this.params = params;
         this.calendar = calendar;
         this.appLog = appLog;
         this.clock = clock;
@@ -59,8 +55,7 @@ public class OriginationScheduler {
             return;
         }
         try {
-            Arrays.stream(params.get("ACH_ORIG", "ORIG_WINDOW_TIMES").orElse("").split(","))
-                    .map(String::trim).map(LocalTime::parse).sorted()
+            window.schedule().stream().map(w -> LocalTime.parse(w.windowTime())).sorted()
                     .filter(t -> !t.isAfter(now.toLocalTime())).reduce((a, b) -> b).ifPresent(t -> {
                         LocalDateTime due = today.atTime(t);
                         if (!due.equals(lastWindow)) {
@@ -71,7 +66,7 @@ public class OriginationScheduler {
         } catch (DateTimeParseException e) {
             if (!today.equals(lastAlert)) { // one alert a day, not one a minute
                 lastAlert = today;
-                appLog.log(ACH_ORIG, "FATAL", "Origination window not run: ORIG_WINDOW_TIMES isn't a list of times like 06:00,09:00 ("
+                appLog.log(ACH_ORIG, "FATAL", "Origination window not run: ACHOrigSchedule has a time that isn't like 06:00 ("
                         + e.getParsedString() + ")");
             }
         }

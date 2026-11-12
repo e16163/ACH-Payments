@@ -65,6 +65,10 @@ public class ReceivedEntryProcessor {
             BigDecimal totalMemoDebits, String status) {
     }
 
+    /** What steps 4-6 did to one file, for the window run (V19, ACHRecvWindowRun). */
+    public record Counts(int entries, int matched, int corrected, int review, int rejected, int memoPosted) {
+    }
+
     private record Return(String code, String reason) {
     }
 
@@ -86,13 +90,15 @@ public class ReceivedEntryProcessor {
     }
 
     /** Steps 4-6, as a processing window runs them. */
-    public void process(String fileID) {
+    public Counts process(String fileID) {
         TranscodeResult t = processTranscodesAndAccounts(fileID);
         RejectionResult r = evaluateRejections(fileID);
         MemoResult m = memoPost(fileID, true);
         appLog.log(ACH_RCV, "INFO", "%s processed: %d matched, %d auto-corrected, %d for manual review, %d rejected, %d memo posted"
                 .formatted(fileID, t.matchedAccounts(), t.autoCorrectedAccounts(), t.manualReviewRequired(), r.rejectedCount(),
                         m.memoPostedCount()));
+        return new Counts(t.processedCount(), t.matchedAccounts(), t.autoCorrectedAccounts(), t.manualReviewRequired(), r.rejectedCount(),
+                m.memoPostedCount());
     }
 
     /** Step 4: map the transaction code, then find the account: exact, a known alias (ACHRecvAcctSubs), or zero padding. */

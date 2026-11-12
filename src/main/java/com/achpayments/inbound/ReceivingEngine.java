@@ -112,6 +112,11 @@ public class ReceivingEngine {
         return results;
     }
 
+    /** The files in fed/inbound that the next window will pick up. */
+    public List<String> waiting() {
+        return waitingFiles().stream().map(p -> p.getFileName().toString()).toList();
+    }
+
     private TreeSet<Path> waitingFiles() {
         TreeSet<Path> files = new TreeSet<>();
         if (Files.isDirectory(inbound)) {

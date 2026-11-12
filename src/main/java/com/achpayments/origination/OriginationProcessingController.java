@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.achpayments.common.AppLogRepository;
@@ -113,6 +114,44 @@ public class OriginationProcessingController {
     public record WindowRequest(String windowTime, String executionMode, Boolean overrideSafetyLock) {
     }
 
+    // ---- the ACH Origination Processing screen ----
+
+    /** A window's last run today: steps 1-7 (ACHOrigWindowRun). */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record WindowRun(String windowId, int extracted, int accountRejected, int limitRejected, int ofacFlagged, int holdRejected,
+            int readyToPost, String runBy, LocalDateTime startedAt) {
+    }
+
+    /** One row of ACHOrigSchedule, with its last run today (null if it hasn't run). */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record Schedule(int scheduleId, String windowTime, String windowName, WindowRun lastRun) {
+    }
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record Today(LocalDate businessDate, List<Schedule> schedules, int waitingForCompliance) {
+    }
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record Ready(String transferId, String recipientName, String routingNumber, BigDecimal amount, LocalDate effectiveDt,
+            LocalDateTime readyAt) {
+    }
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record SendRequest(Integer scheduleId) {
+    }
+
+    /** A row of ACHOrigBatch. */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record Batch(String batchId, int batchNo, String companyName, String stdEntryCode, String companyEntryDesc, LocalDate effectiveDt,
+            int entryCount, BigDecimal totalCreditAmt) {
+    }
+
+    /** A row of ACHOrigFile, with its batches. */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record FileRow(String fileId, String fileName, Integer scheduleId, LocalDate fileHeaderDt, java.time.LocalTime fileHeaderTm,
+            int totalCreditCount, BigDecimal totalCreditAmt, String fedStatus, LocalDateTime sendTm, List<Batch> batches) {
+    }
+
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record WindowResponse(String windowId, String executionStatus, String message, int estimatedCompletionSeconds) {
     }
@@ -123,16 +162,18 @@ public class OriginationProcessingController {
     private final JdbcTemplate jdbc;
     private final AppLogRepository appLog;
     private final Clock clock;
+    private final com.achpayments.outbound.EodFileJob fileJob;
     private final String orig;
 
     public OriginationProcessingController(OriginationWindow window, TransferService transfers, OfacScreening ofac, JdbcTemplate jdbc,
-            AppLogRepository appLog, Clock clock, @Value("${app.db.origination}") String orig) {
+            AppLogRepository appLog, Clock clock, com.achpayments.outbound.EodFileJob fileJob, @Value("${app.db.origination}") String orig) {
         this.window = window;
         this.transfers = transfers;
         this.ofac = ofac;
         this.jdbc = jdbc;
         this.appLog = appLog;
         this.clock = clock;
+        this.fileJob = fileJob;
         this.orig = orig;
     }
 
@@ -144,9 +185,71 @@ public class OriginationProcessingController {
             throw new IllegalArgumentException("window_time must be a time like 12:00.");
         }
         appLog.log(ACH_ORIG, "INFO", "User '%s' triggered origination window %s".formatted(user.getName(), time));
-        OriginationWindow.Run run = window.run(LocalDate.now(clock), time);
+        OriginationWindow.Run run = window.run(LocalDate.now(clock), time, user.getName());
         return new WindowResponse(run.windowId(), "COMPLETED", "ACH processing window %s: %d due, %d ready to post, %d flagged, %d rejected."
                 .formatted(time, run.extracted(), run.ready(), run.flagged(), run.rejected()), 0);
+    }
+
+    /** The screen: today's date, the schedule, each window's last run today, and step 5's queue. */
+    @GetMapping("/api/v1/ach/processing/windows")
+    public Today windows() {
+        LocalDate today = LocalDate.now(clock);
+        Map<String, WindowRun> last = new java.util.HashMap<>();
+        for (Map<String, Object> r : window.runs(today)) { // in run order, so the last one wins
+            last.put((String) r.get("windowTime"), new WindowRun((String) r.get("windowID"), n(r, "extractedCnt"), n(r, "acctRejectCnt"),
+                    n(r, "limitRejectCnt"), n(r, "flaggedCnt"), n(r, "holdRejectCnt"), n(r, "readyCnt"), (String) r.get("runBy"),
+                    (LocalDateTime) r.get("startTm")));
+        }
+        List<Schedule> schedules = window.schedule().stream()
+                .map(w -> new Schedule(w.scheduleId(), w.windowTime(), w.windowName(), last.get(w.windowTime()))).toList();
+        Integer waiting = jdbc.queryForObject("SELECT COUNT(*) FROM " + orig + ".ACHOriginatorTransfer WHERE ofacStatus = 'FLAGGED' "
+                + "AND transferVersion = 1", Integer.class);
+        return new Today(today, schedules, waiting == null ? 0 : waiting);
+    }
+
+    /** The transactions ready to be sent to the Fed for today and the schedule: the ones that window made READY_TO_POST. */
+    @GetMapping("/api/v1/ach/processing/ready")
+    public List<Ready> ready(@RequestParam("schedule_id") int scheduleId) {
+        return jdbc.query("SELECT t.transferSerNo, a.acctOwner, a.routingNo, t.transferAmt, t.effectiveDt, t.processTm FROM " + orig
+                + ".ACHOriginatorTransfer t JOIN " + orig + ".ACHOrigRecvAccount a ON a.recvAcctSerNo = t.recvAcctSerNo "
+                + "AND a.recvAcctVersion = t.recvAcctVersion WHERE t.processStatus = 'READY_TO_POST' AND t.scheduleID = ? "
+                + "AND t.effectiveDt <= ? AND t.transferVersion = 1 ORDER BY t.transferSerNo",
+                (rs, i) -> new Ready(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBigDecimal(4), rs.getObject(5, LocalDate.class),
+                        rs.getObject(6, LocalDateTime.class)), scheduleId, LocalDate.now(clock));
+    }
+
+    /** Send to the Fed: creates the ACH origination file of that schedule's ready transactions, and sends it. */
+    @PostMapping("/api/v1/ach/processing/send-to-fed")
+    public com.achpayments.outbound.EodFileJob.RunResult sendToFed(@RequestBody SendRequest body, Principal user) {
+        OriginationWindow.Window w = window.schedule().stream().filter(x -> body.scheduleId() != null && x.scheduleId() == body.scheduleId())
+                .findFirst().orElseThrow(() -> new IllegalArgumentException("Choose a schedule."));
+        LocalDate today = LocalDate.now(clock);
+        String windowId = "WIN-" + today.format(DateTimeFormatter.BASIC_ISO_DATE) + "-" + w.windowTime().replace(":", "");
+        var result = fileJob.sendNow(today, windowId, w.scheduleId());
+        appLog.log(ACH_ORIG, "ERROR".equals(result.fedStatus()) ? "ERROR" : "INFO", "User '%s' sent the %s schedule to the Fed: %s"
+                .formatted(user.getName(), w.windowTime(), result.message()));
+        return result;
+    }
+
+    /** Today's ACH origination files sent from the schedule (ACHOrigFile), each with its batches (ACHOrigBatch). */
+    @GetMapping("/api/v1/ach/processing/files")
+    public List<FileRow> files(@RequestParam("schedule_id") int scheduleId) {
+        return jdbc.query("SELECT fileID, fileName, scheduleID, fileHeaderDt, fileHeaderTm, totalCreditCount, totalCreditAmt, fedStatus, sendTm "
+                + "FROM " + orig + ".ACHOrigFile WHERE scheduleID = ? AND fileHeaderDt = ? ORDER BY fileID",
+                (rs, i) -> new FileRow(rs.getString(1), rs.getString(2), rs.getInt(3), rs.getObject(4, LocalDate.class),
+                        rs.getObject(5, java.time.LocalTime.class), rs.getInt(6), rs.getBigDecimal(7), rs.getString(8),
+                        rs.getObject(9, LocalDateTime.class), batches(rs.getString(1))), scheduleId, LocalDate.now(clock));
+    }
+
+    private List<Batch> batches(String fileID) {
+        return jdbc.query("SELECT batchID, batchNo, companyName, stdEntryCode, companyEntryDesc, effectiveDt, totalBatchCount, totalCreditAmt "
+                + "FROM " + orig + ".ACHOrigBatch WHERE fileID = ? ORDER BY batchNo",
+                (rs, i) -> new Batch(rs.getString(1), rs.getInt(2), rs.getString(3), rs.getString(4), rs.getString(5),
+                        rs.getObject(6, LocalDate.class), rs.getInt(7), rs.getBigDecimal(8)), fileID);
+    }
+
+    private static int n(Map<String, Object> row, String column) {
+        return ((Number) row.get(column)).intValue();
     }
 
     /** 1. */

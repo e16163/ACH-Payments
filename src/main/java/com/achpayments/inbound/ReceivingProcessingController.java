@@ -67,16 +67,29 @@ public class ReceivingProcessingController {
     public record PostingRequest(LocalDate businessDate, String outputFormat) {
     }
 
+    /** One window run on the ACH Receiving Processing screen: steps 2-6. */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record WindowRun(String executionId, String windowTime, int files, int validated, int entries, int matched, int autoCorrected,
+            int manualReview, int rejected, int memoPosted, String runBy, java.time.LocalDateTime startedAt) {
+    }
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record WindowsStatus(LocalDate businessDate, List<ReceivingWindow.Window> schedules, List<String> waitingFiles, List<WindowRun> runs,
+            CorePostingFileJob.Result postingFile) {
+    }
+
     private final ReceivingWindow window;
     private final ReceivingEngine engine;
     private final ReceivedEntryProcessor processor;
     private final CorePostingFileJob posting;
     private final JdbcTemplate jdbc;
     private final AppLogRepository appLog;
+    private final java.time.Clock clock;
     private final String recv;
 
     public ReceivingProcessingController(ReceivingWindow window, ReceivingEngine engine, ReceivedEntryProcessor processor,
-            CorePostingFileJob posting, JdbcTemplate jdbc, AppLogRepository appLog, @Value("${app.db.receiving}") String recv) {
+            CorePostingFileJob posting, JdbcTemplate jdbc, AppLogRepository appLog, java.time.Clock clock, @Value("${app.db.receiving}") String recv) {
+        this.clock = clock;
         this.window = window;
         this.engine = engine;
         this.processor = processor;
@@ -95,8 +108,22 @@ public class ReceivingProcessingController {
         }
         String time = windowPath.substring(0, 2) + ":" + windowPath.substring(2);
         appLog.log(ACH_RCV, "INFO", "User '%s' triggered processing window %s".formatted(user.getName(), time));
-        ReceivingWindow.Run run = window.run(time, body == null ? null : body.fileName());
+        ReceivingWindow.Run run = window.run(time, body == null ? null : body.fileName(), user.getName());
         return new TriggerResponse(run.executionId(), run.status(), run.windowTime(), run.startedAt());
+    }
+
+    /** The ACH Receiving Processing screen: the day's scheduled windows, the files waiting for one, each run, and step 7. */
+    @org.springframework.web.bind.annotation.GetMapping("/windows")
+    public WindowsStatus windows() {
+        LocalDate today = LocalDate.now(clock);
+        List<WindowRun> runs = window.runs(today).stream().map(r -> new WindowRun((String) r.get("executionID"), (String) r.get("windowTime"),
+                n(r, "fileCnt"), n(r, "validatedCnt"), n(r, "entryCnt"), n(r, "matchedCnt"), n(r, "correctedCnt"), n(r, "reviewCnt"),
+                n(r, "rejectedCnt"), n(r, "memoPostedCnt"), (String) r.get("runBy"), (java.time.LocalDateTime) r.get("startTm"))).toList();
+        return new WindowsStatus(today, window.schedule(), engine.waiting(), runs, posting.find(today).orElse(null));
+    }
+
+    private static int n(Map<String, Object> row, String column) {
+        return ((Number) row.get(column)).intValue();
     }
 
     /** 2. */

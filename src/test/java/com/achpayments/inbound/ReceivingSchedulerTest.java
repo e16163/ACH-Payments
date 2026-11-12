@@ -23,7 +23,7 @@ import com.achpayments.common.AppLogRepository;
 import com.achpayments.common.BankingCalendar;
 import com.achpayments.param.ParamCache;
 
-/** Ba's processing windows and the core posting file: times from AppParam, in Eastern time, on banking days. */
+/** Ba's processing windows and the core posting file: times from ACHRecvSchedule and AppParam, in Eastern time, on banking days. */
 class ReceivingSchedulerTest {
 
     private static final ZoneId ET = ZoneId.of("America/New_York");
@@ -38,7 +38,8 @@ class ReceivingSchedulerTest {
     }
 
     private ReceivingScheduler at(String instant, String windows) {
-        when(params.get("ACH_RCV", "RECV_WINDOW_TIMES")).thenReturn(Optional.of(windows));
+        when(window.schedule()).thenReturn(java.util.Arrays.stream(windows.split(","))
+                .map(t -> new ReceivingWindow.Window(0, t, t + " window")).toList());
         when(params.get("ACH_RCV", "CORE_POSTING_TIME")).thenReturn(Optional.of("19:00"));
         return new ReceivingScheduler(window, posting, params, calendar, appLog, Clock.fixed(Instant.parse(instant), ET));
     }

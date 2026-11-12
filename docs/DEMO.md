@@ -95,42 +95,42 @@ Keep the $2.50 fee; Part 2 uses it.
 
 ---
 
-## Part 3: End-of-day ACH file (UC-ACH-EOD-01)
+## Part 3: ACH Origination Processing (UC-ACH-EOD-01, Ba's critique of 2026-11-12)
 
-From your blueprint: on the transfer's date, processing windows at 6 AM, 9 AM, 12 PM and 3 PM Eastern (`ORIG_WINDOW_TIMES`) check each transfer again (account, limits, OFAC, hold) and mark it `READY_TO_POST`. The file builds by itself after `FED_FILE_CUTOFF_TIME` (5 PM) from `READY_TO_POST` transfers only. **Run now** runs one last window, then builds the file, so you needn't wait for the windows.
+From your blueprint: on the transfer's date, processing windows at 6 AM, 9 AM, 12 PM and 3 PM Eastern (the `ACHOrigSchedule` table) check each transfer again (account, limits, OFAC, hold) and mark it `READY_TO_POST`. **Send to the Fed** puts that schedule's ready transfers in an ACH origination file. Anything ready that no schedule sent goes in the 5 PM file (`FED_FILE_CUTOFF_TIME`), which builds by itself.
 
-1. Sign out, sign in as **achorig**, and click **ACH Origination File**.
-2. You see:
-   - **Waiting for a file (1):** Jane Smith's transfer
-   - **Left out (1):** Blocked Test Person, reason **OFAC review**
-   - a **Compliance alert** (your EX-01)
-3. **Business date** is already set to the date of Jane's transfer. Run now takes a date because a transfer made today is dated the next banking day or later.
-4. **EX-02 (the Fed is down):** sign in as **admin** and, in **System Configuration**, edit `FED_SIM_FAIL_ATTEMPTS` and set it to `3`. Sign back in as **achorig** and, in **ACH Origination File**, click **Run now**. The file ends in **ERROR** with an **Operations alert**. The full app waits 1 second, then 2, between its 3 tries.
-5. As **admin**, set `FED_SIM_FAIL_ATTEMPTS` back to `0`. As **achorig**, click **Resend** on the file. It's now **SENT**.
-6. Click **View** to read the NACHA file: the file header, batch header, Jane's entry line, the batch and file controls, and the rows of 9s that pad it to a multiple of 10 records. **Download** saves the `.ach` file.
-7. Click **Run now** again: "Nothing is due". A rerun can't duplicate anything.
+The demo starts with 3 sample transfers from Savings dated today (on a banking day), so the screen has work. Your transfer from Part 2 is dated the next banking day or later, so it shows on that day's screen.
 
-In the full app, the transfer's `processStatus` is now `PROCESSED` (the query in Part 4): `PENDING_BATCH` at Confirm, `READY_TO_POST` after a window, `PROCESSED` once in a file. There's no member screen yet that lists past transfers.
+1. Sign out, sign in as **achorig**, and click **ACH Origination Processing**. It shows today's date and the 4 schedules.
+2. Click **9:00 AM window**, then **Process window**. Steps 1–7 show what the window did: 3 extracted, 3 ready to post, none rejected or flagged. The schedule button gets a ✓.
+3. **Ready to be sent to the Fed (3)** lists the 3 transfers this window made ready. Click **12:00 PM window**: its list is empty, because each schedule shows only its own transactions.
+4. Back on **9:00 AM window**, click **Send to the Fed**. The file appears under **ACH origination files from this schedule today**, **SENT**, with one row per batch (one batch per effective date and entry description: RENT, TUITION, UTILITIES).
+5. Click **View** to read the NACHA file: the file header, the batch headers, the entry lines, the batch and file controls, and the rows of 9s that pad it to a multiple of 10 records. **Download** saves the `.ach` file.
+6. **EX-02 (the Fed is down):** in a fresh tab (so the sample transfers are back), sign in as **admin** and, in **System Configuration**, set `FED_SIM_FAIL_ATTEMPTS` to `3`. As **achorig**, process a schedule and click **Send to the Fed**: the file ends in **ERROR** with an **Operations alert**. As **admin**, set the parameter back to `0`; as **achorig**, click **Resend**: **SENT**. The full app waits 1 second, then 2, between its 3 tries.
 
-To see a recurring series, make a Weekly transfer with 3 payments in Part 2. Each time you run the file, the next payment appears under **Waiting**, with its own date and its own hold. If the money isn't there on that date, that payment is rejected, shows under **Left out**, and the series continues.
+In the full app, every value on this screen comes from the database: `ACHOrigSchedule`, `ACHOrigWindowRun` (one row per window run, with each step's count), `ACHOriginatorTransfer.scheduleID`, and `ACHOrigFile` (with its new `scheduleID`) and `ACHOrigBatch`. A transfer's `processStatus` goes `PENDING_BATCH` at Confirm, `READY_TO_POST` after a window, `PROCESSED` once in a file.
+
+To see a recurring series, make a Weekly transfer with 3 payments in Part 2. Each payment is its own row with its own date and hold. If the money isn't there on a payment's date, the window rejects that one and the series continues.
 
 ## Part 3A: OFAC Review (your blueprint, Origination step 5)
 
 1. Sign out and sign in as **achcomp**. **OFAC Review** lists Blocked Test Person's transfer from Part 2.
-2. Type a note and click **Clear** (a false positive). It leaves the list. Sign in as **achorig**: in **ACH Origination File** it's now under **Waiting**, and **Run now** sends it. Its hold is placed at the window, since none was placed at Confirm.
-3. As **member**, make another transfer to Blocked Test Person, then, as **achcomp**, click **Block**. As **achorig**, it shows under **Left out** with the reason **OFAC blocked**, and it never goes in a file.
+2. Type a note and click **Clear** (a false positive). It leaves the list, and the next window on its date makes it ready to post. Its hold is placed at that window, since none was placed at Confirm.
+3. As **member**, make another transfer to Blocked Test Person, then, as **achcomp**, click **Block**. It's rejected, its hold is released, and it never goes in a file.
+
+While a transfer waits for review, **ACH Origination Processing** shows a **Compliance alert** with the count.
 
 Only **achcomp** sees **OFAC Review** and can clear or block; the other logins are refused. In the full app, each decision is a row in `ach_origination.ACHOrigOfacReview`, with the officer's login and the note.
 
-## Part 3B: ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)
+## Part 3B: ACH Receiving Processing (UC-ACH-RCV-01, UC-ACH-RCV-02)
 
-From your blueprint, the engine processes the Fed's files at 6 AM, 9 AM, 12 PM, 3 PM and 6 PM Eastern (`RECV_WINDOW_TIMES`) on banking days. **Receive file** simulates a delivery, so you needn't wait.
+From your blueprint, the Fed delivers files to the inbound folder, and the engine processes them at 6 AM, 9 AM, 12 PM, 3 PM and 6 PM Eastern (the `ACHRecvSchedule` table) on banking days. **Receive file** simulates a delivery; **Process window** runs a window now, so you needn't wait.
 
-1. Sign out and sign in as **achrecv**. **ACH Receiving File** opens.
-2. In **Simulate a file from the Fed**, choose **Sample 1: payroll (valid)** and click **Receive file**: **VALIDATED**, 50 entries, $129,450.00. Do the same with **Sample 2: retail (valid)**: 50 entries, $71,840.00 credits and $1,144.90 debits.
+1. Sign out and sign in as **achrecv**. **ACH Receiving Processing** opens with today's date and the 5 schedules.
+2. In **Simulate a file from the Fed**, choose **Sample 1: payroll (valid)** and click **Receive file**. It's under **Waiting for a window: PAYROLL.ach**, and not yet in **Files received**. Click **9:00 AM window**, then **Process window**: steps 2–6 show 1 file, 50 entries, 47 matched / 2 auto-corrected, 1 manual review, 3 returned, 47 memo posted. **Files received** shows it **VALIDATED**, $129,450.00. Do the same with **Sample 2: retail (valid)**: 50 entries, $71,840.00 credits and $1,144.90 debits.
 3. Click **View transactions** on Sample 1. The **ACH Inbound Overview** shows your 9 columns, 10 rows a page, sorted by trace number. Click **Next**.
 4. Click **Select** on a row to see all 24 fields.
-5. Back in **ACH Receiving File**, try your exceptions:
+5. Back in **ACH Receiving Processing**, try your exceptions (receive, then process a window, each time):
    - **EX-03:** receive Sample 1 again: **DUPLICATE**, no new entries.
    - **EX-02:** choose **Sample 1 with a wrong batch total**: **OUT_OF_BALANCE**, nothing saved, and a rejection notice for the Fed.
    - **EX-01:** choose **Sample 1 changed in transit**: **REJECTED_SIG_FAIL**, nothing saved, and a Security Operations alert. **View transactions** on it shows "No receiving transactions found in this file batch."
@@ -142,13 +142,15 @@ From your blueprint, the engine processes the Fed's files at 6 AM, 9 AM, 12 PM, 
 7. In Sample 2, the debits are held (**MEMO_POSTED**) unless they're returned: **R10** (blocked originator), **R08** (stop payment), and the same **R02**, **R16** and **R03** accounts as Sample 1. Credits from other companies stay **RECEIVED** until the end-of-day posting file.
    - **R01 (no funds)** needs Sample 2 *before* Sample 1 (in the online demo, a fresh tab): then Supplier Kappa's $19.99 debit meets a $5.00 balance. After Sample 1, Kappa already has an $8,500 payment from a trusted company, available at once, so the debit goes through. That's memo posting doing its job.
 
-Entries aren't OFAC screened (they were screened at origination). In the full app, the end-of-day posting file (step 7) is written at 7 PM (`CORE_POSTING_TIME`) to `~/dev/core/posting`, and the returns wait as `PENDING` rows in `ACHRecvReturn`; sending them to the Fed is not built yet.
+8. **Step 7, the core posting file.** It's written by itself at 7 PM (`CORE_POSTING_TIME`); **Generate now** writes it at once. The screen then shows its name, entry count and totals. It's written once a day.
+
+Entries aren't OFAC screened (they were screened at origination). In the full app, each window run is a row in `ACHRecvWindowRun`, the posting file goes to `~/dev/core/posting` with a row in `ACHRecvPostingJob`, and the returns wait as `PENDING` rows in `ACHRecvReturn`; sending them to the Fed is not built yet.
 
 ## Part 3C: Back-office screens (UC-ACH-BO)
 
 These are read-only for now. They're guessed from your table design until your use cases arrive, and the rows are made-up samples. Click **Select** on any row to see all its fields.
 
-1. Sign in as **achorig**. It opens on **ACH Origination File**, which works as in Part 3, with four more tabs:
+1. Sign in as **achorig**. It opens on **ACH Origination Processing**, which works as in Part 3, with four more tabs:
    - **ACH Origination Return:** returns on entries we sent, and their actions
    - **ACH Origination Reversal** and **ACH Origination Resubmission:** the action rows, with the file each belongs to
    - **ACH Origination NOC:** NOCs we received, their actions, and the account and transaction code substitutions

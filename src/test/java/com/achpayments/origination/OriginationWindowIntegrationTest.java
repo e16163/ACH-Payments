@@ -36,12 +36,15 @@ class OriginationWindowIntegrationTest {
     private static final String CHECKING = "X-WIN-CHK";
     private static final String LISTED = "WINDOW LISTED PERSON";
     private static final Principal OFFICER = () -> "achcomp";
+    private static final Principal OPS = () -> "achorig";
 
     @Autowired OriginationWindow window;
     @Autowired OriginationProcessingController api;
     @Autowired TransferService transfers;
     @Autowired TransferDates dates;
     @Autowired JdbcTemplate jdbc;
+    @Autowired java.time.Clock clock;
+    @Autowired com.achpayments.common.BankingCalendar calendar;
     @Autowired com.achpayments.outbound.EodController eod;
 
     @Value("${app.db.origination}")
@@ -58,6 +61,15 @@ class OriginationWindowIntegrationTest {
 
     @AfterEach
     void cleanUp() {
+        // Files sent from a window (processID WIN-...): entries, batches, the audit trail (refuses DELETE; TRUNCATE skips the trigger)
+        jdbc.update("DELETE FROM AppLog WHERE logMesg LIKE '%FILE\\_%'");
+        jdbc.update("DELETE t FROM " + orig + ".ACHOrigTransaction t JOIN " + orig + ".ACHOrigFile f ON f.fileID = t.fileID WHERE f.processID LIKE 'WIN-%'");
+        jdbc.execute("TRUNCATE TABLE " + orig + ".ACHOrigFedAction");
+        jdbc.update("INSERT INTO " + orig + ".ACHOrigFedAction (fileID, processID, actionID, actionTm, lastModBy) "
+                + "VALUES ('FILE_20261102_01', 'PROC_FED_01', 401, '2026-11-02 08:30:00', 'FED_BATCH_SYS')");
+        jdbc.update("DELETE b FROM " + orig + ".ACHOrigBatch b JOIN " + orig + ".ACHOrigFile f ON f.fileID = b.fileID WHERE f.processID LIKE 'WIN-%'");
+        jdbc.update("DELETE FROM " + orig + ".ACHOrigFile WHERE processID LIKE 'WIN-%'");
+        jdbc.update("DELETE FROM " + orig + ".ACHOrigWindowRun");
         jdbc.update("DELETE FROM OfacSdnName WHERE sdnName = ?", LISTED);
         jdbc.update("DELETE FROM " + orig + ".ACHOrigLimitRule WHERE ruleName = 'X-WIN-RULE'");
         jdbc.update("DELETE FROM " + orig + ".ACHOrigOfacReview WHERE transferSerNo IN (SELECT transferSerNo FROM " + orig
@@ -70,7 +82,10 @@ class OriginationWindowIntegrationTest {
     }
 
     private String submit(String name) {
-        String serNo = "REC-20000103-0001";
+        return submit(name, "REC-20000103-0001");
+    }
+
+    private String submit(String name, String serNo) {
         jdbc.update("INSERT INTO " + orig + ".ACHOrigRecvAccount (recvAcctSerNo, recvAcctVersion, memberNo, acctNo, routingNo, acctType, "
                 + "acctOwner, sourceID, lastModBy) VALUES (?, 1, ?, '123456789', '021000021', 'CHECKING', ?, 'ONLINE_BANKING', ?)",
                 serNo, MEMBER, name, MEMBER);
@@ -100,6 +115,41 @@ class OriginationWindowIntegrationTest {
         assertEquals(held, available()); // no second hold
         assertTrue(run.extracted() >= 1 && run.ready() >= 1);
         assertTrue(eod.status().pending().stream().anyMatch(i -> i.transferSerNo().equals(serNo))); // still on the EOD screen
+    }
+
+    /** Ba (2026-11-12): pick a schedule, see the transfers it made ready today, send them to the Fed as one file. */
+    @Test
+    void aScheduleListsAndSendsOnlyTheTransfersItMadeReady() {
+        LocalDate today = LocalDate.now(clock);
+        org.junit.jupiter.api.Assumptions.assumeTrue(calendar.isBankingDay(today), "the Fed takes files on banking days only");
+        Map<String, Integer> ids = api.windows().schedules().stream()
+                .collect(java.util.stream.Collectors.toMap(OriginationProcessingController.Schedule::windowTime,
+                        OriginationProcessingController.Schedule::scheduleId));
+        assertEquals(List.of("06:00", "09:00", "12:00", "15:00"), ids.keySet().stream().sorted().toList()); // from ACHOrigSchedule
+
+        String nine = submit("JANE SMITH", "REC-20000103-0001");
+        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET effectiveDt = ? WHERE transferSerNo = ?", today, nine); // due today
+        api.triggerWindow(new OriginationProcessingController.WindowRequest("09:00", null, null), OPS);
+        String noon = submit("JOHN DOE", "REC-20000103-0002");
+        jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET effectiveDt = ? WHERE transferSerNo = ?", today, noon);
+        api.triggerWindow(new OriginationProcessingController.WindowRequest("12:00", null, null), OPS);
+
+        assertEquals(List.of(nine), api.ready(ids.get("09:00")).stream().map(OriginationProcessingController.Ready::transferId).toList());
+        assertEquals(List.of(noon), api.ready(ids.get("12:00")).stream().map(OriginationProcessingController.Ready::transferId).toList());
+        var nineRun = api.windows().schedules().stream().filter(x -> x.windowTime().equals("09:00")).findFirst().orElseThrow().lastRun();
+        assertEquals(List.of(1, "achorig"), List.of(nineRun.readyToPost(), nineRun.runBy()));
+
+        var sent = api.sendToFed(new OriginationProcessingController.SendRequest(ids.get("09:00")), OPS);
+        assertEquals("SENT", sent.fedStatus());
+        var files = api.files(ids.get("09:00"));
+        assertEquals(1, files.size());
+        assertEquals(List.of(sent.fileID(), ids.get("09:00"), 1), List.of(files.get(0).fileId(), files.get(0).scheduleId(), files.get(0).totalCreditCount()));
+        assertEquals(1, files.get(0).batches().size());
+        assertEquals(1, files.get(0).batches().get(0).entryCount());
+        assertEquals("PROCESSED", transfer(nine).get("processStatus"));
+        assertEquals(List.of(), api.ready(ids.get("09:00")));
+        assertEquals(List.of(noon), api.ready(ids.get("12:00")).stream().map(OriginationProcessingController.Ready::transferId).toList());
+        assertEquals(List.of(), api.files(ids.get("12:00")));
     }
 
     @Test

@@ -67,10 +67,28 @@ type Transfer = {
   acctNo: string; acctType: string; fromAcctNo: string; fromAcctName: string; fromAcctType: string; amount: number
   fee: number; effectiveDt: string; frequency: string; memo: string | null; submitted: string
   processStatus: string; firstSerNo: string | null; reqNo: number; remaining: number; ofacTm: string
+  scheduleId: number | null; readyTm: string | null // the window that made it READY_TO_POST (V19)
+}
+type BatchRow = {
+  batch_id: string; batch_no: number; company_name: string; std_entry_code: string; company_entry_desc: string
+  effective_dt: string; entry_count: number; total_credit_amt: number
 }
 type AchFileRow = {
-  fileID: string; fileName: string; fedStatus: string; fileHeaderDt: string; totalCreditCount: number
-  totalCreditAmt: number; sendTm: string | null; content: string
+  fileID: string; fileName: string; fedStatus: string; fileHeaderDt: string; fileHeaderTm: string; totalCreditCount: number
+  totalCreditAmt: number; sendTm: string | null; content: string; scheduleId: number | null; batches: BatchRow[]
+}
+// ACHOrigWindowRun and ACHRecvWindowRun (V19), with the screens' field names
+type OrigRun = {
+  window_id: string; window_time: string; business_date: string; extracted: number; account_rejected: number; limit_rejected: number
+  ofac_flagged: number; hold_rejected: number; ready_to_post: number; run_by: string; started_at: string
+}
+type RecvRun = {
+  execution_id: string; window_time: string; business_date: string; files: number; validated: number; entries: number; matched: number
+  auto_corrected: number; manual_review: number; rejected: number; memo_posted: number; run_by: string; started_at: string
+}
+type PostingJob = {
+  posting_job_id: string; business_date: string; total_records_posted: number; total_debit_volume: number; total_credit_volume: number
+  posting_file_name: string; status: string
 }
 type RecvFile = {
   fileID: string; fileName: string; fileHeaderDt: string; fileHeaderTm: string; fedStatus: string; processStatus: string; modifier: string
@@ -87,19 +105,27 @@ type State = {
   params: Param[]
   transfers: Transfer[]
   files: AchFileRow[]
+  origRuns: OrigRun[]
   nextTrace: number
   receivedFiles: RecvFile[]
   receivedEntries: RecvRow[]
   core: Record<string, CoreAccount> // the receivers' accounts (SimCoreAccount)
   externalAccounts: ExternalAccount[] // newest last
+  inbound: string[] // the sample files waiting in fed/inbound for a receiving window
+  recvRuns: RecvRun[]
+  postingJobs: PostingJob[] // ACHRecvPostingJob
 }
 
-const KEY = 'ach-demo-state-6' // new name: state saved by an older demo has no processing fields
+const KEY = 'ach-demo-state-7' // new name: state saved by an older demo has no schedules or window runs
 const MEMBER_NO = 'M10982347'
+// The ACHOrigSchedule and ACHRecvSchedule rows (V19)
+const slot = (schedule_id: number, window_time: string, window_name: string) => ({ schedule_id, window_time, window_name })
+const ORIG_SCHEDULE = [slot(1, '06:00', '6:00 AM window'), slot(2, '09:00', '9:00 AM window'), slot(3, '12:00', '12:00 PM window'), slot(4, '15:00', '3:00 PM window')]
+const RECV_SCHEDULE = [...ORIG_SCHEDULE, slot(5, '18:00', '6:00 PM window')]
 const PENDING_MICRO_DEPOSIT = 'ACTIVE_PENDING_MICRO_DEPOSIT' // TransferService: stored as PENDING_MICRO_DEP
 
 function freshState(): State {
-  return {
+  const s: State = {
     user: null,
     // The design's sample AppLog row (V7)
     logs: [{
@@ -119,8 +145,6 @@ function freshState(): State {
       { systemName: 'ACH_ORIG', paramName: 'EXTERNAL_XFER_FEE', paramDesc: 'Fee for a member external ACH transfer (UC-ACH-ORG-01)', paramRawType: 'DECIMAL', paramRawValue: '0.00', lastModTm: '2026-11-03T21:21:05', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'FED_IMMEDIATE_DEST', paramDesc: 'Routing number of the Federal Reserve office that receives our files', paramRawType: 'STRING', paramRawValue: '011000015', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'ORIG_COMPANY_NAME', paramDesc: 'Company name in NACHA batch headers (16 characters at most)', paramRawType: 'STRING', paramRawValue: 'DEMO CU', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
-      { systemName: 'ACH_ORIG', paramName: 'ORIG_WINDOW_TIMES', paramDesc: 'Intraday windows when scheduled transfers are checked and made ready to post (Eastern, comma-separated)', paramRawType: 'STRING', paramRawValue: '06:00,09:00,12:00,15:00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
-      { systemName: 'ACH_RCV', paramName: 'RECV_WINDOW_TIMES', paramDesc: 'FedACH distribution windows when inbound files are processed (Eastern, comma-separated)', paramRawType: 'STRING', paramRawValue: '06:00,09:00,12:00,15:00,18:00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_RCV', paramName: 'CORE_POSTING_TIME', paramDesc: 'Time the end-of-day core posting file is generated (Eastern)', paramRawType: 'STRING', paramRawValue: '19:00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_RCV', paramName: 'TRUSTED_COMPANY_IDS', paramDesc: 'Originator Company IDs whose credits are memo posted at once (comma-separated)', paramRawType: 'STRING', paramRawValue: '1900483920', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_RCV', paramName: 'MAX_ENTRY_AMOUNT', paramDesc: 'A received entry above this amount waits for manual review', paramRawType: 'DECIMAL', paramRawValue: '25000.00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
@@ -128,6 +152,7 @@ function freshState(): State {
     ],
     transfers: [],
     files: [],
+    origRuns: [],
     nextTrace: 1,
     // The sample ACHRecvFile and ACHRecvTransaction rows (V7)
     receivedFiles: [{ fileID: 'ACHFILE-88392', fileName: 'ACHFILE-88392.ach', fileHeaderDt: '2026-11-01', fileHeaderTm: '16:00:00', fedStatus: 'PROCESSED', processStatus: 'PROCESSED', modifier: 'A' }],
@@ -146,6 +171,32 @@ function freshState(): State {
     core: sampleCore(),
     // The sample ACHOrigRecvAccount row (V7)
     externalAccounts: [{ recvAcctSerNo: 'REC-SRV-20261102-01', routingNo: '051000033', acctNo: '987654321012', acctType: 'CHECKING', acctOwner: 'JOHN DOE', acctStatus: 'ACTIVE' }],
+    inbound: [],
+    recvRuns: [],
+    postingJobs: [],
+  }
+  seedToday(s)
+  return s
+}
+
+/**
+ * Sample transfers submitted yesterday from Savings for today, so the ACH Origination Processing screen has work on a
+ * banking day. The money was held at Confirm, as for any transfer.
+ */
+function seedToday(s: State) {
+  const today = isoDate(new Date())
+  if (!isBankingDay(today)) return
+  const savings = s.accounts.find((a) => a.acctType === 'SAVINGS')!
+  const yesterday = isoDateTime(new Date(Date.now() - 86_400_000))
+  const seeds: [string, number, string][] = [['JOHN DOE', 125_000, 'RENT'], ['JOHN DOE', 4_550, 'UTILITIES'], ['JOHN DOE', 30_000, 'TUITION']]
+  for (const [recvName, amount, memo] of seeds) {
+    savings.cents -= amount
+    s.transfers.push({
+      transferSerNo: `TRF-SEED-${pad(s.transfers.length + 1, 4)}`, ofacStatus: 'OFAC_PASSED', memoStatus: 'POSTED', recvName, bankName: 'Sample Bank (from the design samples)',
+      routingNo: '051000033', acctNo: '987654321012', acctType: 'CHECKING', fromAcctNo: savings.acctNo, fromAcctName: savings.acctName,
+      fromAcctType: savings.acctType, amount, fee: 0, effectiveDt: today, frequency: 'ONETIME', memo, submitted: yesterday,
+      processStatus: 'PENDING_BATCH', firstSerNo: null, reqNo: 1, remaining: 0, ofacTm: yesterday, scheduleId: null, readyTm: null,
+    })
   }
 }
 
@@ -314,6 +365,10 @@ function route(s: State, method: string, path: string, body: Body): unknown {
   if (path.startsWith('/eod')) {
     if (role !== 'ACH_ORIG_OPS') denied()
     return eod(s, method, path, body)
+  }
+  if (path.startsWith('/v1/ach/processing/')) {
+    if (role !== 'ACH_ORIG_OPS') denied()
+    return processing(s, method, path.slice('/v1/ach/processing'.length), body)
   }
   if (path.startsWith('/v1/ach/receiving')) {
     if (role !== 'ACH_RECV_OPS') denied()
@@ -497,6 +552,7 @@ function submit(s: State, body: Body) {
     recvName: c.recvName, bankName: c.bankName, routingNo: c.routingNo, acctNo: c.acctNo, acctType: c.acctType,
     fromAcctNo: c.from.acctNo, fromAcctName: c.from.acctName, fromAcctType: c.from.acctType, amount: c.amount, fee: c.fee,
     effectiveDt: c.effectiveDt, frequency: c.frequency, memo: c.memo, submitted: isoDateTime(new Date()), ofacTm: isoDateTime(new Date()),
+    scheduleId: null, readyTm: null,
   }
   s.transfers.push(t)
   // TransferService.activate: an account still pending micro-deposits becomes ACTIVE; the transfer's account check has just verified it
@@ -563,10 +619,32 @@ function receiving(s: State, method: string, path: string, body: Body) {
       return { ...f, entryCount: entries.length, totalCreditAmt: total(1), totalDebitAmt: total(0) }
     }).sort((a, b) => b.fileHeaderDt.localeCompare(a.fileHeaderDt) || b.fileID.localeCompare(a.fileID))
   }
-  if (path === '/files/receive' && method === 'POST') {
-    const result = receiveSample(s, String(body.sample))
-    log(s, 'ACH_RCV', result.processStatus === 'VALIDATED' ? 'INFO' : 'WARN', `User '${s.user}' received sample ${body.sample}: ${result.fileID} ${result.processStatus}`)
-    return [result]
+  if (path === '/files/receive' && method === 'POST') { // the Fed delivers it to fed/inbound; a window processes it
+    const sample = String(body.sample ?? '')
+    if (!SAMPLES[sample] && sample !== 'TAMPERED') fail(400, 'Choose a file to receive.')
+    const fileName = `${sample}.ach`
+    if (!s.inbound.includes(sample)) s.inbound = [...s.inbound, sample].sort()
+    log(s, 'ACH_RCV', 'INFO', `User '${s.user}' received sample ${sample}: ${fileName} is waiting for the next processing window`)
+    return { fileName, message: `${fileName} is in fed/inbound, waiting for the next processing window.` }
+  }
+  if (path === '/windows' && method === 'GET') {
+    const today = isoDate(new Date())
+    return {
+      business_date: today, schedules: RECV_SCHEDULE, waiting_files: s.inbound.map((x) => `${x}.ach`),
+      runs: s.recvRuns.filter((r) => r.business_date === today).map(({ business_date: _d, ...rest }) => rest),
+      posting_file: s.postingJobs.find((j) => j.business_date === today) ?? null,
+    }
+  }
+  const trigger = /^\/trigger\/(\d{4})$/.exec(path)
+  if (trigger && method === 'POST') {
+    const w = RECV_SCHEDULE.find((x) => x.window_time.replace(':', '') === trigger[1])
+      ?? fail(400, `Unknown processing window ${trigger[1]}; use one of [${RECV_SCHEDULE.map((x) => x.window_time.replace(':', '')).join(', ')}].`)
+    log(s, 'ACH_RCV', 'INFO', `User '${s.user}' triggered processing window ${w.window_time}`)
+    return runRecvWindow(s, w.window_time, s.user!)
+  }
+  if (path === '/generate-posting-file' && method === 'POST') {
+    if (typeof body.business_date !== 'string') fail(400, 'business_date is required.')
+    return postingFile(s, body.business_date as string)
   }
   if (path.startsWith('/transactions?') && method === 'GET') {
     const q = new URLSearchParams(path.split('?')[1])
@@ -609,11 +687,116 @@ function receiveSample(s: State, sample: string) {
     const n = processEntries(s.receivedEntries.filter((e) => e.fileID === fileID), s.core,
       rcv('TRUSTED_COMPANY_IDS').split(',').map((x) => x.trim()).filter(Boolean), toCents(rcv('MAX_ENTRY_AMOUNT')), isoDateTime(new Date()))
     log(s, 'ACH_RCV', 'INFO', `${fileID} processed: ${n.matched} matched, ${n.corrected} auto-corrected, ${n.review} for manual review, ${n.rejected} rejected, ${n.posted} memo posted`)
+    return { fileID, fileName, processStatus: row.processStatus, message: r.message, counts: { entries: r.entries.length, ...n } }
   }
-  return { fileID, fileName, processStatus: row.processStatus, message: r.message }
+  return { fileID, fileName, processStatus: row.processStatus, message: r.message, counts: null }
+}
+
+/** ReceivingWindow.run: picks up every file waiting in fed/inbound (steps 2-3), runs steps 4-6, and records the run. */
+function runRecvWindow(s: State, windowTime: string, runBy: string) {
+  const now = new Date()
+  const today = isoDate(now)
+  const run: RecvRun = {
+    execution_id: `EXEC-REC-${today.replace(/-/g, '')}-${windowTime.replace(':', '')}`, window_time: windowTime, business_date: today, files: 0,
+    validated: 0, entries: 0, matched: 0, auto_corrected: 0, manual_review: 0, rejected: 0, memo_posted: 0, run_by: runBy, started_at: isoDateTime(now),
+  }
+  log(s, 'ACH_RCV', 'INFO', `${run.execution_id}: processing window ${windowTime} started`)
+  for (const sample of s.inbound) {
+    const r = receiveSample(s, sample)
+    run.files++
+    if (r.processStatus !== 'VALIDATED') log(s, 'ACH_RCV', 'WARN', `${r.fileID} ${r.processStatus}: ${r.message}`)
+    if (!r.counts) continue
+    run.validated++
+    run.entries += r.counts.entries
+    run.matched += r.counts.matched
+    run.auto_corrected += r.counts.corrected
+    run.manual_review += r.counts.review
+    run.rejected += r.counts.rejected
+    run.memo_posted += r.counts.posted
+  }
+  s.inbound = []
+  s.recvRuns.push(run)
+  log(s, 'ACH_RCV', 'INFO', `${run.execution_id}: ${run.files} file(s) processed`)
+  return { execution_id: run.execution_id, status: 'COMPLETED', window_time: windowTime, started_at: run.started_at }
+}
+
+/** CorePostingFileJob.generate (step 7): posts the day's entries to the core, once a day. */
+function postingFile(s: State, businessDate: string): PostingJob {
+  const done = s.postingJobs.find((j) => j.business_date === businessDate)
+  if (done) return done
+  const ymd = businessDate.replace(/-/g, '')
+  let count = 0, debits = 0, credits = 0
+  for (const e of s.receivedEntries) {
+    if (!['RECEIVED', 'AUTO_CORRECTED', 'MEMO_POSTED'].includes(e.processStatus) || !e.coreTranCode || (e.settlementDt ?? e.effectiveDt) > businessDate) continue
+    if (e.coreTranCode !== 'PRENOTE') {
+      const cents = Math.round(e.amount * 100)
+      const acct = s.core[e.correctedAcctNo ?? e.recvAcctID]
+      if (acct && e.processStatus !== 'MEMO_POSTED') acct.cents += e.creditFlag === 1 ? cents : -cents // a memo post already moved it
+      if (e.creditFlag === 1) credits += cents
+      else debits += cents
+      count++
+    }
+    Object.assign(e, { processStatus: 'POSTED', postedTm: isoDateTime(new Date()) })
+  }
+  const job: PostingJob = {
+    posting_job_id: `JOB-POST-${ymd}-EOD`, business_date: businessDate, total_records_posted: count, total_debit_volume: debits / 100,
+    total_credit_volume: credits / 100, posting_file_name: `CORE_ACH_POSTING_${ymd}.DAT`, status: 'READY_FOR_CORE_INGESTION',
+  }
+  s.postingJobs.push(job)
+  log(s, 'ACH_RCV', 'INFO', `${job.posting_job_id}: ${job.posting_file_name} posted ${count} entries, debits ${job.total_debit_volume}, credits ${job.total_credit_volume}`)
+  return job
 }
 
 const param = (s: State, name: string) => s.params.find((p) => p.systemName === 'ACH_ORIG' && p.paramName === name)?.paramRawValue ?? ''
+
+// ---- ACH Origination Processing (OriginationProcessingController) ----
+
+function processing(s: State, method: string, path: string, body: Body) {
+  const today = isoDate(new Date())
+  const scheduleId = () => Number(new URLSearchParams(path.split('?')[1]).get('schedule_id'))
+  if (path === '/trigger-window' && method === 'POST') {
+    const time = String(body.window_time ?? '')
+    if (!/^\d{2}:\d{2}$/.test(time)) fail(400, 'window_time must be a time like 12:00.')
+    log(s, 'ACH_ORIG', 'INFO', `User '${s.user}' triggered origination window ${time}`)
+    const r = runWindow(s, today, time, s.user!)
+    const rejected = r.account_rejected + r.limit_rejected + r.hold_rejected
+    return {
+      window_id: r.window_id, execution_status: 'COMPLETED', estimated_completion_seconds: 0,
+      message: `ACH processing window ${time}: ${r.extracted} due, ${r.ready_to_post} ready to post, ${r.ofac_flagged} flagged, ${rejected} rejected.`,
+    }
+  }
+  if (path === '/windows' && method === 'GET') {
+    const runs = s.origRuns.filter((r) => r.business_date === today)
+    return {
+      business_date: today,
+      schedules: ORIG_SCHEDULE.map((w) => {
+        const r = runs.filter((x) => x.window_time === w.window_time).pop()
+        return { ...w, last_run: r ? (({ window_time: _t, business_date: _d, ...rest }) => rest)(r) : null }
+      }),
+      waiting_for_compliance: s.transfers.filter((t) => t.ofacStatus === 'FLAGGED').length,
+    }
+  }
+  if (path.startsWith('/ready?') && method === 'GET') {
+    const id = scheduleId()
+    return s.transfers.filter((t) => t.processStatus === 'READY_TO_POST' && t.scheduleId === id && t.effectiveDt <= today)
+      .sort((a, b) => a.transferSerNo.localeCompare(b.transferSerNo))
+      .map((t) => ({ transfer_id: t.transferSerNo, recipient_name: t.recvName, routing_number: t.routingNo, amount: t.amount / 100, effective_dt: t.effectiveDt, ready_at: t.readyTm }))
+  }
+  if (path === '/send-to-fed' && method === 'POST') {
+    const w = ORIG_SCHEDULE.find((x) => x.schedule_id === body.schedule_id) ?? fail(400, 'Choose a schedule.')
+    const result = send(s, today, false, w.schedule_id)
+    log(s, 'ACH_ORIG', result.fedStatus === 'ERROR' ? 'ERROR' : 'INFO', `User '${s.user}' sent the ${w.window_time} schedule to the Fed: ${result.message}`)
+    return result
+  }
+  if (path.startsWith('/files?') && method === 'GET') {
+    const id = scheduleId()
+    return s.files.filter((f) => f.scheduleId === id && f.fileHeaderDt === today).map((f) => ({
+      file_id: f.fileID, file_name: f.fileName, schedule_id: f.scheduleId, file_header_dt: f.fileHeaderDt, file_header_tm: f.fileHeaderTm,
+      total_credit_count: f.totalCreditCount, total_credit_amt: f.totalCreditAmt, fed_status: f.fedStatus, send_tm: f.sendTm, batches: f.batches,
+    }))
+  }
+  fail(404, 'Not found')
+}
 
 function eod(s: State, method: string, path: string, body: Body) {
   if (path === '/eod/status' && method === 'GET') return eodStatus(s)
@@ -666,6 +849,7 @@ function scheduleNext(s: State, t: Transfer) {
   s.transfers.push({
     ...t, transferSerNo: nextSerNo(s), firstSerNo, reqNo: t.reqNo + 1, remaining: t.remaining - 1, memoStatus: 'PENDING', ofacStatus: 'OFAC_PASSED',
     processStatus: 'PENDING_BATCH', effectiveDt: occurrence(first.effectiveDt, t.frequency, t.reqNo), submitted: isoDateTime(new Date()),
+    scheduleId: null, readyTm: null,
   })
 }
 
@@ -674,13 +858,20 @@ function scheduleNext(s: State, t: Transfer) {
  * OFAC (skipped once cleared), the hold, then READY_TO_POST. The demo's accounts are always active and its limits can't be
  * changed, so the account and limit re-checks always pass.
  */
-function runWindow(s: State, businessDate: string) {
+function runWindow(s: State, businessDate: string, windowTime: string, runBy: string): OrigRun {
+  const started = isoDateTime(new Date())
+  const run: OrigRun = {
+    window_id: `WIN-${businessDate.replace(/-/g, '')}-${windowTime.replace(':', '')}`, window_time: windowTime, business_date: businessDate,
+    extracted: 0, account_rejected: 0, limit_rejected: 0, ofac_flagged: 0, hold_rejected: 0, ready_to_post: 0, run_by: runBy, started_at: started,
+  }
   const due = s.transfers.filter((t) => t.processStatus === 'PENDING_BATCH' && t.effectiveDt <= businessDate)
     .sort((a, b) => a.transferSerNo.localeCompare(b.transferSerNo))
+  run.extracted = due.length
   for (const t of due) {
     const from = s.accounts.find((a) => a.acctNo === t.fromAcctNo)!
     if (t.memoStatus !== 'POSTED' && from.cents < t.amount + t.fee) {
       reject(s, t, 'INSUFFICIENT_FUNDS')
+      run.account_rejected++
       continue
     }
     if (t.ofacStatus !== 'CLEARED') {
@@ -689,6 +880,7 @@ function runWindow(s: State, businessDate: string) {
         t.ofacStatus = 'FLAGGED'
         t.processStatus = 'PENDING'
         log(s, 'ACH_ORIG', 'WARN', `Compliance alert: ${t.transferSerNo} is flagged by OFAC and waits for review`)
+        run.ofac_flagged++
         continue
       }
       t.ofacStatus = 'OFAC_PASSED'
@@ -698,7 +890,12 @@ function runWindow(s: State, businessDate: string) {
       t.memoStatus = 'POSTED'
     }
     t.processStatus = 'READY_TO_POST'
+    t.scheduleId = ORIG_SCHEDULE.find((w) => w.window_time === windowTime)?.schedule_id ?? null
+    t.readyTm = isoDateTime(new Date())
+    run.ready_to_post++
   }
+  s.origRuns.push(run)
+  return run
 }
 
 /** OriginationWindow.reject: gives the hold back and schedules the next payment of a series. */
@@ -738,11 +935,15 @@ function resolve(s: State, body: Body) {
   return { transfer_id: id, previous_status: 'FLAGGED', current_status: t.ofacStatus, updated_at: t.ofacTm }
 }
 
-function runEod(s: State, businessDate: string) {
+/** The 5 PM file: one last window, then everything ready (EodFileJob.run). */
+const runEod = (s: State, businessDate: string) => send(s, businessDate, true, null)
+
+/** EodFileJob.send: the 5 PM file (sweep), or Send to the Fed for one schedule's ready transactions. */
+function send(s: State, businessDate: string, sweep: boolean, scheduleId: number | null) {
   if (!isBankingDay(businessDate)) return { fileID: null, fedStatus: null, message: `${businessDate} isn't a banking day, so no file was built.` }
-  runWindow(s, businessDate) // one last window before the file (EodFileJob)
+  if (sweep) runWindow(s, businessDate, 'EOD', 'EOD_BATCH')
   const due = s.transfers
-    .filter((t) => t.processStatus === 'READY_TO_POST' && t.effectiveDt <= businessDate)
+    .filter((t) => t.processStatus === 'READY_TO_POST' && t.effectiveDt <= businessDate && (scheduleId === null || t.scheduleId === scheduleId))
     .sort((a, b) => a.transferSerNo.localeCompare(b.transferSerNo))
   if (due.length === 0) return { fileID: null, fedStatus: null, message: `Nothing is due for ${businessDate}.` }
 
@@ -775,8 +976,13 @@ function runEod(s: State, businessDate: string) {
     fileIdModifier: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[seq - 1], batches,
   })
   const file: AchFileRow = {
-    fileID, fileName: `${fileID}.ach`, fedStatus: 'QUEUED', fileHeaderDt: today, totalCreditCount: due.length,
-    totalCreditAmt: due.reduce((sum, t) => sum + t.amount, 0) / 100, sendTm: null, content,
+    fileID, fileName: `${fileID}.ach`, fedStatus: 'QUEUED', fileHeaderDt: today, fileHeaderTm: `${pad(now.getHours())}:${pad(now.getMinutes())}:00`,
+    totalCreditCount: due.length, totalCreditAmt: due.reduce((sum, t) => sum + t.amount, 0) / 100, sendTm: null, content, scheduleId,
+    batches: batches.map((b) => ({
+      batch_id: `${fileID}-B${pad(b.batchNumber, 3)}`, batch_no: b.batchNumber, company_name: b.companyName, std_entry_code: b.secCode,
+      company_entry_desc: b.entryDesc, effective_dt: `20${b.effectiveDate.slice(0, 2)}-${b.effectiveDate.slice(2, 4)}-${b.effectiveDate.slice(4)}`,
+      entry_count: b.entries.length, total_credit_amt: b.entries.reduce((sum, e) => sum + e.cents, 0) / 100,
+    })),
   }
   s.files.push(file)
   for (const t of due) {

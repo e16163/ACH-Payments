@@ -183,9 +183,9 @@ describe('demo AppLog (UC-SYS-LOG-01)', () => {
 
   it('logs a received file', async () => {
     await demoLogin('achrecv', 'achrecv123')
-    const r = (await post('/v1/ach/receiving/files/receive', { sample: 'PAYROLL' }) as { fileID: string }[])[0]
+    await post('/v1/ach/receiving/files/receive', { sample: 'PAYROLL' })
     await demoLogin('admin', 'admin123')
-    expect(await messages()).toContain(`ACH_RCV INFO User 'achrecv' received sample PAYROLL: ${r.fileID} VALIDATED`)
+    expect(await messages()).toContain(`ACH_RCV INFO User 'achrecv' received sample PAYROLL: PAYROLL.ach is waiting for the next processing window`)
   })
 
   it('filters by level, keyword and date, newest first', async () => {
@@ -220,8 +220,13 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
   type Page = { items: { traceNo: string; tranID: number }[]; total: number }
   const BASE = '/v1/ach/receiving'
   const asOperator = () => demoLogin('achrecv', 'achrecv123')
-  const receive = async (sample: string) => (await post(`${BASE}/files/receive`, { sample }) as { fileID: string; processStatus: string; message: string }[])[0]
   const files = () => demoApi<File[]>(`${BASE}/files`)
+  /** The Fed delivers the sample, then the 9:00 AM window processes it (ReceivingBlueprintIntegrationTest.receive). */
+  const receive = async (sample: string) => {
+    await post(`${BASE}/files/receive`, { sample })
+    await post(`${BASE}/trigger/0900`, {})
+    return (await files())[0]
+  }
   const page = (fileID: string, n = 1) => demoApi<Page>(`${BASE}/transactions?fileID=${fileID}&page=${n}&limit=10&sortBy=traceNo&sortDir=ASC`)
 
   it("starts with the sample file for operators, and keeps admins and members out", async () => {
@@ -262,13 +267,14 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
     expect(await demoApi('/me')).toMatchObject({ username: 'achrecv', roles: ['ACH_RECV_OPS'] })
     expect((await error(demoApi('/params/systems'))).status).toBe(403)
     expect((await error(demoApi('/eod/status'))).status).toBe(403)
+    expect((await error(demoApi('/v1/ach/processing/windows'))).status).toBe(403)
     expect((await error(demoApi('/transfers/dates'))).status).toBe(403)
   })
 
-  it('keeps achorig out of the receiving screens and lets it use the origination file', async () => {
+  it('keeps achorig out of the receiving screens and lets it use origination processing', async () => {
     await demoLogin('achorig', 'achorig123')
     expect(await demoApi('/me')).toMatchObject({ username: 'achorig', roles: ['ACH_ORIG_OPS'] })
-    expect(await demoApi('/eod/status')).toHaveProperty('pending')
+    expect(await demoApi('/v1/ach/processing/windows')).toHaveProperty('schedules')
     expect((await error(files())).status).toBe(403)
     expect((await error(demoApi('/params/systems'))).status).toBe(403)
   })
@@ -330,8 +336,10 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
     await asOperator()
     const r = await receive('OUT_OF_BALANCE')
     expect(r.processStatus).toBe('OUT_OF_BALANCE')
-    expect(r.message).toContain('Batch 3: total credits says 2675000 but the entries add up to 2670000')
     expect((await page(r.fileID)).total).toBe(0)
+    await demoLogin('admin', 'admin123')
+    const log = await demoApi<{ items: { logMesg: string }[] }>('/v1/admin/logs?page=1&limit=5&level=WARN')
+    expect(log.items[0].logMesg).toContain('Batch 3: total credits says 2675000 but the entries add up to 2670000')
   })
 
   it('EX-03: the same file twice is flagged and adds no entries', async () => {
@@ -340,6 +348,27 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
     const second = await receive('PAYROLL')
     expect(second.processStatus).toBe('DUPLICATE')
     expect((await page(second.fileID)).total).toBe(0)
+  })
+
+  it("ACH Receiving Processing: a received file waits for a window, the run is kept, and step 7 posts once", async () => {
+    type Today = { schedules: { window_time: string }[]; waiting_files: string[]; runs: Record<string, unknown>[]; posting_file: Record<string, unknown> | null; business_date: string }
+    const today = () => demoApi<Today>(`${BASE}/windows`)
+    await asOperator()
+    expect((await today()).schedules.map((w) => w.window_time)).toEqual(['06:00', '09:00', '12:00', '15:00', '18:00'])
+    expect(await post(`${BASE}/files/receive`, { sample: 'PAYROLL' })).toEqual({ fileName: 'PAYROLL.ach', message: 'PAYROLL.ach is in fed/inbound, waiting for the next processing window.' })
+    expect((await today()).waiting_files).toEqual(['PAYROLL.ach'])
+    expect(await files()).toHaveLength(1) // only the design's sample, until a window runs
+
+    await post(`${BASE}/trigger/0900`, {})
+    const t = await today()
+    expect(t.waiting_files).toEqual([])
+    expect(t.runs).toEqual([expect.objectContaining({ window_time: '09:00', files: 1, validated: 1, entries: 50, matched: 47, auto_corrected: 2, manual_review: 1, rejected: 3, memo_posted: 47, run_by: 'achrecv' })])
+    expect((await error(post(`${BASE}/trigger/0800`, {}))).status).toBe(400)
+
+    const job = await post(`${BASE}/generate-posting-file`, { business_date: t.business_date }) as { total_records_posted: number }
+    expect(job.total_records_posted).toBeGreaterThan(0)
+    expect(await post(`${BASE}/generate-posting-file`, { business_date: t.business_date })).toEqual(job)
+    expect((await today()).posting_file).toEqual(job)
   })
 })
 
@@ -360,6 +389,14 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   const setFailures = (n: string) => demoApi('/params/ACH_ORIG/FED_SIM_FAIL_ATTEMPTS', {
     method: 'PUT',
     body: JSON.stringify({ paramDesc: 'Fed simulator', paramRawType: 'INTEGER', paramRawValue: n }),
+  })
+  // On a banking day the demo starts with sample transfers for today; the 6:00 AM schedule sends them first.
+  let seedFiles = 0
+  beforeEach(async () => {
+    await asOrigOps()
+    await post('/v1/ach/processing/trigger-window', { window_time: '06:00' })
+    seedFiles = (await post('/v1/ach/processing/send-to-fed', { schedule_id: 1 }) as { fileID: string | null }).fileID ? 1 : 0
+    await demoLogout()
   })
 
   it('only lets achorig in', async () => {
@@ -389,7 +426,7 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     expect(lines[1].slice(53, 63).trim()).toBe('RENT')
 
     expect((await run(r.effectiveDt)).fileID).toBeNull()
-    expect((await status()).files).toHaveLength(1)
+    expect((await status()).files).toHaveLength(seedFiles + 1)
     expect((await status()).pending).toHaveLength(0)
     await demoLogout()
     await memberWithMfa()
@@ -433,7 +470,7 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
     await run(second.effectiveDt) // $2,500 left, so the $6,000 hold fails
     let s = await status()
     expect(s.leftOut).toEqual([expect.objectContaining({ reason: 'Failed the account, limit or funds check' })])
-    expect(s.files).toHaveLength(1)
+    expect(s.files).toHaveLength(seedFiles + 1)
     expect(s.pending).toHaveLength(1)
     await run(s.pending[0].effectiveDt) // the last one, also short
     s = await status()
@@ -483,6 +520,42 @@ describe('demo ACH Origination File (UC-ACH-EOD-01)', () => {
   it('builds no file on a day that is not a banking day', async () => {
     await asOrigOps()
     expect((await run('2030-01-05')).message).toBe("2030-01-05 isn't a banking day, so no file was built.")
+  })
+})
+
+describe("demo ACH Origination Processing (Ba's critique, 2026-11-12)", () => {
+  type Today = { business_date: string; schedules: { schedule_id: number; window_time: string; last_run: Record<string, unknown> | null }[] }
+
+  it('lists the 4 schedules for today, and only lets achorig in', async () => {
+    await demoLogin('achrecv', 'achrecv123')
+    expect((await error(demoApi('/v1/ach/processing/windows'))).status).toBe(403)
+    await demoLogin('achorig', 'achorig123')
+    const t = await demoApi<Today>('/v1/ach/processing/windows')
+    expect(t.schedules.map((w) => w.window_time)).toEqual(['06:00', '09:00', '12:00', '15:00'])
+    expect(t.schedules.every((w) => w.last_run === null)).toBe(true)
+    expect((await error(post('/v1/ach/processing/send-to-fed', { schedule_id: 9 }))).message).toBe('Choose a schedule.')
+  })
+
+  it("sends only the selected schedule's ready transactions, in a file with its batches", async (ctx) => {
+    await demoLogin('achorig', 'achorig123')
+    const probe = await post('/v1/ach/processing/send-to-fed', { schedule_id: 1 }) as { message: string }
+    if (probe.message.includes("isn't a banking day")) ctx.skip() // no sample transfers then
+    const ready = (id: number) => demoApi<{ transfer_id: string }[]>(`/v1/ach/processing/ready?schedule_id=${id}`)
+    expect(await ready(2)).toEqual([])
+    const r = await post('/v1/ach/processing/trigger-window', { window_time: '09:00' }) as { window_id: string; message: string }
+    expect(r.message).toBe('ACH processing window 09:00: 3 due, 3 ready to post, 0 flagged, 0 rejected.')
+    const t = await demoApi<Today>('/v1/ach/processing/windows')
+    expect(t.schedules[1].last_run).toMatchObject({ window_id: r.window_id, extracted: 3, ready_to_post: 3, run_by: 'achorig' })
+    expect(await ready(2)).toHaveLength(3)
+    expect(await ready(3)).toEqual([])
+
+    const sent = await post('/v1/ach/processing/send-to-fed', { schedule_id: 2 }) as { fileID: string; fedStatus: string }
+    expect(sent.fedStatus).toBe('SENT')
+    expect(await ready(2)).toEqual([])
+    const files = await demoApi<{ file_id: string; schedule_id: number; total_credit_count: number; batches: { company_entry_desc: string; entry_count: number }[] }[]>('/v1/ach/processing/files?schedule_id=2')
+    expect(files).toEqual([expect.objectContaining({ file_id: sent.fileID, schedule_id: 2, total_credit_count: 3 })])
+    expect(files[0].batches.map((b) => [b.company_entry_desc, b.entry_count])).toEqual([['RENT', 1], ['TUITION', 1], ['UTILITIES', 1]])
+    expect(await demoApi('/v1/ach/processing/files?schedule_id=3')).toEqual([])
   })
 })
 

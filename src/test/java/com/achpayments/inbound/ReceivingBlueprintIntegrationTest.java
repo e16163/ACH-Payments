@@ -50,6 +50,8 @@ class ReceivingBlueprintIntegrationTest {
     @Autowired
     FedInboundSimulator fed;
     @Autowired
+    ReceivingWindow window;
+    @Autowired
     JdbcTemplate jdbc;
     @Value("${app.db.receiving}")
     String recv;
@@ -67,6 +69,7 @@ class ReceivingBlueprintIntegrationTest {
         jdbc.update("DELETE FROM " + recv + ".ACHRecvBatch WHERE fileID LIKE 'ACHFILE-2%'");
         jdbc.update("DELETE FROM " + recv + ".ACHRecvFile WHERE fileID LIKE 'ACHFILE-2%'");
         jdbc.update("DELETE FROM " + recv + ".ACHRecvPostingJob");
+        jdbc.update("DELETE FROM " + recv + ".ACHRecvWindowRun");
         jdbc.update("DELETE FROM ACHMemoPost WHERE acctNo IN (SELECT acctNo FROM SimCoreAccount WHERE memberNo LIKE 'M300%')");
         jdbc.update("UPDATE SimCoreAccount SET ledgerBal = 2000.00, availBal = 2000.00 WHERE memberNo LIKE 'M300%'");
         jdbc.update("UPDATE SimCoreAccount SET ledgerBal = 5.00, availBal = 5.00 WHERE acctNo = '987654410019'");
@@ -79,8 +82,10 @@ class ReceivingBlueprintIntegrationTest {
         }
     }
 
+    /** The Fed delivers the sample, then a processing window picks it up (steps 2-6). */
     private String receive(Sample sample) throws IOException {
-        List<ReceivingEngine.Result> results = receiving.receive(new ReceivingController.ReceiveRequest(sample), OPS);
+        receiving.receive(new ReceivingController.ReceiveRequest(sample), OPS);
+        List<ReceivingEngine.Result> results = window.run("09:00", null, "achrecv").files();
         assertEquals(ReceivingEngine.VALIDATED, results.get(0).processStatus(), results.get(0).message());
         return results.get(0).fileID();
     }
@@ -92,6 +97,23 @@ class ReceivingBlueprintIntegrationTest {
 
     private BigDecimal balance(String column, String account) {
         return jdbc.queryForObject("SELECT " + column + " FROM SimCoreAccount WHERE acctNo = ?", BigDecimal.class, account);
+    }
+
+    @Test
+    void aReceivedFileWaitsForAWindowAndTheWindowRunIsKept() throws IOException {
+        receiving.receive(new ReceivingController.ReceiveRequest(Sample.PAYROLL), OPS);
+        assertEquals(List.of("PAYROLL.ach"), api.windows().waitingFiles()); // nothing happens until a window
+        assertEquals(List.of("06:00", "09:00", "12:00", "15:00", "18:00"),
+                api.windows().schedules().stream().map(ReceivingWindow.Window::windowTime).toList()); // from ACHRecvSchedule
+
+        window.run("09:00", null, "achrecv");
+
+        ReceivingProcessingController.WindowsStatus today = api.windows();
+        assertEquals(List.of(), today.waitingFiles());
+        ReceivingProcessingController.WindowRun run = today.runs().get(today.runs().size() - 1);
+        assertEquals(List.of("09:00", 1, 1, 50, 47, 2, 1, 3, 47, "achrecv"), List.of(run.windowTime(), run.files(), run.validated(), run.entries(),
+                run.matched(), run.autoCorrected(), run.manualReview(), run.rejected(), run.memoPosted(), run.runBy()));
+        assertEquals(2, jdbc.queryForObject("SELECT scheduleID FROM " + recv + ".ACHRecvWindowRun ORDER BY runID DESC LIMIT 1", Integer.class));
     }
 
     @Test

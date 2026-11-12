@@ -49,12 +49,14 @@ Code: `nacha/AchFileParser`, `AchFileWriter`, `AchFileValidator`. A file must pa
 | Time | Receiving (RDFI) | Origination (ODFI) |
 |---|---|---|
 | 06:00 | window: validate, extract, match accounts, returns, memo post | window: checks on transfers due today, `READY_TO_POST` |
-| 09:00, 12:00, 15:00 | same | same |
-| 17:00 | | EOD: one last window, then the NACHA file to the Fed |
+| 09:00, 12:00, 15:00 | same | same; ops can **Send to the Fed** a schedule's ready transfers in its own file |
+| 17:00 | | EOD: one last window, then the NACHA file of everything still ready |
 | 18:00 | last window | |
 | 19:00 | core posting file: final posting of everything memo posted or waiting | |
 
-- The windows mirror the Fed's distribution times: a bank processes what arrived since the last window instead of once a day. Same Day *submission* windows (sending several files a day) are still not built.
+- The windows mirror the Fed's distribution times: a bank processes what arrived since the last window instead of once a day.
+- The schedules are tables (`ACHOrigSchedule`, `ACHRecvSchedule`), and each window run is a row (`ACHOrigWindowRun`, `ACHRecvWindowRun`) with the count for each step. Ops screens read those rows, so "what did the 9 AM window do?" has an answer after the fact (an audit trail, not just a log line).
+- Sending a file per schedule is how a bank meets the Same Day deadlines; the 9:00 AM file here would make the 10:30 AM FedACH deadline. Same Day eligibility rules ($1M, no IAT, the Same Day fee) are still not built.
 
 ## 4. ACH Origination, as built (we are the ODFI)
 
@@ -108,4 +110,5 @@ Not built yet: sending returns to the Fed, NOCs we send, a manual-review screen.
 
 - **2026-11-07: Routing number box.** Ba: only error when the routing number isn't 9 digits; any 9 digits pass until real routing validation is written. (The transfer step still requires the 3-7-1 check digit, because the EOD file validator rejects a file containing a bad one.)
 - **2026-11-08: Ba's blueprint built** (plan and Q1–Q10 in `docs/BLUEPRINT-PLAN.md`). Highlights: the hold stays at Confirm and the window re-checks (Q3); unknown accounts get NACHA's R03 after manual review; trusted Company IDs are a parameter; a new compliance login resolves OFAC hits.
+- **2026-11-12: Ba's critique: processing screens.** ACH Origination File → **ACH Origination Processing**: today's date, pick a schedule, see the transactions that window made ready, **Send to the Fed** creates the file for them. ACH Receiving File → **ACH Receiving Processing**: receiving only delivers to the inbound folder; a window processes it; step 7's posting file is on the same screen. Ba: "you must pull data from the database", so the schedules and window runs became tables (V19), and `ACHOrigFile` got a `scheduleID`.
 - **Spec errors found in Ba's sample files** (worth mentioning in an interview, since this is what a validator is for): batch numbers had 6 digits instead of 7; some amounts were 11–12 digits instead of 10; several batch control totals didn't match their entries (e.g. $26,750 stated vs $26,700 in the entries); one routing number (`031000030`) failed the 3-7-1 check digit (the right one is `031000037`). The samples were rebuilt with computed control records.

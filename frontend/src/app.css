@@ -724,7 +724,46 @@ td.num {
   color: var(--on-primary);
 }
 
-/* ---- ACH Origination File and ACH Receiving File ---- */
+/* ---- ACH Origination Processing and ACH Receiving Processing ---- */
+.schedule {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+dl.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+}
+
+dl.steps div {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+
+dl.steps dt {
+  color: var(--mute);
+  font-size: 13px;
+}
+
+dl.steps dd {
+  font-size: 20px;
+  margin: 4px 0 0;
+}
+
+tr.sub td {
+  color: var(--mute);
+  font-size: 13px;
+}
+
+tr.sub td:first-child {
+  padding-left: 28px;
+}
+
 .hint {
   color: var(--mute);
   font-size: 14px;
