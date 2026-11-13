@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.achpayments.common.AppLogRepository;
+import com.achpayments.memo.AccountHistory;
 import com.achpayments.memo.MemoPostingEngine;
 import com.achpayments.memo.MemoPostingEngine.Screening;
 import com.achpayments.memo.MemoPostingEngine.Source;
@@ -73,17 +74,19 @@ public class OriginationWindow {
     private final TransferService transfers;
     private final OfacScreening ofac;
     private final MemoPostingEngine memo;
+    private final AccountHistory history;
     private final AppLogRepository appLog;
     private final Clock clock;
     private final String orig;
 
     public OriginationWindow(JdbcTemplate jdbc, TransactionTemplate transaction, TransferService transfers, OfacScreening ofac,
-            MemoPostingEngine memo, AppLogRepository appLog, Clock clock, @Value("${app.db.origination}") String orig) {
+            MemoPostingEngine memo, AccountHistory history, AppLogRepository appLog, Clock clock, @Value("${app.db.origination}") String orig) {
         this.jdbc = jdbc;
         this.transaction = transaction;
         this.transfers = transfers;
         this.ofac = ofac;
         this.memo = memo;
+        this.history = history;
         this.appLog = appLog;
         this.clock = clock;
         this.orig = orig;
@@ -198,7 +201,8 @@ public class OriginationWindow {
         if ("POSTED".equals(t.memoStatus())) {
             return Optional.empty();
         }
-        var result = memo.post(new MemoPostingEngine.Request(Source.ORIG, t.serNo(), t.acctNo(), false, t.total(), Screening.ALLOW));
+        var result = memo.post(new MemoPostingEngine.Request(Source.ORIG, t.serNo(), t.acctNo(), false, t.total(), Screening.ALLOW,
+                "ACH transfer to " + t.recvName()));
         jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET memoStatus = ?, memoTm = NOW() WHERE transferSerNo = ? "
                 + "AND transferVersion = 1", result.status().name(), t.serNo());
         return result.posted() ? Optional.empty() : Optional.of(result.status().name() + ": " + result.reason());
@@ -246,6 +250,8 @@ public class OriginationWindow {
             jdbc.update("UPDATE SimCoreAccount SET availBal = availBal + ? WHERE acctNo = ?", t.total(), t.acctNo());
             jdbc.update("INSERT INTO ACHMemoPost (tranSource, tranRef, acctNo, creditFlag, amount, postType, memoStatus, reason) "
                     + "VALUES ('ORIG', ?, ?, 1, ?, 'RELEASE', 'POSTED', ?)", t.serNo(), t.acctNo(), t.total(), reason);
+            history.record(t.acctNo(), "Hold released, ACH transfer to " + t.recvName() + " rejected", true, t.total(),
+                    AccountHistory.AVAILABLE, "ACH_ORIG", t.serNo());
             jdbc.update("UPDATE " + orig + ".ACHOriginatorTransfer SET memoStatus = 'RELEASED', memoTm = NOW() WHERE transferSerNo = ? "
                     + "AND transferVersion = 1", t.serNo());
         }

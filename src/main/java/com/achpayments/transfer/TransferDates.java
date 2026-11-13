@@ -2,29 +2,47 @@ package com.achpayments.transfer;
 
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.util.Optional;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import com.achpayments.common.BankingCalendar;
 
 /**
  * UC-ACH-ORG-01 step 4 and "Date Picker Restrictions": the effective date must be a banking day (no weekends or
- * Federal Reserve holidays), and the earliest one is the next banking day (USE-CASES T5: no Same Day for retail).
+ * Federal Reserve holidays). Ba (2026-11-13): before the day's last origination window (3 PM), it can be today, and the
+ * next window sends it; after that, the earliest is the next banking day, sent at its 6 AM window.
  */
 @Component
 public class TransferDates {
 
     private final BankingCalendar calendar;
     private final Clock clock;
+    private final JdbcTemplate jdbc;
+    private final String orig;
 
-    public TransferDates(BankingCalendar calendar, Clock clock) {
+    public TransferDates(BankingCalendar calendar, Clock clock, JdbcTemplate jdbc, @Value("${app.db.origination}") String orig) {
         this.calendar = calendar;
         this.clock = clock;
+        this.jdbc = jdbc;
+        this.orig = orig;
+    }
+
+    /** The same-day cutoff: the last active origination window (ACHOrigSchedule), or null when there's none. */
+    public LocalTime cutoff() {
+        String lastWindow = jdbc.queryForObject("SELECT MAX(windowTime) FROM " + orig + ".ACHOrigSchedule WHERE status = 'ACTIVE'",
+                String.class);
+        return lastWindow == null ? null : LocalTime.parse(lastWindow);
     }
 
     public LocalDate earliest() {
-        return calendar.nextBankingDay(LocalDate.now(clock));
+        LocalDate today = LocalDate.now(clock);
+        LocalTime cutoff = cutoff();
+        boolean sameDay = calendar.isBankingDay(today) && cutoff != null && LocalTime.now(clock).isBefore(cutoff);
+        return sameDay ? today : calendar.nextBankingDay(today);
     }
 
     /**

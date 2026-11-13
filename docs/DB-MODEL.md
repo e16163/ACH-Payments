@@ -136,6 +136,16 @@ There's no new column for the leftover-to-6 AM rule. The 6 AM window sets the ex
 | --- | --- | --- |
 | `ACHOriginator` 9000000001 `name` → `DEMO COMMUNITY BANK`; `ABADirectory` 123456780 → `Demo Community Bank`; `ACH_ORIG/ORIG_COMPANY_NAME` → `DEMO COMM BANK` | Data only | Ba renamed the bank. NACHA widths: origin name 23, company name 16. Rows an admin already changed are left alone. |
 
+### V22 (2026-11-13): member accounts and account history (BLUEPRINT-PLAN.md §4D)
+
+| Change | Marked | Why |
+| --- | --- | --- |
+| `SimCoreAccount.acctNickname VARCHAR(50) NULL` and `acctGroup VARCHAR(15) NOT NULL DEFAULT 'DEPOSIT'` | Adds | Ba's account summary: number, nickname, type, group, available and posted balances, status. Group is the product group (DEPOSIT; LOAN later). |
+| `SimCoreAcctTran` (`acctTranID` PK, `acctNo` FK cascade, `tranTm`, `tranDesc`, `creditFlag`, `amount`, `balanceType` AVAILABLE/POSTED, `tranSource` ACH_ORIG/ACH_RCV/INTERNAL/OPENING, `tranRef`, `availBalAfter`, `ledgerBalAfter`; index `acctNo, tranTm`) | Adds | Ba: list the credits and debits under the account summary. Every balance UPDATE writes one row in the same DB transaction (`memo/AccountHistory`). |
+| Nicknames for the demo member's accounts; one `Opening balance` row per existing account | Data | So each account's list starts from the balance it had. |
+
+Writers: `MemoPostingEngine` (an ACH transfer hold, a received entry memo posted), `OriginationWindow.reject` (hold released), `CorePostingFileJob` (posted), `AccountService.internalTransfer` (both balances, both accounts). No new ACH column: a later-dated transfer just keeps `memoStatus = 'PENDING'` until its window places the hold.
+
 ---
 
 ## 1. The design's tables by component

@@ -78,6 +78,12 @@ describe('demo sign-in', () => {
 })
 
 describe('demo transfer (UC-ACH-ORG-01)', () => {
+  // Wednesday 2026-11-18 at 10 AM: before the 3 PM cutoff, so today is the earliest transfer date
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-18T10:00:00'))
+  })
+  afterEach(() => void vi.useRealTimers())
   beforeEach(memberWithMfa)
 
   it('looks up the bank, or gives EX-01 for a bad routing number', async () => {
@@ -104,6 +110,46 @@ describe('demo transfer (UC-ACH-ORG-01)', () => {
     expect(r).toMatchObject({ processStatus: 'PENDING_BATCH', ofacStatus: 'OFAC_PASSED', memoStatus: 'POSTED', recvName: 'JOHN DOE', memo: 'RENT', amount: 1500, total: 1500 })
     const accounts = await demoApi<{ acctNo: string; availBal: number }[]>('/member/accounts')
     expect(accounts.find((a) => a.acctNo === '100049281920')?.availBal).toBe(7000)
+  })
+
+  type Acct = { acctNo: string; acctNickname: string; acctGroup: string; acctStatus: string; availBal: number; ledgerBal: number }
+  type Tran = { tranDesc: string; credit: boolean; amount: number; balanceType: string; availBalAfter: number; ledgerBalAfter: number; tranRef: string }
+  const account = async (acctNo = '100049281920') => (await demoApi<Acct[]>('/member/accounts')).find((a) => a.acctNo === acctNo)!
+  const history = (acctNo = '100049281920') => demoApi<{ items: Tran[]; total: number }>(`/member/accounts/${acctNo}/transactions?page=1&limit=10`)
+
+  it('before 3 PM a transfer goes today and lowers the available balance at once, but not the posted balance', async () => {
+    expect((await demoApi<{ earliest: string; sameDayCutoff: string }>('/transfers/dates'))).toMatchObject({ earliest: '2026-11-18', sameDayCutoff: '15:00' })
+    const r = await post('/transfers', await transfer()) as { transferSerNo: string }
+    expect(await account()).toMatchObject({ acctNickname: 'Everyday Checking', acctGroup: 'DEPOSIT', acctStatus: 'ACTIVE', availBal: 7000, ledgerBal: 8500 })
+    const { items, total } = await history()
+    expect(total).toBe(2) // the opening balance, then the hold
+    expect(items[0]).toMatchObject({ tranDesc: 'ACH transfer to JOHN DOE', credit: false, amount: 1500, balanceType: 'AVAILABLE', availBalAfter: 7000, ledgerBalAfter: 8500, tranRef: r.transferSerNo })
+  })
+
+  it('from 3 PM the earliest date is the next banking day, and a later-dated transfer leaves the balance alone', async () => {
+    vi.setSystemTime(new Date('2026-11-18T15:00:00'))
+    expect((await demoApi<{ earliest: string }>('/transfers/dates')).earliest).toBe('2026-11-19')
+    expect((await error(post('/transfers/preview', await transfer({ effectiveDt: '2026-11-18' })))).message).toBe('The earliest transfer date is 2026-11-19.')
+    const r = await post('/transfers', await transfer()) as Record<string, unknown>
+    expect(r).toMatchObject({ memoStatus: 'PENDING', effectiveDt: '2026-11-19' })
+    expect((await account()).availBal).toBe(8500)
+  })
+
+  it('moves money between the two accounts, both balances at once, and lists it on both', async () => {
+    const r = await post('/transfers/internal', { fromAcctNo: '100049281920', toAcctNo: '100049281946', amount: '250.00', memo: 'Vacation' }) as Record<string, unknown>
+    expect(r.transferId).toMatch(/^INT-[0-9A-F]{12}$/)
+    expect(await account()).toMatchObject({ availBal: 8250, ledgerBal: 8250 })
+    const savings = await account('100049281946')
+    expect(savings.ledgerBal - savings.availBal).toBe(1595.5) // only the seeded ACH holds keep the two apart
+    expect((await history()).items[0]).toMatchObject({ tranDesc: 'Transfer to Rainy Day Fund ••1946 - Vacation', credit: false, balanceType: 'POSTED', ledgerBalAfter: 8250 })
+    expect((await history('100049281946')).items[0]).toMatchObject({ tranDesc: 'Transfer from Everyday Checking ••1920 - Vacation', credit: true, amount: 250 })
+  })
+
+  it('refuses an internal transfer without funds or between the same account, and hides other accounts', async () => {
+    expect((await error(post('/transfers/internal', { fromAcctNo: '100049281920', toAcctNo: '100049281946', amount: '8500.01' }))).kind).toBe('FUNDS')
+    expect((await error(post('/transfers/internal', { fromAcctNo: '100049281920', toAcctNo: '100049281920', amount: '1' }))).message).toBe('Choose two different accounts.')
+    expect((await error(demoApi('/member/accounts/987654321019/transactions'))).status).toBe(404)
+    expect((await account()).availBal).toBe(8500)
   })
 
   it('flags an OFAC name for review without holding the money', async () => {

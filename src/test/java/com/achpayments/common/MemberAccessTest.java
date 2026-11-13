@@ -108,6 +108,9 @@ class MemberAccessTest {
     com.achpayments.transfer.TransferService transfers;
 
     @MockitoBean
+    com.achpayments.transfer.AccountService accountService;
+
+    @MockitoBean
     BankingCalendar calendar;
 
     @MockitoBean
@@ -185,6 +188,23 @@ class MemberAccessTest {
         org.mockito.Mockito.verify(transfers).submit(org.mockito.ArgumentMatchers.eq(MEMBER_NO), org.mockito.ArgumentMatchers.any());
         org.mockito.Mockito.verify(transfers, org.mockito.Mockito.never())
                 .submit(org.mockito.ArgumentMatchers.eq("SOMEONE-ELSE"), org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void accountHistoryAndInternalTransfersUseTheLoginsMemberNumberAndNeedMfa() throws Exception {
+        mvc.perform(get("/api/member/accounts/100049281920/transactions").with(httpBasic(MEMBER, "member-pw")))
+                .andExpect(status().isForbidden());
+        MockHttpSession session = new MockHttpSession();
+        verify(session, sendCode(session)).andExpect(status().isOk());
+        mvc.perform(get("/api/member/accounts/100049281920/transactions").session(session).with(httpBasic(MEMBER, "member-pw")))
+                .andExpect(status().isNotFound()); // the mock finds nothing, as for another member's account
+        org.mockito.Mockito.verify(accountService).transactions(MEMBER_NO, "100049281920", 1, 10);
+        mvc.perform(post("/api/transfers/internal").session(session).with(httpBasic(MEMBER, "member-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{\"fromAcctNo\":\"100049281920\",\"toAcctNo\":\"100049281946\",\"amount\":5}"))
+                .andExpect(status().isCreated());
+        org.mockito.Mockito.verify(accountService).internalTransfer(org.mockito.ArgumentMatchers.eq(MEMBER_NO), org.mockito.ArgumentMatchers.any());
+        mvc.perform(post("/api/transfers/internal").with(httpBasic("admin", "admin-pw")).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isForbidden());
     }
 
     @Test

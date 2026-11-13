@@ -134,7 +134,7 @@ Executing the transfer is **out of scope** for this use case and is picked up by
 - **T4. Limit tiers. ✅ Decided (2026-11-03): The design's `ACHOrigLimitRule` as written.** A rule applies to an account type (`CHECKING`, `SAVINGS` or `ALL`) over `dayNo` days. The check adds up the member's transfers from that account type within `dayNo` days, plus the new one, and compares the total to `limitAmt`.
 - **T5. Fee and timing. ✅ Decided (2026-11-03):** free and next banking day.
   - The fee is a parameter (`ACH_ORIG` / `EXTERNAL_XFER_FEE` = `0.00`, editable in the Parameter UI).
-  - The earliest effective date is the next banking day.
+  - The earliest effective date is the next banking day. **Changed by Ba (2026-11-13):** before the last origination window (3 PM ET, `ACHOrigSchedule`) on a banking day, it's today, and the next window that day sends it; the hold is placed at Confirm for a same-day transfer and on the effective date otherwise.
   - No Same Day for retail.
 - **T6. OFAC hits. ✅ Decided (2026-11-03; UC-ACH-EOD-01 E2 renamed `CLEARED` to `OFAC_PASSED`): follow the design's `ofacStatus` values** (`CLEARED`, `FLAGGED`, `REVIEW`). A hit saves the transfer with `ofacStatus = 'FLAGGED'`, held until staff clear it, and the member sees "under review".
 - **T7. Member login. ✅ Decided (2026-11-03):** demo member users with simulated MFA, the same approach as P1.
@@ -370,3 +370,4 @@ We log one row per business action, not one per SQL statement. OWASP's logging g
 6. **Ba's processing screens (2026-11-12).** ✅ Built (BLUEPRINT-PLAN.md §4A).
 7. **Ba's follow-up: 6 AM leftovers, next business day, transaction search screens.** ✅ Built 2026-11-12 (BLUEPRINT-PLAN.md §4B, §7A).
 8. **ACH Business Rules Management.** ✅ Built 2026-11-12 (BLUEPRINT-PLAN.md §4C, §7A).
+9. **Ba's member banking: same-day ACH before 3 PM, account summary and history, internal transfer.** ✅ Built 2026-11-13 (BLUEPRINT-PLAN.md §4D, V22).

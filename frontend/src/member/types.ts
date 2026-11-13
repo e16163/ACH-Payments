@@ -1,4 +1,14 @@
-export type Account = { acctNo: string; acctName: string; acctType: string; availBal: string }
+/** Ba (2026-11-13): the account summary. ledgerBal is the posted balance; only the posting system changes it. */
+export type Account = {
+  acctNo: string; acctName: string; acctNickname: string | null; acctType: string; acctGroup: string
+  availBal: string; ledgerBal: string; acctStatus: string
+}
+
+/** One line of an account's history (SimCoreAcctTran). AVAILABLE: a hold or memo post, still pending; POSTED: posted. */
+export type AcctTran = {
+  acctTranId: number; tranTm: string; tranDesc: string; credit: boolean; amount: string; balanceType: 'AVAILABLE' | 'POSTED'
+  tranSource: string; tranRef: string; availBalAfter: string; ledgerBalAfter: string
+}
 
 /** One of the member's registered external bank accounts (Ba's GET /v1/holders/{holderId}/external-accounts). */
 export type ExternalAccount = { externalAccountId: string; bankName: string | null; maskedAccountNumber: string; accountType: string; status: string }

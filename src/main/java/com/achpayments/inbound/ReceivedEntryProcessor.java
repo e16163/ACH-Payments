@@ -189,7 +189,8 @@ public class ReceivedEntryProcessor {
             eligible++;
             BigDecimal amount = (BigDecimal) row.get("amount");
             MemoPostingEngine.Result result = memo.post(new MemoPostingEngine.Request(MemoPostingEngine.Source.RECV,
-                    String.valueOf(row.get("tranID")), (String) row.get("acct"), credit, amount, MemoPostingEngine.Screening.ALLOW));
+                    String.valueOf(row.get("tranID")), (String) row.get("acct"), credit, amount, MemoPostingEngine.Screening.ALLOW,
+                    (credit ? "ACH credit from " : "ACH debit by ") + row.get("companyName")));
             if (result.posted()) {
                 jdbc.update("UPDATE " + recv + ".ACHRecvTransaction SET processStatus = ?, memoPostedTm = ? WHERE tranID = ?",
                         MEMO_POSTED, LocalDateTime.now(clock).withNano(0), row.get("tranID"));

@@ -63,7 +63,16 @@ const FREQUENCIES = ['ONETIME', 'WEEKLY', 'BIWEEKLY', 'MONTHLY']
 // Nacha gives these entry descriptions a meaning, so a member's memo can't be sent as one (EodFileStore).
 const RESERVED_ENTRY_DESC = ['REVERSAL', 'RECLAIM', 'NONSETTLED', 'RETRY PYMT', 'REDEPCHECK', 'HCCLAIMPMT', 'AUTOENROLL']
 
-type Account = { acctNo: string; acctName: string; acctType: string; cents: number }
+// cents is the available balance, ledgerCents the posted one (SimCoreAccount.availBal and ledgerBal)
+type Account = {
+  acctNo: string; acctName: string; acctNickname: string | null; acctType: string; acctGroup: string; acctStatus: string
+  cents: number; ledgerCents: number
+}
+/** SimCoreAcctTran (V22): every change to a member account's balances. */
+type AcctTran = {
+  acctTranId: number; acctNo: string; tranTm: string; tranDesc: string; credit: boolean; cents: number; balanceType: 'AVAILABLE' | 'POSTED'
+  tranSource: string; tranRef: string; availAfter: number; ledgerAfter: number
+}
 type Param = { systemName: string; paramName: string; paramDesc: string; paramRawType: string; paramRawValue: string; lastModTm: string; lastModBy: string }
 type Transfer = {
   transferSerNo: string; ofacStatus: string; memoStatus: string; recvName: string; bankName: string | null; routingNo: string
@@ -106,6 +115,7 @@ type State = {
   mfaVerified: boolean
   mfa: { code: string; expires: number; tries: number } | null
   accounts: Account[]
+  history: AcctTran[] // SimCoreAcctTran (V22)
   params: Param[]
   transfers: Transfer[]
   files: AchFileRow[]
@@ -121,7 +131,7 @@ type State = {
   rules: BusinessRule[] // ACHBusinessRule (V20)
 }
 
-const KEY = 'ach-demo-state-8' // new name: state saved by an older demo has no business rules
+const KEY = 'ach-demo-state-9' // new name: state saved by an older demo has no posted balances or account history
 const MEMBER_NO = 'M10982347'
 // The ACHOrigSchedule and ACHRecvSchedule rows (V19)
 const slot = (schedule_id: number, window_time: string, window_name: string) => ({ schedule_id, window_time, window_name })
@@ -141,9 +151,10 @@ function freshState(): State {
     mfaVerified: false,
     mfa: null,
     accounts: [
-      { acctNo: '100049281920', acctName: 'Primary Checking', acctType: 'CHECKING', cents: 850_000 },
-      { acctNo: '100049281946', acctName: 'Savings', acctType: 'SAVINGS', cents: 1_500_000 },
+      { acctNo: '100049281920', acctName: 'Primary Checking', acctNickname: 'Everyday Checking', acctType: 'CHECKING', acctGroup: 'DEPOSIT', acctStatus: 'ACTIVE', cents: 850_000, ledgerCents: 850_000 },
+      { acctNo: '100049281946', acctName: 'Savings', acctNickname: 'Rainy Day Fund', acctType: 'SAVINGS', acctGroup: 'DEPOSIT', acctStatus: 'ACTIVE', cents: 1_500_000, ledgerCents: 1_500_000 },
     ],
+    history: [],
     params: [
       { systemName: 'ACH_RCV', paramName: 'MEMO_POST_IMMEDIATE', paramDesc: 'Enable immediate memo posting upon transaction ingestion', paramRawType: 'BOOLEAN', paramRawValue: 'TRUE', lastModTm: '2026-11-03T19:14:48', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'FED_FILE_CUTOFF_TIME', paramDesc: 'Cutoff time for building daily Fed file (EST)', paramRawType: 'STRING', paramRawValue: '17:00:00', lastModTm: '2026-11-03T19:15:14', lastModBy: 'SYS_ADMIN' },
@@ -181,6 +192,7 @@ function freshState(): State {
     // The V20 seeds: Ba's sample, and the Company ID the old TRUSTED_COMPANY_IDS parameter held
     rules: [earlyPostingRule(1, '23416789', 'Company 23416789 credits', 'Credits'), earlyPostingRule(2, '1900483920', 'payroll from Company 1900483920', 'Payroll credits')],
   }
+  for (const a of s.accounts) record(s, a, 'Opening balance', true, a.ledgerCents, 'POSTED', 'OPENING', 'OPENING')
   seedToday(s)
   return s
 }
@@ -205,9 +217,11 @@ function seedToday(s: State) {
   const yesterday = isoDateTime(new Date(Date.now() - 86_400_000))
   const seeds: [string, number, string][] = [['JOHN DOE', 125_000, 'RENT'], ['JOHN DOE', 4_550, 'UTILITIES'], ['JOHN DOE', 30_000, 'TUITION']]
   for (const [recvName, amount, memo] of seeds) {
+    const transferSerNo = `TRF-SEED-${pad(s.transfers.length + 1, 4)}`
     savings.cents -= amount
+    record(s, savings, `ACH transfer to ${recvName}`, false, amount, 'AVAILABLE', 'ACH_ORIG', transferSerNo)
     s.transfers.push({
-      transferSerNo: `TRF-SEED-${pad(s.transfers.length + 1, 4)}`, ofacStatus: 'OFAC_PASSED', memoStatus: 'POSTED', recvName, bankName: 'Sample Bank (from the design samples)',
+      transferSerNo, ofacStatus: 'OFAC_PASSED', memoStatus: 'POSTED', recvName, bankName: 'Sample Bank (from the design samples)',
       routingNo: '051000033', acctNo: '987654321012', acctType: 'CHECKING', fromAcctNo: savings.acctNo, fromAcctName: savings.acctName,
       fromAcctType: savings.acctType, amount, fee: 0, effectiveDt: today, frequency: 'ONETIME', memo, submitted: yesterday,
       processStatus: 'PENDING_BATCH', firstSerNo: null, reqNo: 1, remaining: 0, ofacTm: yesterday, scheduleId: null, readyTm: null,
@@ -251,7 +265,21 @@ function nextBankingDay(iso: string): string {
   return isoDate(d)
 }
 
-const earliest = () => nextBankingDay(isoDate(new Date()))
+/** The last ACHOrigSchedule window (3 PM): before it, a banking day's transfers can go out the same day (Ba, 2026-11-13). */
+const SAME_DAY_CUTOFF = ORIG_SCHEDULE[ORIG_SCHEDULE.length - 1].window_time
+function earliest() {
+  const now = new Date()
+  const today = isoDate(now)
+  return isBankingDay(today) && `${pad(now.getHours())}:${pad(now.getMinutes())}` < SAME_DAY_CUTOFF ? today : nextBankingDay(today)
+}
+
+/** AccountHistory.record: one SimCoreAcctTran row, after the balances changed. */
+function record(s: State, a: Account, tranDesc: string, credit: boolean, cents: number, balanceType: 'AVAILABLE' | 'POSTED', tranSource: string, tranRef: string) {
+  s.history.push({
+    acctTranId: s.history.length + 1, acctNo: a.acctNo, tranTm: isoDateTime(new Date()), tranDesc, credit, cents, balanceType, tranSource, tranRef,
+    availAfter: a.cents, ledgerAfter: a.ledgerCents,
+  })
+}
 /** BankingCalendar.businessDate and requireBankingDay: the processing screens work on the next banking day on a weekend or holiday. */
 const businessDate = (iso: string) => (isBankingDay(iso) ? iso : nextBankingDay(iso))
 function requireBankingDay(iso: string) {
@@ -422,8 +450,11 @@ function route(s: State, method: string, path: string, body: Body): unknown {
   if (path === '/member/mfa/verify' && method === 'POST') return verifyMfa(s, String(body.code ?? ''))
   if (!s.mfaVerified) denied() // UC-ACH-ORG-01 precondition: MFA passed
 
-  if (path === '/transfers/dates') return { earliest: earliest(), holidays: HOLIDAYS }
+  if (path === '/transfers/dates') return { earliest: earliest(), holidays: HOLIDAYS, sameDayCutoff: SAME_DAY_CUTOFF }
   if (path === '/member/accounts') return accounts(s)
+  const history = /^\/member\/accounts\/([^/?]+)\/transactions(?:\?|$)/.exec(path)
+  if (history) return accountTransactions(s, decodeURIComponent(history[1]), new URLSearchParams(path.split('?')[1]))
+  if (path === '/transfers/internal' && method === 'POST') return internalTransfer(s, body)
   const holder = /^\/v1\/holders\/([^/]+)\/external-accounts$/.exec(path)
   if (holder) {
     if (decodeURIComponent(holder[1]) !== MEMBER_NO) denied()
@@ -550,7 +581,50 @@ function earlyPosting(s: State): (e: RecvEntry) => boolean {
 function accounts(s: State) {
   return [...s.accounts]
     .sort((a, b) => a.acctType.localeCompare(b.acctType) || a.acctNo.localeCompare(b.acctNo))
-    .map((a) => ({ acctNo: a.acctNo, acctName: a.acctName, acctType: a.acctType, availBal: a.cents / 100 }))
+    .filter((a) => a.acctStatus === 'ACTIVE')
+    .map((a) => ({
+      acctNo: a.acctNo, acctName: a.acctName, acctNickname: a.acctNickname, acctType: a.acctType, acctGroup: a.acctGroup,
+      availBal: a.cents / 100, ledgerBal: a.ledgerCents / 100, acctStatus: a.acctStatus,
+    }))
+}
+
+/** AccountService.transactions: newest first; another member's account is a 404. */
+function accountTransactions(s: State, acctNo: string, query: URLSearchParams) {
+  if (!s.accounts.some((a) => a.acctNo === acctNo)) fail(404, 'Not found')
+  const limit = Math.max(1, Math.min(Number(query.get('limit') ?? 10) || 10, 100))
+  const page = Math.max(1, Number(query.get('page') ?? 1) || 1)
+  const rows = s.history.filter((h) => h.acctNo === acctNo).reverse()
+  return {
+    items: rows.slice((page - 1) * limit, page * limit).map((h) => ({
+      acctTranId: h.acctTranId, tranTm: h.tranTm, tranDesc: h.tranDesc, credit: h.credit, amount: h.cents / 100, balanceType: h.balanceType,
+      tranSource: h.tranSource, tranRef: h.tranRef, availBalAfter: h.availAfter / 100, ledgerBalAfter: h.ledgerAfter / 100,
+    })),
+    total: rows.length, page, limit,
+  }
+}
+
+/** AccountService.internalTransfer: a book transfer, so both balances of both accounts change at once. */
+function internalTransfer(s: State, r: Body) {
+  const mine = s.accounts.filter((a) => a.acctStatus === 'ACTIVE')
+  const from = mine.find((a) => a.acctNo === r.fromAcctNo) ?? invalid('Choose one of your accounts to transfer from.')
+  const to = mine.find((a) => a.acctNo === r.toAcctNo) ?? invalid('Choose one of your accounts to transfer to.')
+  if (from.acctNo === to.acctNo) invalid('Choose two different accounts.')
+  const amount = toCents(r.amount)
+  if (amount === null || amount <= 0 || amount > MAX_CENTS) invalid('Enter an amount between $0.01 and $99,999,999,999.99.')
+  const memo = String(r.memo ?? '').trim()
+  if (!/^[A-Za-z0-9 .,&'-]{0,30}$/.test(memo)) invalid('The memo can be up to 30 letters, numbers and spaces.')
+  if (from.cents < amount!) fail(400, "Your available balance isn't enough for this transfer.", 'FUNDS')
+  from.cents -= amount!
+  from.ledgerCents -= amount!
+  to.cents += amount!
+  to.ledgerCents += amount!
+  const id = `INT-${Math.random().toString(16).slice(2, 14).toUpperCase().padEnd(12, '0')}`
+  const note = memo ? ` - ${memo}` : ''
+  const label = (a: Account) => `${a.acctNickname ?? a.acctName} ••${a.acctNo.slice(-4)}`
+  record(s, from, `Transfer to ${label(to)}${note}`, false, amount!, 'POSTED', 'INTERNAL', id)
+  record(s, to, `Transfer from ${label(from)}${note}`, true, amount!, 'POSTED', 'INTERNAL', id)
+  log(s, 'ACH_ORIG', 'INFO', `Member ${MEMBER_NO} made internal transfer ${id} of ${(amount! / 100).toFixed(2)}`)
+  return { transferId: id, fromAcctNo: from.acctNo, toAcctNo: to.acctNo, amount: amount! / 100, fromAvailBal: from.cents / 100, toAvailBal: to.cents / 100 }
 }
 
 function bankName(routing: string): string | null {
@@ -621,11 +695,17 @@ function nextSerNo(s: State): string {
 
 function submit(s: State, body: Body) {
   const c = check(s, body)
-  // Memo hold (MemoPostingEngine): an OFAC hit waits for review; otherwise the total comes off the available balance.
-  const memoStatus = c.ofacHit ? 'REVIEW' : 'POSTED'
-  if (!c.ofacHit) c.from.cents -= c.amount + c.fee
+  // Memo hold (MemoPostingEngine), for a same-day transfer only (Ba, 2026-11-13): an OFAC hit waits for review; otherwise the
+  // total comes off the available balance. A later-dated one is held by the window on its effective date.
+  const sameDay = c.effectiveDt <= isoDate(new Date())
+  const memoStatus = !sameDay ? 'PENDING' : c.ofacHit ? 'REVIEW' : 'POSTED'
+  const transferSerNo = nextSerNo(s)
+  if (memoStatus === 'POSTED') {
+    c.from.cents -= c.amount + c.fee
+    record(s, c.from, `ACH transfer to ${c.recvName}`, false, c.amount + c.fee, 'AVAILABLE', 'ACH_ORIG', transferSerNo)
+  }
   const t: Transfer = {
-    transferSerNo: nextSerNo(s), ofacStatus: c.ofacHit ? 'FLAGGED' : 'OFAC_PASSED', memoStatus,
+    transferSerNo, ofacStatus: c.ofacHit ? 'FLAGGED' : 'OFAC_PASSED', memoStatus,
     processStatus: c.ofacHit ? 'PENDING' : 'PENDING_BATCH', firstSerNo: null, reqNo: 1, remaining: c.count - 1,
     recvName: c.recvName, bankName: c.bankName, routingNo: c.routingNo, acctNo: c.acctNo, acctType: c.acctType,
     fromAcctNo: c.from.acctNo, fromAcctName: c.from.acctName, fromAcctType: c.from.acctType, amount: c.amount, fee: c.fee,
@@ -970,9 +1050,10 @@ function runWindow(s: State, businessDate: string, windowTime: string, runBy: st
       }
       t.ofacStatus = 'OFAC_PASSED'
     }
-    if (t.memoStatus !== 'POSTED') { // a later payment of a series (E4); the first was held at Confirm
+    if (t.memoStatus !== 'POSTED') { // a later-dated transfer, or a later payment of a series (E4)
       from.cents -= t.amount + t.fee
       t.memoStatus = 'POSTED'
+      record(s, from, `ACH transfer to ${t.recvName}`, false, t.amount + t.fee, 'AVAILABLE', 'ACH_ORIG', t.transferSerNo)
     }
     t.processStatus = 'READY_TO_POST'
     t.scheduleId = ORIG_SCHEDULE.find((w) => w.window_time === windowTime)?.schedule_id ?? null
@@ -987,8 +1068,10 @@ function runWindow(s: State, businessDate: string, windowTime: string, runBy: st
 function reject(s: State, t: Transfer, reason: string) {
   t.processStatus = 'REJECTED'
   if (t.memoStatus === 'POSTED') {
-    s.accounts.find((a) => a.acctNo === t.fromAcctNo)!.cents += t.amount + t.fee
+    const from = s.accounts.find((a) => a.acctNo === t.fromAcctNo)!
+    from.cents += t.amount + t.fee
     t.memoStatus = 'RELEASED'
+    record(s, from, `Hold released, ACH transfer to ${t.recvName} rejected`, true, t.amount + t.fee, 'AVAILABLE', 'ACH_ORIG', t.transferSerNo)
   }
   log(s, 'ACH_ORIG', 'WARN', `Origination window: ${t.transferSerNo} rejected, ${reason}`)
   scheduleNext(s, t)

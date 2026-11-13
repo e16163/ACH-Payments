@@ -41,7 +41,9 @@ public class TransferService {
     static final Set<String> FREQUENCIES = Set.of("ONETIME", "WEEKLY", "BIWEEKLY", "MONTHLY");
     static final String NOT_VERIFIED = "We couldn't verify this account for ACH transfers. Check the details or use a different account.";
 
-    public record Account(String acctNo, String acctName, String acctType, BigDecimal availBal) {
+    /** Ba (2026-11-13): the account summary: number, nickname, type, group, available and posted balances, status. */
+    public record Account(String acctNo, String acctName, String acctNickname, String acctType, String acctGroup,
+            BigDecimal availBal, BigDecimal ledgerBal, String acctStatus) {
     }
 
     public record Preview(String bankName, BigDecimal amount, BigDecimal fee, BigDecimal total, LocalDate effectiveDt,
@@ -92,9 +94,10 @@ public class TransferService {
 
     /** Steps 1-2: the member's active funding accounts and their available balances. */
     public List<Account> accounts(String memberNo) {
-        return jdbc.query("SELECT acctNo, acctName, acctType, availBal FROM SimCoreAccount "
+        return jdbc.query("SELECT acctNo, acctName, acctNickname, acctType, acctGroup, availBal, ledgerBal, acctStatus FROM SimCoreAccount "
                 + "WHERE memberNo = ? AND acctStatus = 'ACTIVE' ORDER BY acctType, acctNo",
-                (rs, i) -> new Account(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBigDecimal(4)), memberNo);
+                (rs, i) -> new Account(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
+                        rs.getBigDecimal(6), rs.getBigDecimal(7), rs.getString(8)), memberNo);
     }
 
     /** Step 5 pre-flight: every check, without saving anything. */
@@ -104,14 +107,23 @@ public class TransferService {
                 dates.estimatedArrival(c.effectiveDt()), c.ofacHit());
     }
 
-    /** Steps 6-7: save the transfer as PENDING and place the memo hold, in one DB transaction. */
+    /**
+     * Steps 6-7: save the transfer as PENDING and, for a same-day transfer, place the memo hold, in one DB transaction.
+     * Ba (2026-11-13): a later-dated transfer leaves the available balance alone until the window on its effective date
+     * places the hold (OriginationWindow.placeHold).
+     */
     @Transactional
     public Receipt submit(String memberNo, TransferRequest r) {
         Checked c = check(memberNo, r);
         activate(memberNo, c.recvAcctSerNo());
         String serNo = insertTransfer(memberNo, c.recvAcctSerNo(), c);
+        if (c.effectiveDt().isAfter(LocalDate.now(clock))) {
+            appLog.log(ACH_ORIG, "INFO", "Member %s submitted transfer %s for %s on %s, hold placed on that day"
+                    .formatted(memberNo, serNo, c.total(), c.effectiveDt()));
+            return receipt(memberNo, serNo).orElseThrow();
+        }
         MemoPostingEngine.Result hold = memo.post(new MemoPostingEngine.Request(Source.ORIG, serNo, c.from().acctNo(),
-                false, c.total(), c.ofacHit() ? Screening.REVIEW : Screening.ALLOW));
+                false, c.total(), c.ofacHit() ? Screening.REVIEW : Screening.ALLOW, "ACH transfer to " + c.recvName()));
         if (hold.status() == MemoPostingEngine.Status.NSF) {
             throw new TransferRejected(Kind.FUNDS, "Your available balance isn't enough for this transfer.");
         }

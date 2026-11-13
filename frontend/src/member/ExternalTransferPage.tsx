@@ -7,7 +7,13 @@ import {
 } from './rules'
 import type { Account, ExternalAccount, Preview, Receipt } from './types'
 
-type DateRules = { earliest: string; holidays: string[] }
+type DateRules = { earliest: string; holidays: string[]; sameDayCutoff: string | null }
+
+/** "15:00" or "15:00:00" -> "3:00 PM" */
+const clockTime = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number)
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
 
 /** "Bank ••••1234 · Checking", as the To list shows a registered external bank account. */
 export function externalAccountLabel(a: ExternalAccount): string {
@@ -222,7 +228,12 @@ export default function ExternalTransferPage({ memberNo }: { memberNo: string })
             {dateRules && (
               <DatePicker value={effectiveDt} earliest={dateRules.earliest} holidays={holidays} onChange={setEffectiveDt} />
             )}
-            <p className="muted small">Weekends and Federal Reserve holidays aren't available. The earliest date is the next banking day.</p>
+            <p className="muted small">
+              Weekends and Federal Reserve holidays aren't available.
+              {dateRules?.sameDayCutoff
+                ? ` Before ${clockTime(dateRules.sameDayCutoff)} ET on a banking day, you can send it today, and the amount comes off your available balance at once. After that, the earliest date is the next banking day.`
+                : ' The earliest date is the next banking day.'}
+            </p>
           </div>
           {show('date') && <p className="field-error">{errors.date}</p>}
 

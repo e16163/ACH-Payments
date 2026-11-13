@@ -85,12 +85,36 @@ class OriginationWindowIntegrationTest {
         return submit(name, "REC-20000103-0001");
     }
 
+    /** Submits and holds the money as Confirm does for a same-day transfer, whatever time of day the test runs. */
     private String submit(String name, String serNo) {
+        String transferSerNo = submitOnly(name, serNo, date);
+        if ("PENDING".equals(transfer(transferSerNo).get("memoStatus"))) { // after 3 PM, date is the next banking day
+            window.placeHold(window.load(transferSerNo, false).orElseThrow());
+        }
+        return transferSerNo;
+    }
+
+    private String submitOnly(String name, String serNo, LocalDate effectiveDt) {
         jdbc.update("INSERT INTO " + orig + ".ACHOrigRecvAccount (recvAcctSerNo, recvAcctVersion, memberNo, acctNo, routingNo, acctType, "
                 + "acctOwner, sourceID, lastModBy) VALUES (?, 1, ?, '123456789', '021000021', 'CHECKING', ?, 'ONLINE_BANKING', ?)",
                 serNo, MEMBER, name, MEMBER);
-        return transfers.submit(MEMBER, new TransferRequest(CHECKING, serNo, new BigDecimal("100.00"), date, "ONETIME", null, "RENT"))
+        return transfers.submit(MEMBER, new TransferRequest(CHECKING, serNo, new BigDecimal("100.00"), effectiveDt, "ONETIME", null, "RENT"))
                 .transferSerNo();
+    }
+
+    /** Ba (2026-11-13): a later-dated transfer keeps the available balance until the window on its effective date holds it. */
+    @Test
+    void aLaterDatedTransferIsHeldByTheWindowOnItsEffectiveDate() {
+        LocalDate later = calendar.nextBankingDay(date);
+        String serNo = submitOnly("JANE SMITH", "REC-20000103-0001", later);
+        assertEquals("PENDING", transfer(serNo).get("memoStatus"));
+        assertEquals(new BigDecimal("20000.00"), available());
+
+        window.run(later, "09:00");
+        assertEquals(Map.of("processStatus", "READY_TO_POST", "ofacStatus", "OFAC_PASSED", "memoStatus", "POSTED"), transfer(serNo));
+        assertEquals(new BigDecimal("19900.00"), available());
+        assertEquals("ACH transfer to JANE SMITH", jdbc.queryForObject("SELECT tranDesc FROM SimCoreAcctTran WHERE tranRef = ?",
+                String.class, serNo));
     }
 
     private Map<String, Object> transfer(String serNo) {

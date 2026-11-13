@@ -256,6 +256,77 @@ The PUT/POST runs the same parser, so an unknown field, op or shape is a 400 bef
 - An integration test: a save round-trips, bad JSON is a 400, a non-admin gets a 403, and a receiving run memo posts a credit from `23416789` at once.
 - A page test, then a browser click-through.
 
+### 4D. Ba: member banking (2026-11-13): ✅ built
+
+Ba asked for three member-login changes, and to check the account tables first:
+1. **Same-day ACH transfer.** On a business day before 3 PM, the member can date a transfer today, and it goes out that day. After 3 PM it goes out at the next business day's 6 AM window.
+2. **Account summary and transactions.** Choose an account. The summary at the top shows the account number, nickname, type, available balance, posted balance and status, with the account's credits and debits listed below. A same-day ACH transfer lowers the available balance right away. The posted balance doesn't change, because only the posting system changes it.
+3. **Internal transfer** between the member's two accounts.
+
+**What the database has:** `SimCoreAccount` has `acctName`, `acctType`, `acctStatus`, `ledgerBal` (posted) and `availBal`, but no nickname, no group, and no list of the account's transactions. `ACHMemoPost` logs hold attempts only.
+
+**V22:**
+
+```sql
+ALTER TABLE SimCoreAccount
+    ADD COLUMN acctNickname VARCHAR(50) NULL AFTER acctName,                       -- the member's own name for the account
+    ADD COLUMN acctGroup VARCHAR(15) NOT NULL DEFAULT 'DEPOSIT' AFTER acctType;    -- product group: DEPOSIT now, LOAN later
+
+CREATE TABLE SimCoreAcctTran (                       -- every change to an account's balances, newest last
+    acctTranID   BIGINT AUTO_INCREMENT NOT NULL,
+    acctNo       VARCHAR(34) NOT NULL,
+    tranTm       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tranDesc     VARCHAR(100) NOT NULL,              -- e.g. "ACH transfer to ACME BANK ••••6789"
+    creditFlag   TINYINT(1) NOT NULL,
+    amount       DECIMAL(13,2) NOT NULL,
+    balanceType  VARCHAR(10) NOT NULL,               -- AVAILABLE (a hold or memo post) or POSTED (both balances)
+    tranSource   VARCHAR(10) NOT NULL,               -- ACH_ORIG, ACH_RCV or INTERNAL
+    tranRef      VARCHAR(30) NOT NULL,               -- transferSerNo, received tranID or the internal transfer's ID
+    availBalAfter DECIMAL(13,2) NOT NULL,
+    ledgerBalAfter DECIMAL(13,2) NOT NULL,
+    CONSTRAINT PK_SimCoreAcctTran PRIMARY KEY (acctTranID),
+    CONSTRAINT FK_SimCoreAcctTran_Account FOREIGN KEY (acctNo) REFERENCES SimCoreAccount(acctNo),
+    INDEX IX_SimCoreAcctTran_Acct (acctNo, tranTm)
+);
+```
+
+The demo member's two accounts get nicknames, and an opening-balance row each, so the list matches the balances.
+
+**What writes a row** (one place for each, beside the balance UPDATE it records):
+
+| Event | Balances | Where |
+| --- | --- | --- |
+| ACH transfer hold (same day at submit, otherwise at the window) | available − | `MemoPostingEngine.post` (ORIG debit) |
+| Hold given back (reject, OFAC block) | available + | `OriginationWindow.reject` |
+| Received credit memo posted early | available + | `MemoPostingEngine.post` (RECV credit) |
+| Received entry in the posting file | posted ± (and available if it wasn't memo posted) | `CorePostingFileJob.generate` |
+| Internal transfer | both balances, on both accounts | new `InternalTransferService` |
+
+**Changes:**
+
+| # | Change | Where |
+| --- | --- | --- |
+| 1 | **Same day before 3 PM.** `TransferDates.earliest()` returns today when today is a banking day and the time (Eastern) is before the last `ACHOrigSchedule` window (15:00), so the cutoff comes from the table. Otherwise it returns the next banking day. The windows already take `effectiveDt <= today`, so a 10 AM transfer goes in the 12 PM window, and anything left after 3 PM goes at the next business day's 6 AM (4B). | `TransferDates`, date picker, demo |
+| 2 | **Hold on the effective date.** At submit, the hold is placed only when `effectiveDt` is today. A future-dated transfer is saved with no hold, and the window places it on its effective date with `placeHold`, the code a series' later payments already use. If funds are short then, it's rejected (`INSUFFICIENT_FUNDS`). The submit still checks the balance as it does now. | `TransferService.submit` |
+| 3 | **Account summary and transactions.** `GET /api/member/accounts/{acctNo}` returns the summary, and `GET /api/member/accounts/{acctNo}/transactions?page=` returns the list. Only the member's own accounts are visible; any other is a 404. On the Accounts page you pick an account, the summary card sits at the top, and the paged transactions are below. Holds show as "Pending" and posted rows as "Posted". | `TransferController`/`TransferService`, `AccountsPage.tsx`, demo |
+| 4 | **Internal transfer.** `POST /api/transfers/internal {fromAcctNo, toAcctNo, amount, memo}`. Checks: both accounts are the member's own and active, they're different, the amount is above zero and within `MAX_AMOUNT`, and the available balance covers it (one guarded UPDATE, like the memo engine). Then both accounts change both balances, two `SimCoreAcctTran` rows are written, and an AppLog line is logged, all in one DB transaction. It's today only, with no fee. | new `transfer/InternalTransferService.java`, Transfer & Pay → **Internal Transfer** page, route, demo |
+| 5 | Docs | DB-MODEL (V22), USE-CASES, ACH-NOTES (available vs posted, holds vs postings, book transfers), DEMO.md |
+
+**Checks:**
+- **TransferDates:** today at 2:59 PM on a banking day, the next banking day at 3:00 PM, and on a Saturday.
+- **Holds:** a same-day transfer lowers available at submit while posted stays the same, and a future-dated one does neither until its window.
+- **Internal transfer:** both balances on both accounts, plus insufficient funds, the same account twice, another member's account (404), and a frozen account.
+- **Account transactions:** a member can't read another member's account.
+- **Also:** the demo server tests, the page tests, and a browser click-through.
+
+**Not doing:** posting outgoing ACH debits to the posted balance (no outbound posting system yet; noted in ACH-NOTES), editing nicknames, recurring or future-dated internal transfers, and statements or CSV.
+
+Decisions (answered 2026-11-13):
+- **Same-day window:** the next window that day, so 3 PM is the last.
+- **Future-dated hold:** placed on the effective date.
+- **Internal transfer:** both balances change at once, as a book transfer.
+- **Group:** product group, seeded `DEPOSIT`.
+
 ## 5. Notes
 
 `docs/ACH-NOTES.md` gets each finished piece:

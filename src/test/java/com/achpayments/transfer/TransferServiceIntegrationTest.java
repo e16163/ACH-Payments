@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.convention.TestBean;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import com.achpayments.transfer.TransferRejected.Kind;
@@ -47,6 +48,20 @@ class TransferServiceIntegrationTest {
     @MockitoBean
     AccountVerifier verifier; // the test double from X3
 
+    @Autowired
+    AccountService accountService;
+
+    /** Wednesday 2027-03-03 at 10 AM Eastern: before the 3 PM cutoff, so today is the earliest transfer date. */
+    @TestBean
+    java.time.Clock clock;
+
+    static java.time.Clock clock() {
+        java.time.ZoneId ny = java.time.ZoneId.of("America/New_York");
+        return java.time.Clock.fixed(LocalDate.parse("2027-03-03").atTime(10, 0).atZone(ny).toInstant(), ny);
+    }
+
+    private static final String SAVINGS = "X-TEST-SAV";
+
     @Value("${app.db.origination}")
     String orig;
 
@@ -70,7 +85,7 @@ class TransferServiceIntegrationTest {
         jdbc.update("DELETE FROM ACHMemoPost WHERE acctNo = ?", CHECKING);
         jdbc.update("DELETE FROM " + orig + ".ACHOriginatorTransfer WHERE memberNo = ?", MEMBER);
         jdbc.update("DELETE FROM " + orig + ".ACHOrigRecvAccount WHERE memberNo = ?", MEMBER);
-        jdbc.update("DELETE FROM SimCoreAccount WHERE acctNo = ?", CHECKING);
+        jdbc.update("DELETE FROM SimCoreAccount WHERE acctNo IN (?, ?)", CHECKING, SAVINGS); // their SimCoreAcctTran rows cascade
     }
 
     private TransferRequest request(String amount) {
@@ -132,6 +147,7 @@ class TransferServiceIntegrationTest {
 
     @Test
     void submitSavesThePendingTransferAndPlacesTheMemoHold() {
+        assertEquals(LocalDate.parse("2027-03-03"), dates.earliest()); // same day: before 3 PM
         TransferService.Receipt receipt = service.submit(MEMBER, request("1500.00"));
 
         assertTrue(receipt.transferSerNo().matches("TRF-\\d{8}-\\d{4}"), receipt.transferSerNo());
@@ -318,5 +334,91 @@ class TransferServiceIntegrationTest {
         service.addExternalAccount(MEMBER, new TransferService.NewExternalAccount("Some Bank", "021000022", "55501234", "SAVINGS", "Jane"));
         service.addExternalAccount(MEMBER, new TransferService.NewExternalAccount("Navy Federal", "256074974", "55501234", "SAVINGS", "Jane"));
         assertNull(service.externalAccounts(MEMBER).get(0).bankName());
+    }
+
+    // ---- Ba (2026-11-13): same-day holds, account history, internal transfers ----
+
+    private BigDecimal posted(String acctNo) {
+        return jdbc.queryForObject("SELECT ledgerBal FROM SimCoreAccount WHERE acctNo = ?", BigDecimal.class, acctNo);
+    }
+
+    @Test
+    void aSameDayTransferLowersTheAvailableBalanceAtOnceButNotThePostedBalance() {
+        TransferService.Receipt receipt = service.submit(MEMBER, request("1500.00"));
+        assertEquals(new BigDecimal("98500.00"), available());
+        assertEquals(new BigDecimal("100000.00"), posted(CHECKING));
+        var row = jdbc.queryForMap("SELECT tranDesc, creditFlag, amount, balanceType, tranSource, availBalAfter, ledgerBalAfter "
+                + "FROM SimCoreAcctTran WHERE tranRef = ?", receipt.transferSerNo());
+        assertEquals("ACH transfer to JANE SMITH", row.get("tranDesc"));
+        assertEquals(false, row.get("creditFlag"));
+        assertEquals("AVAILABLE", row.get("balanceType"));
+        assertEquals("ACH_ORIG", row.get("tranSource"));
+        assertEquals(new BigDecimal("98500.00"), row.get("availBalAfter"));
+        assertEquals(new BigDecimal("100000.00"), row.get("ledgerBalAfter"));
+    }
+
+    @Test
+    void aLaterDatedTransferLeavesTheBalanceAloneUntilItsEffectiveDate() {
+        TransferService.Receipt receipt = service.submit(MEMBER, with("1500.00", r -> new TransferRequest(r.origAcctNo(),
+                r.externalAccountId(), r.amount(), LocalDate.parse("2027-03-04"), r.frequency(), r.transferCount(), r.memo())));
+        assertEquals("PENDING", receipt.memoStatus());
+        assertEquals(new BigDecimal("100000.00"), available());
+        assertEquals(0, jdbc.queryForObject("SELECT COUNT(*) FROM SimCoreAcctTran WHERE tranRef = ?", Integer.class, receipt.transferSerNo()));
+    }
+
+    private void savings(String status) {
+        jdbc.update("INSERT INTO SimCoreAccount (acctNo, memberNo, acctName, acctNickname, acctType, acctOwner, ledgerBal, availBal, acctStatus) "
+                + "VALUES (?, ?, 'Test Savings', 'Nest Egg', 'SAVINGS', 'TEST MEMBER', 500.00, 500.00, ?)", SAVINGS, MEMBER, status);
+    }
+
+    private AccountService.InternalTransferRequest move(String from, String to, String amount) {
+        return new AccountService.InternalTransferRequest(from, to, new BigDecimal(amount), "Vacation");
+    }
+
+    @Test
+    void anInternalTransferMovesBothBalancesOfBothAccountsAndIsListed() {
+        savings("ACTIVE");
+        var receipt = accountService.internalTransfer(MEMBER, move(CHECKING, SAVINGS, "250.00"));
+        assertTrue(receipt.transferId().matches("INT-[0-9A-F]{12}"), receipt.transferId());
+        assertEquals(new BigDecimal("99750.00"), available());
+        assertEquals(new BigDecimal("99750.00"), posted(CHECKING));
+        assertEquals(new BigDecimal("750.00"), receipt.toAvailBal());
+        assertEquals(new BigDecimal("750.00"), posted(SAVINGS));
+
+        var page = accountService.transactions(MEMBER, SAVINGS, 1, 10).orElseThrow();
+        assertEquals(1, page.total());
+        var credit = page.items().get(0);
+        assertEquals("Transfer from Test Checking ••-CHK - Vacation", credit.tranDesc());
+        assertTrue(credit.credit());
+        assertEquals("POSTED", credit.balanceType());
+        assertEquals(receipt.transferId(), credit.tranRef());
+        var debit = accountService.transactions(MEMBER, CHECKING, 1, 10).orElseThrow().items().get(0);
+        assertEquals("Transfer to Nest Egg ••-SAV - Vacation", debit.tranDesc());
+        assertFalse(debit.credit());
+        assertEquals(new BigDecimal("99750.00"), debit.ledgerBalAfter());
+    }
+
+    @Test
+    void anInternalTransferIsRefusedWithoutFundsBetweenTheSameAccountOrToAnAccountThatIsntActive() {
+        savings("ACTIVE");
+        assertEquals(Kind.FUNDS, assertThrows(TransferRejected.class,
+                () -> accountService.internalTransfer(MEMBER, move(SAVINGS, CHECKING, "500.01"))).kind());
+        assertEquals(Kind.INVALID, assertThrows(TransferRejected.class,
+                () -> accountService.internalTransfer(MEMBER, move(CHECKING, CHECKING, "1.00"))).kind());
+        assertEquals(Kind.INVALID, assertThrows(TransferRejected.class,
+                () -> accountService.internalTransfer(MEMBER, move(CHECKING, SAVINGS, "0"))).kind());
+        assertEquals(Kind.INVALID, assertThrows(TransferRejected.class,
+                () -> accountService.internalTransfer(MEMBER, move(CHECKING, "100049281946", "1.00"))).kind()); // another member's
+        jdbc.update("UPDATE SimCoreAccount SET acctStatus = 'FROZEN' WHERE acctNo = ?", SAVINGS);
+        assertEquals(Kind.INVALID, assertThrows(TransferRejected.class,
+                () -> accountService.internalTransfer(MEMBER, move(CHECKING, SAVINGS, "1.00"))).kind());
+        assertEquals(new BigDecimal("100000.00"), available());
+        assertEquals(new BigDecimal("500.00"), posted(SAVINGS));
+    }
+
+    @Test
+    void aMemberCantListAnotherMembersAccount() {
+        assertTrue(accountService.transactions(MEMBER, "100049281920", 1, 10).isEmpty());
+        assertTrue(accountService.transactions(MEMBER, CHECKING, 1, 10).isPresent());
     }
 }

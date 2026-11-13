@@ -42,7 +42,7 @@ Keep the $2.50 fee; Part 2 uses it.
 **Step 1 (log in + MFA):**
 1. Sign in as **member**. Before anything else, it asks "Verify it's you".
 2. Click **Send verification code**. The demo shows the code on screen; a real credit union would text it.
-3. Type the code and click **Verify**. **Accounts** opens, with balances and account numbers masked to the last 4.
+3. Type the code and click **Verify**. **Accounts** opens on **Everyday Checking ••••1920**. Pick an account at the top to see its summary (number, nickname, type and group, available and posted balances, status) and its transactions below, newest first. A hold shows as **Pending** and moves only the available balance; posted rows move both.
 
 **Navigate:** **Transfer & Pay ▾ → Add ACH Transfer**.
 
@@ -60,7 +60,7 @@ Keep the $2.50 fee; Part 2 uses it.
 
 **Step 4 (amount, date, frequency):**
 1. **Amount:** type `1500`. It formats to `1,500`.
-2. **Date picker:** weekends, Federal Reserve holidays (e.g. Thanksgiving, Nov 26) and past days are disabled. The earliest date is the next banking day (no Same Day for retail). Pick the first enabled day.
+2. **Date picker:** weekends, Federal Reserve holidays (e.g. Thanksgiving, Nov 26) and past days are disabled. Before 3:00 PM ET on a banking day (the last `ACHOrigSchedule` window), today is enabled, and the transfer goes out in the next window today. From 3:00 PM, the earliest date is the next banking day. Pick the first enabled day.
 3. **Frequency:** One time. If you pick Weekly, Biweekly or Monthly, it asks for **Number of transfers (2 to 52)**.
 4. **Memo:** `Rent` (up to 10 characters, stored in upper case).
 
@@ -84,9 +84,16 @@ Keep the $2.50 fee; Part 2 uses it.
    - the amount and recipient
    - the date and estimated arrival
 2. **Download receipt** saves a text receipt.
-3. Click **Done**, then **Accounts**. Checking now shows **$6,997.50**: $1,502.50 is on memo hold.
+3. Click **Done**, then **Accounts**. If you picked today, Checking's available balance is now **$6,997.50** ($1,502.50 on memo hold, listed as a Pending "ACH transfer to JANE SMITH"), and the posted balance is still **$8,500.00**: only the posting system changes it. A later date leaves both balances alone until the window on that date places the hold.
 
 **OFAC screening:** start another transfer to **Blocked Test Person's** account (••••4321). Keep it; Part 3 uses it. That's a made-up name on the simulated SDN list. The review page says "This transfer will be reviewed by our compliance team before it's sent." The result is **Transfer under review**, and no money is held.
+
+## Part 2A: Internal Transfer (Ba, 2026-11-13)
+
+1. Click **Transfer & Pay ▾ → Internal Transfer**. **From** is Everyday Checking ••••1920 and **To** is Rainy Day Fund ••••1946.
+2. Enter `250` and the memo `Vacation`, then click **Transfer**. **Transfer complete** shows an `INT-…` confirmation and both new available balances.
+3. On **Accounts**, both accounts list it as **Posted**: an internal transfer is a book transfer inside the core, so the available and posted balances of both accounts change at once.
+4. Pick the same account for From and To: "Choose two different accounts." Enter more than the available balance: "Your available balance isn't enough for this transfer."
 
 ## Part 2B: External Bank Accounts
 

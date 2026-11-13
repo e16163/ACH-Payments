@@ -10,6 +10,7 @@ import LoginPage from './LoginPage'
 import AccountsPage from './member/AccountsPage'
 import ExternalAccountsPage from './member/ExternalAccountsPage'
 import ExternalTransferPage from './member/ExternalTransferPage'
+import InternalTransferPage from './member/InternalTransferPage'
 import MfaPage from './member/MfaPage'
 import AppLogPage from './logs/AppLogPage'
 import ParameterPage from './params/ParameterPage'
@@ -39,6 +40,7 @@ const ROUTES = {
   accounts: '#/accounts',
   external: '#/transfer-pay/external-ach',
   externalAccounts: '#/transfer-pay/external-accounts',
+  internal: '#/transfer-pay/internal',
 }
 
 function useHash() {
@@ -97,7 +99,7 @@ export default function App() {
   const isCompliance = me?.roles.includes('COMPLIANCE')
   const isMember = me?.roles.includes('MEMBER')
   const memberReady = isMember && me?.mfaVerified
-  const onTransferPay = hash === ROUTES.external || hash === ROUTES.externalAccounts
+  const onTransferPay = hash === ROUTES.external || hash === ROUTES.externalAccounts || hash === ROUTES.internal
 
   const onTransactions = hash.startsWith(ROUTES.receivingTransactions)
   const adminElsewhere = hash === ROUTES.appLogs || hash === ROUTES.coreApi || hash === ROUTES.achApi || hash === ROUTES.businessRules
@@ -122,6 +124,7 @@ export default function App() {
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
   else if (memberReady && hash === ROUTES.external) page = <ExternalTransferPage memberNo={me.memberNo ?? ''} />
   else if (memberReady && hash === ROUTES.externalAccounts) page = <ExternalAccountsPage memberNo={me.memberNo ?? ''} />
+  else if (memberReady && hash === ROUTES.internal) page = <InternalTransferPage />
   else if (memberReady) page = <AccountsPage />
   else if (me) page = <p className="card narrow">There are no screens for your role yet.</p>
 
@@ -190,6 +193,7 @@ export default function App() {
                 {menuOpen && (
                   <div className="menu-list" role="menu">
                     <a role="menuitem" href={ROUTES.external}>Add ACH Transfer</a>
+                    <a role="menuitem" href={ROUTES.internal}>Internal Transfer</a>
                     <a role="menuitem" href={ROUTES.externalAccounts}>External Bank Accounts</a>
                   </div>
                 )}

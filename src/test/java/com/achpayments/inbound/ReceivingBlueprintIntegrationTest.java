@@ -71,6 +71,7 @@ class ReceivingBlueprintIntegrationTest {
         jdbc.update("DELETE FROM " + recv + ".ACHRecvPostingJob");
         jdbc.update("DELETE FROM " + recv + ".ACHRecvWindowRun");
         jdbc.update("DELETE FROM ACHMemoPost WHERE acctNo IN (SELECT acctNo FROM SimCoreAccount WHERE memberNo LIKE 'M300%')");
+        jdbc.update("DELETE FROM SimCoreAcctTran WHERE tranSource = 'ACH_RCV'");
         jdbc.update("UPDATE SimCoreAccount SET ledgerBal = 2000.00, availBal = 2000.00 WHERE memberNo LIKE 'M300%'");
         jdbc.update("UPDATE SimCoreAccount SET ledgerBal = 5.00, availBal = 5.00 WHERE acctNo = '987654410019'");
         for (Path dir : List.of(inbound, inbound.resolveSibling("archive"), inbound.resolveSibling("quarantine"), postingDir)) {
@@ -188,6 +189,13 @@ class ReceivingBlueprintIntegrationTest {
                 + ".ACHRecvTransaction WHERE fileID = ? AND recvAcctID = '987654501019'", fileID);
         assertEquals("MEMO_POSTED", credit.get("processStatus"));
         assertTrue(credit.get("memoPostedTm") != null);
+        // Ba (2026-11-13): the account history shows it, with only the available balance moved
+        Map<String, Object> history = jdbc.queryForMap("SELECT h.tranDesc, h.balanceType, h.availBalAfter, h.ledgerBalAfter FROM SimCoreAcctTran h "
+                + "JOIN " + recv + ".ACHRecvTransaction t ON h.tranRef = t.tranID WHERE t.fileID = ? AND t.recvAcctID = '987654501019'", fileID);
+        assertTrue(((String) history.get("tranDesc")).startsWith("ACH credit from "), (String) history.get("tranDesc"));
+        assertEquals("AVAILABLE", history.get("balanceType"));
+        assertEquals(balance("availBal", "987654501019"), history.get("availBalAfter"));
+        assertEquals(balance("ledgerBal", "987654501019"), history.get("ledgerBalAfter"));
     }
 
     @Test
@@ -205,6 +213,8 @@ class ReceivingBlueprintIntegrationTest {
         assertEquals(new BigDecimal("7000.00"), balance("ledgerBal", "987654501019"));
         assertEquals(new BigDecimal("7000.00"), balance("availBal", "987654501019"));
         assertEquals("POSTED", entry(fileID, "987654501019").get("processStatus"));
+        assertEquals(new BigDecimal("7000.00"), jdbc.queryForObject("SELECT MAX(ledgerBalAfter) FROM SimCoreAcctTran "
+                + "WHERE acctNo = '987654501019' AND balanceType = 'POSTED' AND tranSource = 'ACH_RCV'", BigDecimal.class));
         assertEquals("REJECTED", entry(fileID, "987654322019").get("processStatus"));
 
         List<String> lines = Files.readAllLines(postingDir.resolve(result.postingFileName()));

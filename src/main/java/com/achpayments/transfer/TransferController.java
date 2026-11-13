@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.achpayments.common.AppLogRepository;
@@ -29,22 +30,28 @@ import jakarta.servlet.http.HttpServletRequest;
 @RestController
 public class TransferController {
 
-    /** Feeds the date picker: the earliest allowed date and the holidays to disable (weekends are disabled too). */
-    public record DateRules(LocalDate earliest, List<LocalDate> holidays) {
+    /**
+     * Feeds the date picker: the earliest allowed date, the holidays to disable (weekends are disabled too), and the
+     * same-day cutoff (HH:mm Eastern) before which today is allowed.
+     */
+    public record DateRules(LocalDate earliest, List<LocalDate> holidays, java.time.LocalTime sameDayCutoff) {
     }
 
     private final TransferDates dates;
     private final BankingCalendar calendar;
     private final TransferService transfers;
+    private final AccountService accountService;
     private final AppLogRepository appLog;
     private final String memberUsername;
     private final String memberNumber;
 
-    public TransferController(TransferDates dates, BankingCalendar calendar, TransferService transfers, AppLogRepository appLog,
+    public TransferController(TransferDates dates, BankingCalendar calendar, TransferService transfers, AccountService accountService,
+            AppLogRepository appLog,
             @Value("${app.member-username}") String memberUsername, @Value("${app.member-number}") String memberNumber) {
         this.dates = dates;
         this.calendar = calendar;
         this.transfers = transfers;
+        this.accountService = accountService;
         this.appLog = appLog;
         this.memberUsername = memberUsername;
         this.memberNumber = memberNumber;
@@ -60,12 +67,26 @@ public class TransferController {
 
     @GetMapping("/api/transfers/dates")
     public DateRules dateRules() {
-        return new DateRules(dates.earliest(), calendar.holidays().stream().sorted().toList());
+        return new DateRules(dates.earliest(), calendar.holidays().stream().sorted().toList(), dates.cutoff());
     }
 
     @GetMapping("/api/member/accounts")
     public List<TransferService.Account> accounts(Principal member) {
         return transfers.accounts(memberNo(member));
+    }
+
+    /** Ba (2026-11-13): the account's credits and debits, newest first. Another member's account is a 404. */
+    @GetMapping("/api/member/accounts/{acctNo}/transactions")
+    public ResponseEntity<AccountService.AcctTranPage> accountTransactions(@PathVariable String acctNo,
+            @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "10") int limit, Principal member) {
+        return ResponseEntity.of(accountService.transactions(memberNo(member), acctNo, page, limit));
+    }
+
+    /** Ba (2026-11-13): a transfer between the member's own accounts, posted at once. */
+    @PostMapping("/api/transfers/internal")
+    public ResponseEntity<AccountService.InternalTransferReceipt> internal(@RequestBody AccountService.InternalTransferRequest request,
+            Principal member) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(accountService.internalTransfer(memberNo(member), request));
     }
 
     @PostMapping("/api/transfers/preview")

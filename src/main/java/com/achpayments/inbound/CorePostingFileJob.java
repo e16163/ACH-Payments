@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.achpayments.common.AppLogRepository;
+import com.achpayments.memo.AccountHistory;
 
 import tools.jackson.databind.PropertyNamingStrategies;
 import tools.jackson.databind.annotation.JsonNaming;
@@ -49,14 +50,16 @@ public class CorePostingFileJob {
 
     private final JdbcTemplate jdbc;
     private final AppLogRepository appLog;
+    private final AccountHistory history;
     private final Clock clock;
     private final String recv;
     private final Path postingDir;
 
-    public CorePostingFileJob(JdbcTemplate jdbc, AppLogRepository appLog, Clock clock, @Value("${app.db.receiving}") String recv,
+    public CorePostingFileJob(JdbcTemplate jdbc, AppLogRepository appLog, AccountHistory history, Clock clock, @Value("${app.db.receiving}") String recv,
             @Value("${app.core.posting-dir}") String postingDir) {
         this.jdbc = jdbc;
         this.appLog = appLog;
+        this.history = history;
         this.clock = clock;
         this.recv = recv;
         this.postingDir = Path.of(postingDir);
@@ -78,7 +81,7 @@ public class CorePostingFileJob {
         String jobID = "JOB-POST-" + businessDate.format(DAY) + "-EOD";
         String fileName = "CORE_ACH_POSTING_" + businessDate.format(DAY) + ".DAT";
         List<Map<String, Object>> rows = jdbc.queryForList("SELECT tranID, creditFlag, amount, COALESCE(correctedAcctNo, recvAcctID) AS acct, "
-                + "coreTranCode, traceNo, effectiveDt, processStatus FROM " + recv + ".ACHRecvTransaction "
+                + "coreTranCode, traceNo, effectiveDt, processStatus, companyName FROM " + recv + ".ACHRecvTransaction "
                 + "WHERE processStatus IN ('RECEIVED', 'AUTO_CORRECTED', 'MEMO_POSTED') AND coreTranCode IS NOT NULL "
                 + "AND COALESCE(settlementDt, effectiveDt) <= ? ORDER BY tranID", businessDate);
 
@@ -92,6 +95,8 @@ public class CorePostingFileJob {
                 boolean memoPosted = ReceivedEntryProcessor.MEMO_POSTED.equals(row.get("processStatus"));
                 jdbc.update("UPDATE SimCoreAccount SET ledgerBal = ledgerBal + ?, availBal = availBal + ? WHERE acctNo = ?",
                         signed, memoPosted ? BigDecimal.ZERO : signed, row.get("acct"));
+                history.record((String) row.get("acct"), (credit ? "ACH credit from " : "ACH debit by ") + row.get("companyName"),
+                        credit, amount, AccountHistory.POSTED, "ACH_RCV", String.valueOf(row.get("tranID")));
                 details.add(String.join("|", "D", String.valueOf(row.get("tranID")), (String) row.get("acct"), credit ? "CR" : "DR",
                         amount.toPlainString(), (String) row.get("coreTranCode"), (String) row.get("traceNo"), String.valueOf(row.get("effectiveDt"))));
                 if (credit) {
