@@ -46,9 +46,10 @@ import tools.jackson.databind.json.JsonMapper;
         BackOfficeController.class, EodController.class, AppLogController.class, ExternalAccountController.class,
         com.achpayments.inbound.ReceivingProcessingController.class, com.achpayments.origination.OriginationProcessingController.class,
         com.achpayments.rules.BusinessRuleController.class})
-@Import({SecurityConfig.class, MfaService.class, UnhandledErrorLogger.class, MemberAccessTest.Clocks.class})
+@Import({SecurityConfig.class, MfaService.class, MemberNumbers.class, UnhandledErrorLogger.class, MemberAccessTest.Clocks.class})
 @TestPropertySource(properties = {"app.admin-password=admin-pw", "app.orig-password=orig-pw", "app.recv-password=recv-pw", "app.comp-password=comp-pw",
-        "app.member-password=member-pw"})
+        "app.member-password=member-pw",
+        "app.ldap.url=ldap://localhost:1/dc=achpayments,dc=local"}) // nothing listens there: the fallback logins work with LDAP down
 class MemberAccessTest {
 
     @TestConfiguration
@@ -472,7 +473,7 @@ class MemberAccessTest {
         mvc.perform(get("/api/eod/status").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/transfers/dates").with(httpBasic("achrecv", "recv-pw"))).andExpect(status().isForbidden());
         mvc.perform(get("/api/me").with(httpBasic("achrecv", "recv-pw")))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.roles[0]").value("ACH_RECV_OPS"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.roles[0]").value("ACH_RECV"))
                 .andExpect(jsonPath("$.memberNo").doesNotExist());
     }
 

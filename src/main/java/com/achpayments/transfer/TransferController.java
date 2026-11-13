@@ -5,7 +5,6 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -20,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.achpayments.common.AppLogRepository;
 import com.achpayments.common.BankingCalendar;
+import com.achpayments.common.MemberNumbers;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -42,27 +42,20 @@ public class TransferController {
     private final TransferService transfers;
     private final AccountService accountService;
     private final AppLogRepository appLog;
-    private final String memberUsername;
-    private final String memberNumber;
+    private final MemberNumbers memberNumbers;
 
     public TransferController(TransferDates dates, BankingCalendar calendar, TransferService transfers, AccountService accountService,
-            AppLogRepository appLog,
-            @Value("${app.member-username}") String memberUsername, @Value("${app.member-number}") String memberNumber) {
+            AppLogRepository appLog, MemberNumbers memberNumbers) {
         this.dates = dates;
         this.calendar = calendar;
         this.transfers = transfers;
         this.accountService = accountService;
         this.appLog = appLog;
-        this.memberUsername = memberUsername;
-        this.memberNumber = memberNumber;
+        this.memberNumbers = memberNumbers;
     }
 
-    /** The demo member's login name maps to the design's member number; any other login has no member number. */
     private String memberNo(Principal user) {
-        if (!user.getName().equals(memberUsername)) {
-            throw new AccessDeniedException("No member number for " + user.getName());
-        }
-        return memberNumber;
+        return memberNumbers.of(user).orElseThrow(() -> new AccessDeniedException("No member number for " + user.getName()));
     }
 
     @GetMapping("/api/transfers/dates")

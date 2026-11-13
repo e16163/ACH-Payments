@@ -1,0 +1,153 @@
+# Ba's roles and permissions (docs/LDAP-PLAN.md section 1) and one demo user per role.
+# A user is a member of role groups; a role is a member of permission groups. Passwords are set by setup.sh.
+
+dn: dc=achpayments,dc=local
+objectClass: dcObject
+objectClass: organization
+dc: achpayments
+o: Demo Community Bank
+
+dn: ou=people,dc=achpayments,dc=local
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=roles,dc=achpayments,dc=local
+objectClass: organizationalUnit
+ou: roles
+
+dn: ou=permissions,dc=achpayments,dc=local
+objectClass: organizationalUnit
+ou: permissions
+
+dn: uid=ldapadmin,ou=people,dc=achpayments,dc=local
+objectClass: inetOrgPerson
+uid: ldapadmin
+cn: LDAP Admin
+sn: Admin
+
+dn: uid=ldaporig,ou=people,dc=achpayments,dc=local
+objectClass: inetOrgPerson
+uid: ldaporig
+cn: LDAP Origination Operator
+sn: Operator
+
+dn: uid=ldaprecv,ou=people,dc=achpayments,dc=local
+objectClass: inetOrgPerson
+uid: ldaprecv
+cn: LDAP Receiving Operator
+sn: Operator
+
+dn: uid=ldapcomp,ou=people,dc=achpayments,dc=local
+objectClass: inetOrgPerson
+uid: ldapcomp
+cn: LDAP Compliance Officer
+sn: Officer
+
+# employeeNumber holds the member number (holderId in Ba's APIs)
+dn: uid=ldapmember,ou=people,dc=achpayments,dc=local
+objectClass: inetOrgPerson
+uid: ldapmember
+cn: LDAP Member
+sn: Member
+employeeNumber: M10982347
+
+dn: cn=MEMBER,ou=roles,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: MEMBER
+member: uid=ldapmember,ou=people,dc=achpayments,dc=local
+
+dn: cn=ACH_ORIG,ou=roles,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_ORIG
+member: uid=ldaporig,ou=people,dc=achpayments,dc=local
+
+dn: cn=ACH_RECV,ou=roles,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_RECV
+member: uid=ldaprecv,ou=people,dc=achpayments,dc=local
+
+dn: cn=ADMIN,ou=roles,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ADMIN
+member: uid=ldapadmin,ou=people,dc=achpayments,dc=local
+
+dn: cn=COMPLIANCE,ou=roles,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: COMPLIANCE
+member: uid=ldapcomp,ou=people,dc=achpayments,dc=local
+
+dn: cn=ACH_MEMBER_UI,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_MEMBER_UI
+member: cn=MEMBER,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_ORIG_Reversal_UI,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_ORIG_Reversal_UI
+member: cn=ACH_ORIG,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_ORIG_Return_UI,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_ORIG_Return_UI
+member: cn=ACH_ORIG,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_ORIG_Resubmision_UI,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_ORIG_Resubmision_UI
+member: cn=ACH_ORIG,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_ORIG_PROCESS,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_ORIG_PROCESS
+member: cn=ACH_ORIG,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_RECV_Reversal_UI,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_RECV_Reversal_UI
+member: cn=ACH_RECV,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_RECV_Return_UI,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_RECV_Return_UI
+member: cn=ACH_RECV,ou=roles,dc=achpayments,dc=local
+
+# No screen behind this one: under Nacha only the ODFI resubmits (docs/LDAP-PLAN.md section 5)
+dn: cn=ACH_RECV_Resubmision_UI,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_RECV_Resubmision_UI
+member: cn=ACH_RECV,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_RECV_PROCESS,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_RECV_PROCESS
+member: cn=ACH_RECV,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_BUSINESS_RULES,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_BUSINESS_RULES
+member: cn=ADMIN,ou=roles,dc=achpayments,dc=local
+
+dn: cn=SYSTEM_LOGS,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: SYSTEM_LOGS
+member: cn=ADMIN,ou=roles,dc=achpayments,dc=local
+
+dn: cn=SYSTEM_CONFIG,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: SYSTEM_CONFIG
+member: cn=ADMIN,ou=roles,dc=achpayments,dc=local
+
+dn: cn=OPEN_BANKING_API,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: OPEN_BANKING_API
+member: cn=ADMIN,ou=roles,dc=achpayments,dc=local
+
+dn: cn=ACH_PAYMENTS_API,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: ACH_PAYMENTS_API
+member: cn=ADMIN,ou=roles,dc=achpayments,dc=local
+
+dn: cn=OFAC_REVIEW_UI,ou=permissions,dc=achpayments,dc=local
+objectClass: groupOfNames
+cn: OFAC_REVIEW_UI
+member: cn=COMPLIANCE,ou=roles,dc=achpayments,dc=local

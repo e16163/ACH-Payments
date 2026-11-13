@@ -4,7 +4,6 @@ import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,29 +17,31 @@ import jakarta.servlet.http.HttpServletRequest;
 @RestController
 public class MeController {
 
-    /** {@code memberNo} is the member's number (the holderId in Ba's APIs), or null for staff logins. */
-    public record Me(String username, List<String> roles, boolean mfaVerified, String memberNo) {
+    /**
+     * {@code permissions} decide which screens the UI shows (docs/LDAP-PLAN.md). {@code memberNo} is the member's
+     * number (the holderId in Ba's APIs), or null for staff logins.
+     */
+    public record Me(String username, List<String> roles, List<String> permissions, boolean mfaVerified, String memberNo) {
     }
 
     public record Code(String code) {
     }
 
     private final MfaService mfa;
-    private final String memberUsername;
-    private final String memberNumber;
+    private final MemberNumbers memberNumbers;
 
-    public MeController(MfaService mfa, @Value("${app.member-username}") String memberUsername,
-            @Value("${app.member-number}") String memberNumber) {
+    public MeController(MfaService mfa, MemberNumbers memberNumbers) {
         this.mfa = mfa;
-        this.memberUsername = memberUsername;
-        this.memberNumber = memberNumber;
+        this.memberNumbers = memberNumbers;
     }
 
     @GetMapping("/api/me")
     public Me me(Authentication auth, HttpServletRequest request) {
-        List<String> roles = auth.getAuthorities().stream().map(a -> a.getAuthority())
-                .filter(a -> a.startsWith("ROLE_")).map(a -> a.substring(5)).toList();
-        return new Me(auth.getName(), roles, MfaService.isVerified(request), auth.getName().equals(memberUsername) ? memberNumber : null);
+        List<String> authorities = auth.getAuthorities().stream().map(a -> a.getAuthority()).sorted().toList();
+        List<String> roles = authorities.stream().filter(a -> a.startsWith("ROLE_")).map(a -> a.substring(5)).toList();
+        // FACTOR_PASSWORD and the like are Spring Security's own record of how the user signed in
+        List<String> permissions = authorities.stream().filter(a -> !a.startsWith("ROLE_") && !a.startsWith("FACTOR_")).toList();
+        return new Me(auth.getName(), roles, permissions, MfaService.isVerified(request), memberNumbers.of(auth).orElse(null));
     }
 
     /** Simulated delivery: the code comes back in the response so the demo screen can show it. */

@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Ba's ACH Business Rules Management (2026-11-12). Only ROLE_SYS_ADMIN gets here; see SecurityConfig. The app list is /api/params/systems. */
+/** Ba's ACH Business Rules Management (2026-11-12). Only the ACH_BUSINESS_RULES permission gets here; see SecurityConfig. The app list is /api/params/systems. */
 @RestController
 @RequestMapping("/api/ach-business-rules")
 public class BusinessRuleController {

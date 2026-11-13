@@ -128,15 +128,24 @@ cd frontend && ./node/npm run dev
 
 Then open http://localhost:5173/ach/.
 
-### 6. Demo logins
+### 6. Logins (LDAP) and demo logins
 
-The app opens on a **Sign in** page, and **Sign out** is at the top right. These are demo users only; real logins come in roadmap step 16. A local demo can use simple passwords, e.g. `member123` and `achrecv123`.
+Users, roles and permissions live in a local OpenLDAP server (docs/LDAP-PLAN.md). Set it up once, and run the same script after a reboot to start it again:
+
+```sh
+brew install openldap
+./ldap/setup.sh   # ldap://localhost:1389, base dc=achpayments,dc=local
+```
+
+The first run loads `ldap/seed.ldif` and writes `~/dev/ldap-credentials.txt`: `LDAP_ADMIN_PASSWORD` for `cn=admin,dc=achpayments,dc=local` and `LDAP_USER_PASSWORD` for the seeded users `ldapadmin`, `ldaporig`, `ldaprecv`, `ldapcomp` and `ldapmember`. Add a user with `ldapadd` (an `inetOrgPerson` under `ou=people`), then add it as a `member` of a role under `ou=roles`. It can sign in right away. A role's permissions are the groups under `ou=permissions` that list the role as a `member`. Set `APP_LDAP_URL` to use another server.
+
+The env-var demo logins below still work as a fallback, also while LDAP is down. The app opens on a **Sign in** page, and **Sign out** is at the top right. A local demo can use simple passwords, e.g. `member123` and `achrecv123`.
 
 | User | Role | Can use |
 | --- | --- | --- |
-| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator | Parameter UI, System Audit & App Logs, Open Core Banking API, ACH Payments API |
-| `achorig` (or `APP_ORIG_USERNAME`) | ACH origination back office (`ACH_ORIG_OPS`) | ACH Origination Processing, Return, Reversal, Resubmission, NOC |
-| `achrecv` (or `APP_RECV_USERNAME`) | ACH receiving back office (`ACH_RECV_OPS`) | ACH Receiving Processing, ACH Receiving Transactions, Return, Reversal, NOC |
+| `admin` (or `APP_ADMIN_USERNAME`) | System Administrator (`ADMIN`) | Parameter UI, ACH Business Rules, System Audit & App Logs, Open Core Banking API, ACH Payments API |
+| `achorig` (or `APP_ORIG_USERNAME`) | ACH origination back office (`ACH_ORIG`) | ACH Origination Processing, Return, Reversal, Resubmission, NOC |
+| `achrecv` (or `APP_RECV_USERNAME`) | ACH receiving back office (`ACH_RECV`) | ACH Receiving Processing, ACH Receiving Transactions, Return, Reversal, NOC |
 | `member` | Member: the sample member M10982347, John Doe (`APP_MEMBER_NUMBER`) | Online banking: Transfer & Pay (Add ACH Transfer, External Bank Accounts). After the password, enter the 6-digit code shown on screen (simulated MFA). |
 
 Scripts and tests can still send HTTP Basic credentials, but a browser never gets the Basic login popup.

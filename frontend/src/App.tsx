@@ -24,7 +24,7 @@ const ApiSpecPage = lazy(() => import('./apidocs/ApiSpecPage').catch(() => ({
 })))
 
 type Health = { db: string; error?: string }
-type Me = { username: string; roles: string[]; mfaVerified: boolean; memberNo: string | null }
+type Me = { username: string; roles: string[]; permissions: string[]; mfaVerified: boolean; memberNo: string | null }
 
 const ROUTES = {
   params: '#/system-configuration',
@@ -93,25 +93,26 @@ export default function App() {
 
   useEffect(() => setMenuOpen(false), [hash])
 
-  const isAdmin = me?.roles.includes('SYS_ADMIN')
-  const isOrigOps = me?.roles.includes('ACH_ORIG_OPS')
-  const isRecvOps = me?.roles.includes('ACH_RECV_OPS')
-  const isCompliance = me?.roles.includes('COMPLIANCE')
-  const isMember = me?.roles.includes('MEMBER')
+  // Ba's permissions from LDAP (docs/LDAP-PLAN.md), not roles, decide the screens
+  const can = (permission: string) => !!me?.permissions.includes(permission)
+  const isOrigOps = can('ACH_ORIG_PROCESS')
+  const isRecvOps = can('ACH_RECV_PROCESS')
+  const isCompliance = can('OFAC_REVIEW_UI')
+  const isMember = can('ACH_MEMBER_UI')
   const memberReady = isMember && me?.mfaVerified
   const onTransferPay = hash === ROUTES.external || hash === ROUTES.externalAccounts || hash === ROUTES.internal
 
   const onTransactions = hash.startsWith(ROUTES.receivingTransactions)
   const adminElsewhere = hash === ROUTES.appLogs || hash === ROUTES.coreApi || hash === ROUTES.achApi || hash === ROUTES.businessRules
-  const myScreens = SCREENS.filter((s) => me?.roles.includes(s.role))
+  const myScreens = SCREENS.filter((s) => can(s.permission))
   const screen = myScreens.find((s) => s.route === hash)
 
   let page = null
   if (signedOut) page = <LoginPage onSignedIn={loadMe} />
-  else if (isAdmin && hash === ROUTES.appLogs) page = <AppLogPage />
-  else if (isAdmin && hash === ROUTES.businessRules) page = <BusinessRulePage />
-  else if (isAdmin && hash === ROUTES.coreApi) page = <ApiSpecPage key={hash} page="core" />
-  else if (isAdmin && hash === ROUTES.achApi) page = <ApiSpecPage key={hash} page="ach" />
+  else if (can('SYSTEM_LOGS') && hash === ROUTES.appLogs) page = <AppLogPage />
+  else if (can('ACH_BUSINESS_RULES') && hash === ROUTES.businessRules) page = <BusinessRulePage />
+  else if (can('OPEN_BANKING_API') && hash === ROUTES.coreApi) page = <ApiSpecPage key={hash} page="core" />
+  else if (can('ACH_PAYMENTS_API') && hash === ROUTES.achApi) page = <ApiSpecPage key={hash} page="ach" />
   else if (screen) page = <BackOfficePage key={screen.route} screen={screen} />
   else if (isOrigOps && hash === ROUTES.originationTransactions) page = <AchOriginationTransactionPage />
   else if (isOrigOps) page = <AchOriginationProcessingPage />
@@ -120,7 +121,7 @@ export default function App() {
   } else if (isRecvOps) {
     page = <AchReceivingProcessingPage transactionsRoute={ROUTES.receivingTransactions} />
   } else if (isCompliance) page = <OfacReviewPage />
-  else if (isAdmin) page = <ParameterPage />
+  else if (can('SYSTEM_CONFIG')) page = <ParameterPage />
   else if (isMember && !me?.mfaVerified) page = <MfaPage onVerified={loadMe} />
   else if (memberReady && hash === ROUTES.external) page = <ExternalTransferPage memberNo={me.memberNo ?? ''} />
   else if (memberReady && hash === ROUTES.externalAccounts) page = <ExternalAccountsPage memberNo={me.memberNo ?? ''} />
@@ -150,15 +151,13 @@ export default function App() {
       </header>
       {me && (
         <nav className="mainnav" aria-label="Main">
-          {isAdmin && (
-            <>
-              <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>
-              <a className={hash === ROUTES.businessRules ? 'active' : ''} href={ROUTES.businessRules}>ACH Business Rules Management</a>
-              <a className={hash === ROUTES.appLogs ? 'active' : ''} href={ROUTES.appLogs}>System Audit &amp; App Logs</a>
-              <a className={hash === ROUTES.coreApi ? 'active' : ''} href={ROUTES.coreApi}>Open Core Banking API</a>
-              <a className={hash === ROUTES.achApi ? 'active' : ''} href={ROUTES.achApi}>ACH Payments API</a>
-            </>
+          {can('SYSTEM_CONFIG') && <a className={!adminElsewhere ? 'active' : ''} href={ROUTES.params}>System Configuration</a>}
+          {can('ACH_BUSINESS_RULES') && (
+            <a className={hash === ROUTES.businessRules ? 'active' : ''} href={ROUTES.businessRules}>ACH Business Rules Management</a>
           )}
+          {can('SYSTEM_LOGS') && <a className={hash === ROUTES.appLogs ? 'active' : ''} href={ROUTES.appLogs}>System Audit &amp; App Logs</a>}
+          {can('OPEN_BANKING_API') && <a className={hash === ROUTES.coreApi ? 'active' : ''} href={ROUTES.coreApi}>Open Core Banking API</a>}
+          {can('ACH_PAYMENTS_API') && <a className={hash === ROUTES.achApi ? 'active' : ''} href={ROUTES.achApi}>ACH Payments API</a>}
           {isOrigOps && (
             <>
               <a className={!screen && hash !== ROUTES.originationTransactions ? 'active' : ''} href={ROUTES.originationProcessing}>

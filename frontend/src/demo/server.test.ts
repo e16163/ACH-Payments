@@ -58,7 +58,7 @@ describe('demo sign-in', () => {
   it('needs a sign-in, then shows who is signed in, and signs out', async () => {
     expect((await error(demoApi('/me'))).status).toBe(401)
     await demoLogin('member', 'member123')
-    expect(await demoApi('/me')).toEqual({ username: 'member', roles: ['MEMBER'], mfaVerified: false, memberNo: 'M10982347' })
+    expect(await demoApi('/me')).toEqual({ username: 'member', roles: ['MEMBER'], permissions: ['ACH_MEMBER_UI'], mfaVerified: false, memberNo: 'M10982347' })
     await demoLogout()
     expect((await error(demoApi('/me'))).status).toBe(401)
   })
@@ -316,7 +316,7 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
 
   it('keeps achrecv out of the other screens', async () => {
     await asOperator()
-    expect(await demoApi('/me')).toMatchObject({ username: 'achrecv', roles: ['ACH_RECV_OPS'] })
+    expect(await demoApi('/me')).toMatchObject({ username: 'achrecv', roles: ['ACH_RECV'] })
     expect((await error(demoApi('/params/systems'))).status).toBe(403)
     expect((await error(demoApi('/eod/status'))).status).toBe(403)
     expect((await error(demoApi('/v1/ach/processing/windows'))).status).toBe(403)
@@ -325,7 +325,7 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
 
   it('keeps achorig out of the receiving screens and lets it use origination processing', async () => {
     await demoLogin('achorig', 'achorig123')
-    expect(await demoApi('/me')).toMatchObject({ username: 'achorig', roles: ['ACH_ORIG_OPS'] })
+    expect(await demoApi('/me')).toMatchObject({ username: 'achorig', roles: ['ACH_ORIG'] })
     expect(await demoApi('/v1/ach/processing/windows')).toHaveProperty('schedules')
     expect((await error(files())).status).toBe(403)
     expect((await error(demoApi('/params/systems'))).status).toBe(403)
@@ -337,7 +337,7 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
 
   it('serves every back-office list to its own login only', async () => {
     for (const screen of SCREENS) {
-      await demoLogin(screen.role === 'ACH_ORIG_OPS' ? 'achorig' : 'achrecv', screen.role === 'ACH_ORIG_OPS' ? 'achorig123' : 'achrecv123')
+      await demoLogin(screen.permission.startsWith('ACH_ORIG') ? 'achorig' : 'achrecv', screen.permission.startsWith('ACH_ORIG') ? 'achorig123' : 'achrecv123')
       for (const section of screen.sections) {
         const rows = await demoApi<Record<string, unknown>[]>(section.path)
         expect(rows.length).toBeGreaterThan(0)
@@ -345,7 +345,7 @@ describe('demo ACH Receiving (UC-ACH-RCV-01, UC-ACH-RCV-02)', () => {
       }
       await demoLogin('admin', 'admin123')
       expect((await error(demoApi(screen.sections[0].path))).status).toBe(403)
-      await demoLogin(screen.role === 'ACH_ORIG_OPS' ? 'achrecv' : 'achorig', screen.role === 'ACH_ORIG_OPS' ? 'achrecv123' : 'achorig123')
+      await demoLogin(screen.permission.startsWith('ACH_ORIG') ? 'achrecv' : 'achorig', screen.permission.startsWith('ACH_ORIG') ? 'achrecv123' : 'achorig123')
       expect((await error(demoApi(screen.sections[0].path))).status).toBe(403)
     }
   })

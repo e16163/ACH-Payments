@@ -13,12 +13,20 @@ import { validateDesc, validateName, validateValue, PARAM_TYPES } from '../param
 import { isValidRouting } from '../member/rules'
 import { parseRule, results, type Rule } from './rules'
 
-type Role = 'MEMBER' | 'SYS_ADMIN' | 'ACH_ORIG_OPS' | 'ACH_RECV_OPS' | 'COMPLIANCE'
+type Role = 'MEMBER' | 'ADMIN' | 'ACH_ORIG' | 'ACH_RECV' | 'COMPLIANCE'
+// Ba's permissions per role, as in ldap/seed.ldif (docs/LDAP-PLAN.md)
+const PERMISSIONS: Record<Role, string[]> = {
+  MEMBER: ['ACH_MEMBER_UI'],
+  ACH_ORIG: ['ACH_ORIG_PROCESS', 'ACH_ORIG_Resubmision_UI', 'ACH_ORIG_Return_UI', 'ACH_ORIG_Reversal_UI'],
+  ACH_RECV: ['ACH_RECV_PROCESS', 'ACH_RECV_Resubmision_UI', 'ACH_RECV_Return_UI', 'ACH_RECV_Reversal_UI'],
+  ADMIN: ['ACH_BUSINESS_RULES', 'ACH_PAYMENTS_API', 'OPEN_BANKING_API', 'SYSTEM_CONFIG', 'SYSTEM_LOGS'],
+  COMPLIANCE: ['OFAC_REVIEW_UI'],
+}
 const USERS: Record<string, { password: string; role: Role }> = {
   member: { password: 'member123', role: 'MEMBER' },
-  admin: { password: 'admin123', role: 'SYS_ADMIN' },
-  achorig: { password: 'achorig123', role: 'ACH_ORIG_OPS' },
-  achrecv: { password: 'achrecv123', role: 'ACH_RECV_OPS' },
+  admin: { password: 'admin123', role: 'ADMIN' },
+  achorig: { password: 'achorig123', role: 'ACH_ORIG' },
+  achrecv: { password: 'achrecv123', role: 'ACH_RECV' },
   achcomp: { password: 'achcomp123', role: 'COMPLIANCE' },
 }
 
@@ -333,7 +341,7 @@ const invalid = (msg: string): never => fail(400, msg, 'INVALID')
 
 // ---- sign-in (SecurityConfig) ----
 
-const systemOf = (role: Role) => (role === 'ACH_RECV_OPS' ? 'ACH_RCV' : role === 'SYS_ADMIN' ? 'ACH_SYS' : 'ACH_ORIG')
+const systemOf = (role: Role) => (role === 'ACH_RECV' ? 'ACH_RCV' : role === 'ADMIN' ? 'ACH_SYS' : 'ACH_ORIG')
 
 export async function demoLogin(username: string, password: string): Promise<void> {
   const user = USERS[username]
@@ -400,34 +408,34 @@ function route(s: State, method: string, path: string, body: Body): unknown {
   const role = USERS[s.user].role
   const denied = () => fail(403, "You don't have permission to do this.")
 
-  if (path === '/me') return { username: s.user, roles: [role], mfaVerified: s.mfaVerified, memberNo: role === 'MEMBER' ? MEMBER_NO : null }
+  if (path === '/me') return { username: s.user, roles: [role], permissions: PERMISSIONS[role], mfaVerified: s.mfaVerified, memberNo: role === 'MEMBER' ? MEMBER_NO : null }
 
   if (path.startsWith('/v1/admin/logs')) {
-    if (role !== 'SYS_ADMIN') denied()
+    if (role !== 'ADMIN') denied()
     return logs(s, path)
   }
   if (path.startsWith('/params')) {
-    if (role !== 'SYS_ADMIN') denied()
+    if (role !== 'ADMIN') denied()
     return params(s, method, path, body)
   }
   if (path.startsWith('/ach-business-rules')) {
-    if (role !== 'SYS_ADMIN') denied()
+    if (role !== 'ADMIN') denied()
     return businessRules(s, method, path, body)
   }
   if (path.startsWith('/v1/ach/origination/transactions')) {
-    if (role !== 'ACH_ORIG_OPS') denied()
+    if (role !== 'ACH_ORIG') denied()
     return originationTransactions(s, path.slice('/v1/ach/origination/transactions'.length))
   }
   if (path.startsWith('/eod')) {
-    if (role !== 'ACH_ORIG_OPS') denied()
+    if (role !== 'ACH_ORIG') denied()
     return eod(s, method, path)
   }
   if (path.startsWith('/v1/ach/processing/')) {
-    if (role !== 'ACH_ORIG_OPS') denied()
+    if (role !== 'ACH_ORIG') denied()
     return processing(s, method, path.slice('/v1/ach/processing'.length), body)
   }
   if (path.startsWith('/v1/ach/receiving')) {
-    if (role !== 'ACH_RECV_OPS') denied()
+    if (role !== 'ACH_RECV') denied()
     return receiving(s, method, path.slice('/v1/ach/receiving'.length), body)
   }
   if (path.startsWith('/v1/compliance/ofac/')) {
@@ -438,7 +446,7 @@ function route(s: State, method: string, path: string, body: Body): unknown {
   }
   if (path.startsWith('/v1/ach/back-office/')) {
     const key = path.slice('/v1/ach/back-office/'.length)
-    if (role !== (key.startsWith('origination/') ? 'ACH_ORIG_OPS' : 'ACH_RECV_OPS')) denied()
+    if (role !== (key.startsWith('origination/') ? 'ACH_ORIG' : 'ACH_RECV')) denied()
     return BACK_OFFICE[key as keyof typeof BACK_OFFICE]
   }
   if (role !== 'MEMBER') denied()

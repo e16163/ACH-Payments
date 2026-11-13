@@ -4,7 +4,6 @@ import java.security.Principal;
 import java.util.List;
 import java.util.Map;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -16,6 +15,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.achpayments.common.MemberNumbers;
+
 /**
  * External Bank Accounts, as Ba's ach-origination-system.yaml defines them. Only members who passed MFA get here
  * (SecurityConfig), and {@code holderId} must be the signed-in member's own number.
@@ -24,22 +25,19 @@ import org.springframework.web.bind.annotation.RestController;
 public class ExternalAccountController {
 
     private final TransferService transfers;
-    private final String memberUsername;
-    private final String memberNumber;
+    private final MemberNumbers memberNumbers;
 
-    public ExternalAccountController(TransferService transfers, @Value("${app.member-username}") String memberUsername,
-            @Value("${app.member-number}") String memberNumber) {
+    public ExternalAccountController(TransferService transfers, MemberNumbers memberNumbers) {
         this.transfers = transfers;
-        this.memberUsername = memberUsername;
-        this.memberNumber = memberNumber;
+        this.memberNumbers = memberNumbers;
     }
 
-    /** The demo member's login maps to the design's member number; any other holder is someone else's. */
+    /** Any holder other than the signed-in member's own number is someone else's. */
     private String ownHolder(Principal user, String holderId) {
-        if (!user.getName().equals(memberUsername) || !memberNumber.equals(holderId)) {
+        if (!memberNumbers.of(user).filter(holderId::equals).isPresent()) {
             throw new AccessDeniedException("Holder " + holderId + " isn't " + user.getName());
         }
-        return memberNumber;
+        return holderId;
     }
 
     @GetMapping("/api/v1/holders/{holderId}/external-accounts")

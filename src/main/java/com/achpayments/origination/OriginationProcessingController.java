@@ -33,7 +33,7 @@ import tools.jackson.databind.annotation.JsonNaming;
 
 /**
  * Ba's blueprint, "ACH Origination Processing & Gateway API Specification" section II, with Ba's paths and snake_case
- * fields. Compliance paths are for ROLE_COMPLIANCE, the rest for ROLE_ACH_ORIG_OPS (SecurityConfig). Each step works on
+ * fields. Compliance paths need OFAC_REVIEW_UI, the rest ACH_ORIG_PROCESS (SecurityConfig). Each step works on
  * a saved transfer named by transfer_id; the window runs the same steps in order.
  */
 @RestController

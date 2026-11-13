@@ -2,21 +2,35 @@ package com.achpayments.common;
 
 import java.io.IOException;
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
+import org.springframework.ldap.core.support.LdapContextSource;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.ldap.DefaultSpringSecurityContextSource;
+import org.springframework.security.ldap.SpringSecurityLdapTemplate;
+import org.springframework.security.ldap.authentication.BindAuthenticator;
+import org.springframework.security.ldap.authentication.LdapAuthenticationProvider;
+import org.springframework.security.ldap.search.FilterBasedLdapUserSearch;
+import org.springframework.security.ldap.userdetails.InetOrgPersonContextMapper;
+import org.springframework.security.ldap.userdetails.LdapAuthoritiesPopulator;
 import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -26,32 +40,50 @@ import org.springframework.security.web.csrf.CsrfException;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * Demo login (docs/USE-CASES.md P1, T7): the app's own sign-in page (POST /api/login, POST /api/logout) for an
- * admin, the back-office logins (ROLE_ACH_ORIG_OPS, ROLE_ACH_RECV_OPS, ROLE_COMPLIANCE) and a member, whose passwords come from environment variables. HTTP Basic still works for
- * scripts and tests, but a 401 never sends the browser's login popup. Members also pass a simulated MFA step.
- * Real users come in step 16.
+ * Sign-in (docs/LDAP-PLAN.md): users, roles and permissions come from the LDAP server, with the env-var demo logins
+ * (docs/USE-CASES.md P1, T7) as a fallback. Each URL is checked against one of Ba's permissions, not a role.
+ * The app's own sign-in page posts to /api/login and /api/logout. HTTP Basic still works for scripts and tests,
+ * but a 401 never sends the browser's login popup. Members also pass a simulated MFA step.
  */
 @Configuration
 public class SecurityConfig {
 
+    /** Ba's roles and their permissions, as in ldap/seed.ldif, for the fallback logins. LdapLoginTest checks they match. */
+    static final Map<String, List<String>> PERMISSIONS = Map.of(
+            "MEMBER", List.of("ACH_MEMBER_UI"),
+            "ACH_ORIG", List.of("ACH_ORIG_Reversal_UI", "ACH_ORIG_Return_UI", "ACH_ORIG_Resubmision_UI", "ACH_ORIG_PROCESS"),
+            "ACH_RECV", List.of("ACH_RECV_Reversal_UI", "ACH_RECV_Return_UI", "ACH_RECV_Resubmision_UI", "ACH_RECV_PROCESS"),
+            "ADMIN", List.of("ACH_BUSINESS_RULES", "SYSTEM_LOGS", "SYSTEM_CONFIG", "OPEN_BANKING_API", "ACH_PAYMENTS_API"),
+            "COMPLIANCE", List.of("OFAC_REVIEW_UI"));
+
+    private static final String ORIG_BO = "/api/v1/ach/back-office/origination/";
+    private static final String RECV_BO = "/api/v1/ach/back-office/receiving/";
+
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http, AccessDeniedHandler deniedHandler, AppLogRepository appLog,
-            InMemoryUserDetailsManager users, FailedSignInLog failedSignIns) throws Exception {
+            AuthenticationManager authentication, InMemoryUserDetailsManager users, LdapContextSource ldap,
+            FailedSignInLog failedSignIns) throws Exception {
         http
+                .authenticationManager(authentication)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/health").permitAll()
-                        .requestMatchers("/api/params/**", "/api/ach-business-rules/**", "/api/v1/admin/**").hasRole("SYS_ADMIN")
-                        .requestMatchers("/api/eod/**").hasRole("ACH_ORIG_OPS")
-                        .requestMatchers("/api/v1/ach/back-office/origination/**").hasRole("ACH_ORIG_OPS")
-                        .requestMatchers("/api/v1/ach/back-office/receiving/**").hasRole("ACH_RECV_OPS")
+                        .requestMatchers("/api/params/**").hasAuthority("SYSTEM_CONFIG")
+                        .requestMatchers("/api/ach-business-rules/**").hasAuthority("ACH_BUSINESS_RULES")
+                        .requestMatchers("/api/v1/admin/logs/**").hasAuthority("SYSTEM_LOGS")
+                        .requestMatchers("/api/eod/**").hasAuthority("ACH_ORIG_PROCESS")
+                        .requestMatchers(ORIG_BO + "returns", ORIG_BO + "return-actions").hasAuthority("ACH_ORIG_Return_UI")
+                        .requestMatchers(ORIG_BO + "reversals").hasAuthority("ACH_ORIG_Reversal_UI")
+                        .requestMatchers(ORIG_BO + "resubmissions").hasAuthority("ACH_ORIG_Resubmision_UI")
+                        .requestMatchers(ORIG_BO + "**").hasAuthority("ACH_ORIG_PROCESS") // the NOC screen
+                        .requestMatchers(RECV_BO + "returns", RECV_BO + "return-requests").hasAuthority("ACH_RECV_Return_UI")
+                        .requestMatchers(RECV_BO + "reversals").hasAuthority("ACH_RECV_Reversal_UI")
+                        .requestMatchers(RECV_BO + "**").hasAuthority("ACH_RECV_PROCESS") // the NOC screen
                         // Ba's blueprint, ACH Origination Processing: compliance resolves OFAC hits, origination ops run the rest
-                        .requestMatchers("/api/v1/compliance/**").hasRole("COMPLIANCE")
+                        .requestMatchers("/api/v1/compliance/**").hasAuthority("OFAC_REVIEW_UI")
                         .requestMatchers("/api/v1/ach/origination/**", "/api/v1/ach/processing/**", "/api/v1/ach/limits/**",
-                                "/api/v1/ach/transfers/**", "/api/v1/accounts/**").hasRole("ACH_ORIG_OPS")
-                        // UC-ACH-RCV-02: ACH_RECV_OPS or SUPPORT. Only operations receive files.
-                        .requestMatchers(HttpMethod.POST, "/api/v1/ach/receiving/**").hasRole("ACH_RECV_OPS")
-                        .requestMatchers("/api/v1/ach/receiving/**").hasAnyRole("ACH_RECV_OPS", "SUPPORT")
-                        .requestMatchers("/api/member/mfa/**").hasRole("MEMBER")
+                                "/api/v1/ach/transfers/**", "/api/v1/accounts/**").hasAuthority("ACH_ORIG_PROCESS")
+                        .requestMatchers("/api/v1/ach/receiving/**").hasAuthority("ACH_RECV_PROCESS")
+                        .requestMatchers("/api/member/mfa/**").hasAuthority("ACH_MEMBER_UI")
                         // UC-ACH-ORG-01 precondition: the member is logged in AND has passed MFA
                         .requestMatchers("/api/member/**", "/api/transfers/**", "/api/routing/**", "/api/v1/holders/**").access(MEMBER_WITH_MFA)
                         .requestMatchers("/api/**").authenticated()
@@ -65,7 +97,7 @@ public class SecurityConfig {
                         .failureHandler((request, response, e) -> {
                             // Only a real login name: someone may have typed their password in that box
                             String name = request.getParameter("username");
-                            failedSignIns.record(name != null && users.userExists(name) ? name : "(unknown)");
+                            failedSignIns.record(name != null && (users.userExists(name) || ldapUserExists(ldap, name)) ? name : "(unknown)");
                             json(response, 401, "Incorrect username or password.");
                         }))
                 .logout(logout -> logout.logoutUrl("/api/logout")
@@ -86,9 +118,18 @@ public class SecurityConfig {
 
     private static String systemOf(Authentication auth) {
         List<String> roles = auth.getAuthorities().stream().map(GrantedAuthority::getAuthority).toList();
-        if (roles.contains("ROLE_ACH_RECV_OPS")) return AppLogRepository.ACH_RCV;
-        if (roles.contains("ROLE_ACH_ORIG_OPS") || roles.contains("ROLE_MEMBER") || roles.contains("ROLE_COMPLIANCE")) return AppLogRepository.ACH_ORIG;
+        if (roles.contains("ROLE_ACH_RECV")) return AppLogRepository.ACH_RCV;
+        if (roles.contains("ROLE_ACH_ORIG") || roles.contains("ROLE_MEMBER") || roles.contains("ROLE_COMPLIANCE")) return AppLogRepository.ACH_ORIG;
         return AppLogRepository.ACH_SYS;
+    }
+
+    private static boolean ldapUserExists(LdapContextSource ldap, String name) {
+        try {
+            new FilterBasedLdapUserSearch("ou=people", "(uid={0})", ldap).searchForUser(name);
+            return true;
+        } catch (RuntimeException e) { // not found, or LDAP is down: log the attempt without the name
+            return false;
+        }
     }
 
     /**
@@ -131,18 +172,62 @@ public class SecurityConfig {
             @Value("${app.comp-password}") String compPassword,
             @Value("${app.member-username}") String memberUsername,
             @Value("${app.member-password}") String memberPassword) {
-        PasswordEncoder encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
         return new InMemoryUserDetailsManager(
-                User.withUsername(adminUsername).password(encoder.encode(adminPassword)).roles("SYS_ADMIN").build(),
-                User.withUsername(origUsername).password(encoder.encode(origPassword)).roles("ACH_ORIG_OPS").build(),
-                User.withUsername(recvUsername).password(encoder.encode(recvPassword)).roles("ACH_RECV_OPS").build(),
-                User.withUsername(compUsername).password(encoder.encode(compPassword)).roles("COMPLIANCE").build(),
-                User.withUsername(memberUsername).password(encoder.encode(memberPassword)).roles("MEMBER").build());
+                fallbackUser(adminUsername, adminPassword, "ADMIN"),
+                fallbackUser(origUsername, origPassword, "ACH_ORIG"),
+                fallbackUser(recvUsername, recvPassword, "ACH_RECV"),
+                fallbackUser(compUsername, compPassword, "COMPLIANCE"),
+                fallbackUser(memberUsername, memberPassword, "MEMBER"));
+    }
+
+    private static UserDetails fallbackUser(String name, String password, String role) {
+        List<String> authorities = new ArrayList<>(PERMISSIONS.get(role));
+        authorities.add("ROLE_" + role);
+        return User.withUsername(name).password(ENCODER.encode(password)).authorities(authorities.toArray(String[]::new)).build();
+    }
+
+    private static final PasswordEncoder ENCODER = PasswordEncoderFactories.createDelegatingPasswordEncoder();
+
+    /** The LDAP server and base DN, e.g. ldap://localhost:1389/dc=achpayments,dc=local (ldap/setup.sh). */
+    @Bean
+    DefaultSpringSecurityContextSource ldap(@Value("${app.ldap.url}") String url) {
+        return new DefaultSpringSecurityContextSource(url);
+    }
+
+    /**
+     * The fallback logins first: a name they don't know (or a wrong password) moves on to LDAP. Checking LDAP
+     * first would lock everyone out while LDAP is down, since a connection error ends the sign-in.
+     */
+    @Bean
+    AuthenticationManager authenticationManager(InMemoryUserDetailsManager users, DefaultSpringSecurityContextSource ldap) {
+        DaoAuthenticationProvider fallback = new DaoAuthenticationProvider(users);
+        fallback.setPasswordEncoder(ENCODER);
+        BindAuthenticator bind = new BindAuthenticator(ldap);
+        bind.setUserDnPatterns(new String[] {"uid={0},ou=people"});
+        LdapAuthenticationProvider directory = new LdapAuthenticationProvider(bind, rolesAndPermissions(ldap));
+        directory.setUserDetailsContextMapper(new InetOrgPersonContextMapper()); // keeps employeeNumber, the member number
+        return new ProviderManager(fallback, directory);
+    }
+
+    /** The user's role groups (ROLE_x), then each role's permission groups. A user may have several roles. */
+    private static LdapAuthoritiesPopulator rolesAndPermissions(DefaultSpringSecurityContextSource ldap) {
+        SpringSecurityLdapTemplate template = new SpringSecurityLdapTemplate(ldap);
+        return (user, username) -> {
+            List<GrantedAuthority> authorities = new ArrayList<>();
+            for (Map<String, List<String>> role : template.searchForMultipleAttributeValues("ou=roles", "(member={0})",
+                    new Object[] {user.getNameInNamespace()}, new String[] {"cn"})) {
+                authorities.add(new SimpleGrantedAuthority("ROLE_" + role.get("cn").get(0)));
+                template.searchForSingleAttributeValues("ou=permissions", "(member={0})",
+                        new Object[] {role.get(SpringSecurityLdapTemplate.DN_KEY).get(0)}, "cn")
+                        .forEach(permission -> authorities.add(new SimpleGrantedAuthority(permission)));
+            }
+            return authorities;
+        };
     }
 
     private static final AuthorizationManager<RequestAuthorizationContext> MEMBER_WITH_MFA = (authentication, context) -> {
         boolean member = authentication.get().getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_MEMBER"));
+                .anyMatch(a -> a.getAuthority().equals("ACH_MEMBER_UI"));
         return new AuthorizationDecision(member && MfaService.isVerified(context.getRequest()));
     };
 }

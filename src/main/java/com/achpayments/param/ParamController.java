@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Parameter UI API (UC-SYS-PARAM-01). Only ROLE_SYS_ADMIN gets here; see SecurityConfig. */
+/** Parameter UI API (UC-SYS-PARAM-01). Only the SYSTEM_CONFIG permission gets here; see SecurityConfig. */
 @RestController
 @RequestMapping("/api/params")
 public class ParamController {

@@ -26,7 +26,7 @@ import tools.jackson.databind.annotation.JsonNaming;
 
 /**
  * Ba's blueprint, "ACH Receiving Processing System — API Specification" section II: one endpoint per step, with Ba's
- * snake_case fields. POST /api/v1/ach/receiving/** is for ROLE_ACH_RECV_OPS (SecurityConfig).
+ * snake_case fields. /api/v1/ach/receiving/** needs the ACH_RECV_PROCESS permission (SecurityConfig).
  */
 @RestController
 @RequestMapping("/api/v1/ach/receiving")
