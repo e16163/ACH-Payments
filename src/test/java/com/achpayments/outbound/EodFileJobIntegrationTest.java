@@ -180,7 +180,7 @@ class EodFileJobIntegrationTest {
         assertEquals(serNo.replace("-", ""), line.individualId());
         assertEquals("JANE SMITH", line.individualName());
         assertEquals(entry.get("traceNo"), line.traceNumber());
-        assertEquals("DEMO CU", sent.batches().get(0).header().companyName());
+        assertEquals("DEMO COMM BANK", sent.batches().get(0).header().companyName());
         assertEquals("011000015", sent.header().immediateDestination());
     }
 

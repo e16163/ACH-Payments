@@ -166,8 +166,13 @@ main {
   font-size: 13px;
   color: var(--mute);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+.statusbar .credit {
+  margin-left: auto;
 }
 
 .dot {

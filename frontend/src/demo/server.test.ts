@@ -73,7 +73,7 @@ describe('demo sign-in', () => {
   it('keeps admins out of member screens', async () => {
     await demoLogin('admin', 'admin123')
     expect((await error(demoApi('/transfers/dates'))).status).toBe(403)
-    expect(await demoApi<unknown[]>('/params/systems')).toHaveLength(9)
+    expect(await demoApi<unknown[]>('/params/systems')).toHaveLength(11)
   })
 })
 

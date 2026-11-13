@@ -75,9 +75,11 @@ class ParamSecurityTest {
     void adminGetsTheDesignAppList() throws Exception {
         mvc.perform(get("/api/params/systems").with(httpBasic("admin", "admin-pw")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(9))
+                .andExpect(jsonPath("$.length()").value(11))
                 .andExpect(jsonPath("$[0].systemName").value("ACH_ORIG"))
-                .andExpect(jsonPath("$[0].appName").value("ACH Origination UI"));
+                .andExpect(jsonPath("$[0].appName").value("ACH Origination UI"))
+                .andExpect(jsonPath("$[1].systemName").value("ACH_ORIG_PROCESS"))
+                .andExpect(jsonPath("$[7].systemName").value("ACH_RECV_PROCESS"));
     }
 
     @Test

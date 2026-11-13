@@ -40,11 +40,13 @@ Spec: [Use Case Parameter UI.docx](ACH%20Payments%20System%20Design/Use%20Case%2
   | `systemName` | App |
   | --- | --- |
   | `ACH_ORIG` | ACH Origination UI |
+  | `ACH_ORIG_PROCESS` | ACH Origination Processing (Ba, 2026-11-12) |
   | `ACH_ORIG_RETURN` | ACH Origination Return UI |
   | `ACH_ORIG_REVERSAL` | ACH Origination Reversal UI |
   | `ACH_ORIG_RESUB` | ACH Origination Resubmission UI |
   | `ACH_ORIG_NOC` | ACH Origination NOC UI |
   | `ACH_RCV` | ACH Receiving UI |
+  | `ACH_RECV_PROCESS` | ACH Receiving Processing (Ba, 2026-11-12) |
   | `ACH_RCV_RETURN` | ACH Receiving Return UI |
   | `ACH_RCV_REVERSAL` | ACH Receiving Reversal UI |
   | `ACH_RCV_NOC` | ACH Receiving NOC UI |
@@ -202,7 +204,7 @@ The Transfer UI is finished when all of these hold:
   - WEB credit (T1), tran code `22` for checking, `32` for savings.
   - Company ID `9000000001`, `odfiID` `12345678`, immediate origin `123456780`.
   - Immediate destination is a new parameter, `ACH_ORIG/FED_IMMEDIATE_DEST` = `011000015`.
-  - Company name is a new parameter, `ACH_ORIG/ORIG_COMPANY_NAME` = `DEMO CU`, because "DEMO CREDIT UNION" is 17 characters and the field holds 16.
+  - Company name is a new parameter, `ACH_ORIG/ORIG_COMPANY_NAME` = `DEMO CU`, because "DEMO CREDIT UNION" is 17 characters and the field holds 16. (Since V21 the bank is Demo Community Bank: `DEMO COMM BANK`, and the File Header origin name is `DEMO COMMUNITY BANK`.)
   - The fee isn't in the file. `settlementDt` stays `NULL`, because the Fed sets it.
 - **E8. IDs.** `fileID` follows the sample, `FILE_yyyyMMdd_nn`, with `fileIDModifier` A, B, C… per day. `processID` is `EOD-yyyyMMddHHmmss-A<attempt>`, which keeps the `ACHOrigFedAction` key unique across retries (DB-MODEL F11). New `Action` rows sit next to 401 `FED_SEND`: `FILE_QUEUED`, `FED_SEND_FAILED`.
 - **E9. Status after sending.** The designer (2026-11-05): the batch updates the transfer to **Processed**. So `ACHOriginatorTransfer.processStatus` goes `PENDING_BATCH` → `PROCESSED` when the transfer goes in a file, and delivery is tracked by `fedStatus` on the file and its entries: `QUEUED` → `SENT` or `ERROR`.

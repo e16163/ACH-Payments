@@ -134,8 +134,8 @@ export default function App() {
       )}
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true">DCU</span>
-          <span className="brand-name">Demo Credit Union</span>
+          <span className="brand-mark" aria-hidden="true">DCB</span>
+          <span className="brand-name">Demo Community Bank - 2026</span>
           <span className="brand-product">{isMember ? 'Online Banking' : 'ACH Payments'}</span>
         </div>
         {me && (
@@ -212,6 +212,7 @@ export default function App() {
             {health?.error && <span className="status-error"> — {health.error}</span>}
           </>
         )}
+        <span className="credit">Developed by Ben Doan, Georgia Tech Class of 2029</span>
       </footer>
     </div>
   )

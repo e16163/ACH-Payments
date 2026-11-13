@@ -18,7 +18,7 @@ A walk-through of what's built from your documents, and what isn't yet.
 
 Use the online demo to click through. Use the full app to see the rows land in your tables (the last section).
 
-The bank is a made-up **Demo Credit Union**, not Navy Federal. The member is your sample member **M10982347 (John Doe)**, with your seed accounts: Primary Checking ••••1920 ($8,500) and Savings ••••1946 ($15,000).
+The bank is a made-up **Demo Community Bank**, not Navy Federal. The member is your sample member **M10982347 (John Doe)**, with your seed accounts: Primary Checking ••••1920 ($8,500) and Savings ••••1946 ($15,000).
 
 ---
 

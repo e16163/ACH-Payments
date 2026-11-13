@@ -254,7 +254,7 @@ export default function ExternalTransferPage({ memberNo }: { memberNo: string })
             <p>
               External transfers cost {money(preview.fee)}. The total is held from your available balance today. Funds
               should arrive at the other bank by the estimated arrival date. You can't cancel a transfer after it's been
-              sent to the Federal Reserve. By confirming, you authorize Demo Credit Union to send this ACH credit to the
+              sent to the Federal Reserve. By confirming, you authorize Demo Community Bank to send this ACH credit to the
               account above{frequency !== 'ONETIME' ? ' on the schedule shown' : ''}.
             </p>
             <label className="checkbox">

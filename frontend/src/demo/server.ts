@@ -24,11 +24,13 @@ const USERS: Record<string, { password: string; role: Role }> = {
 
 const APPS: [string, string][] = [
   ['ACH_ORIG', 'ACH Origination UI'],
+  ['ACH_ORIG_PROCESS', 'ACH Origination Processing'],
   ['ACH_ORIG_RETURN', 'ACH Origination Return UI'],
   ['ACH_ORIG_REVERSAL', 'ACH Origination Reversal UI'],
   ['ACH_ORIG_RESUB', 'ACH Origination Resubmission UI'],
   ['ACH_ORIG_NOC', 'ACH Origination NOC UI'],
   ['ACH_RCV', 'ACH Receiving UI'],
+  ['ACH_RECV_PROCESS', 'ACH Receiving Processing'],
   ['ACH_RCV_RETURN', 'ACH Receiving Return UI'],
   ['ACH_RCV_REVERSAL', 'ACH Receiving Reversal UI'],
   ['ACH_RCV_NOC', 'ACH Receiving NOC UI'],
@@ -41,7 +43,7 @@ const BANKS: Record<string, string> = {
   '026009593': 'Bank of America, N.A.',
   '051000033': "Sample Bank (from the design samples)",
   '121000248': 'Wells Fargo Bank, N.A.',
-  '123456780': 'Demo Credit Union',
+  '123456780': 'Demo Community Bank',
 }
 const OFAC = ['BLOCKED DEMO ENTITY', 'BLOCKED TEST PERSON', 'OFAC TEST BLOCKED PERSON', 'SANCTIONED TEST TRADING LLC']
 const HOLIDAYS = [
@@ -147,7 +149,7 @@ function freshState(): State {
       { systemName: 'ACH_ORIG', paramName: 'FED_FILE_CUTOFF_TIME', paramDesc: 'Cutoff time for building daily Fed file (EST)', paramRawType: 'STRING', paramRawValue: '17:00:00', lastModTm: '2026-11-03T19:15:14', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'EXTERNAL_XFER_FEE', paramDesc: 'Fee for a member external ACH transfer (UC-ACH-ORG-01)', paramRawType: 'DECIMAL', paramRawValue: '0.00', lastModTm: '2026-11-03T21:21:05', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'FED_IMMEDIATE_DEST', paramDesc: 'Routing number of the Federal Reserve office that receives our files', paramRawType: 'STRING', paramRawValue: '011000015', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
-      { systemName: 'ACH_ORIG', paramName: 'ORIG_COMPANY_NAME', paramDesc: 'Company name in NACHA batch headers (16 characters at most)', paramRawType: 'STRING', paramRawValue: 'DEMO CU', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
+      { systemName: 'ACH_ORIG', paramName: 'ORIG_COMPANY_NAME', paramDesc: 'Company name in NACHA batch headers (16 characters at most)', paramRawType: 'STRING', paramRawValue: 'DEMO COMM BANK', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_RCV', paramName: 'CORE_POSTING_TIME', paramDesc: 'Time the end-of-day core posting file is generated (Eastern)', paramRawType: 'STRING', paramRawValue: '19:00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_RCV', paramName: 'MAX_ENTRY_AMOUNT', paramDesc: 'A received entry above this amount waits for manual review', paramRawType: 'DECIMAL', paramRawValue: '25000.00', lastModTm: '2026-11-08T12:00:00', lastModBy: 'SYS_ADMIN' },
       { systemName: 'ACH_ORIG', paramName: 'FED_SIM_FAIL_ATTEMPTS', paramDesc: 'Fed simulator: how many send attempts fail, to demo EX-02 (0 = none)', paramRawType: 'INTEGER', paramRawValue: '0', lastModTm: '2026-11-05T12:00:00', lastModBy: 'SYS_ADMIN' },
@@ -1083,7 +1085,7 @@ function send(s: State, businessDate: string, scheduleId: number) {
   const seq = s.files.filter((f) => f.fileHeaderDt === today).length + 1
   const fileID = `FILE_${today.replace(/-/g, '')}_${pad(seq, 2)}`
   const content = buildNachaFile({
-    immediateDestination: param(s, 'FED_IMMEDIATE_DEST'), immediateOrigin: '123456780', originName: 'DEMO CREDIT UNION',
+    immediateDestination: param(s, 'FED_IMMEDIATE_DEST'), immediateOrigin: '123456780', originName: 'DEMO COMMUNITY BANK',
     fileCreationDate: today.replace(/-/g, '').slice(2), fileCreationTime: pad(now.getHours()) + pad(now.getMinutes()),
     fileIdModifier: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'[seq - 1], batches,
   })

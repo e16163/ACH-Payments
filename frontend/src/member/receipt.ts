@@ -11,7 +11,7 @@ export function statusLabel(r: Pick<Receipt, 'ofacStatus' | 'processStatus'>): s
 /** The text of the downloadable receipt (UC-ACH-ORG-01 step 7). Account numbers are masked to the last 4. */
 export function receiptText(r: Receipt): string {
   const lines = [
-    'Demo Credit Union',
+    'Demo Community Bank',
     'External ACH Transfer Receipt',
     '',
     `Reference number:   ${r.transferSerNo}`,

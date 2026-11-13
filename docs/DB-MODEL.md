@@ -130,6 +130,12 @@ The files and batches the screen lists are the design's own `ACHOrigFile`, `ACHO
 
 There's no new column for the leftover-to-6 AM rule. The 6 AM window sets the existing `ACHOriginatorTransfer.scheduleID` on transfers left `READY_TO_POST` from an earlier day. `ACHOrigFile.scheduleID` is no longer NULL for new files, because the 5 PM file goes away.
 
+### V21 (2026-11-12): Demo Community Bank
+
+| Change | Marked | Why |
+| --- | --- | --- |
+| `ACHOriginator` 9000000001 `name` → `DEMO COMMUNITY BANK`; `ABADirectory` 123456780 → `Demo Community Bank`; `ACH_ORIG/ORIG_COMPANY_NAME` → `DEMO COMM BANK` | Data only | Ba renamed the bank. NACHA widths: origin name 23, company name 16. Rows an admin already changed are left alone. |
+
 ---
 
 ## 1. The design's tables by component

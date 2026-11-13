@@ -18,7 +18,7 @@ All tokens live in `frontend/src/app.css` (`:root`). Use them; don't hard-code n
 x.ai's palette has no error or success colours. These two are additions, because banking forms need them.
 
 ## Layout
-- A 64 px header with the round DCU mark, "Demo Credit Union", and the product name in muted text.
+- A 64 px header with the round DCB mark, "Demo Community Bank - 2026", and the product name in muted text.
 - A menu bar below it. Items are pills, and the current page has a white outline.
 - Content is centred, max 1200 px wide, with 32 px side padding.
 - A small muted status bar at the bottom shows the database health.
