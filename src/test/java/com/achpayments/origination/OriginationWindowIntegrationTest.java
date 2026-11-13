@@ -257,6 +257,8 @@ class OriginationWindowIntegrationTest {
         assertEquals(Map.of("processStatus", "REJECTED", "ofacStatus", "BLOCKED", "memoStatus", "RELEASED"), transfer(serNo));
         assertTrue(eod.status().leftOut().stream().anyMatch(i -> i.transferSerNo().equals(serNo) && i.reason().equals("OFAC blocked")));
         assertEquals(new BigDecimal("20000.00"), available());
+        assertEquals(new BigDecimal("20000.00"), jdbc.queryForObject("SELECT availBalAfter FROM SimCoreAcctTran WHERE tranRef = ? "
+                + "AND creditFlag = 1 AND tranDesc = 'Hold released, ACH transfer to " + LISTED + " rejected'", BigDecimal.class, serNo));
     }
 
     @Test

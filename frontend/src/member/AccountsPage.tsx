@@ -32,8 +32,6 @@ export default function AccountsPage() {
       .catch((e) => setError(String(e.message ?? e)))
   }, [])
 
-  useEffect(() => setPage(1), [acctNo])
-
   useEffect(() => {
     if (!acctNo) return
     api<TranPage>(`/member/accounts/${encodeURIComponent(acctNo)}/transactions?page=${page}&limit=${LIMIT}`)
@@ -51,7 +49,7 @@ export default function AccountsPage() {
       <div className="toolbar">
         <label>
           Account{' '}
-          <select value={acctNo} onChange={(e) => setAcctNo(e.target.value)}>
+          <select value={acctNo} onChange={(e) => { setAcctNo(e.target.value); setPage(1) }}>
             {accounts?.map((x) => <option key={x.acctNo} value={x.acctNo}>{accountLabel(x)}</option>)}
           </select>
         </label>

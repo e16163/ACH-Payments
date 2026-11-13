@@ -23,12 +23,9 @@ public class MemoPostingEngine {
 
     public enum Status { POSTED, NSF, REVIEW, DEFERRED, INELIGIBLE }
 
-    /** desc is the line on the member's account history; null shows the source and reference. */
+    /** desc is the line on the member's account history (SimCoreAcctTran). */
     public record Request(Source source, String tranRef, String acctNo, boolean credit, BigDecimal amount,
             Screening screening, String desc) {
-        public Request(Source source, String tranRef, String acctNo, boolean credit, BigDecimal amount, Screening screening) {
-            this(source, tranRef, acctNo, credit, amount, screening, null);
-        }
     }
 
     public record Result(Status status, String reason) {
@@ -54,9 +51,7 @@ public class MemoPostingEngine {
         }
         Result result = decideAndApply(r);
         if (result.posted()) {
-            String desc = r.desc() != null ? r.desc()
-                    : (r.source() == Source.ORIG ? "ACH transfer " : r.credit() ? "ACH credit " : "ACH debit ") + r.tranRef();
-            history.record(r.acctNo(), desc, r.credit(), r.amount(), AccountHistory.AVAILABLE,
+            history.record(r.acctNo(), r.desc(), r.credit(), r.amount(), AccountHistory.AVAILABLE,
                     r.source() == Source.ORIG ? "ACH_ORIG" : "ACH_RCV", r.tranRef());
         }
         jdbc.update("INSERT INTO ACHMemoPost (tranSource, tranRef, acctNo, creditFlag, amount, postType, memoStatus, reason) "

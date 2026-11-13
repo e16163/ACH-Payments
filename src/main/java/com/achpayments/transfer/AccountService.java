@@ -98,8 +98,11 @@ public class AccountService {
         if (debited != 1) {
             throw new TransferRejected(Kind.FUNDS, "Your available balance isn't enough for this transfer.");
         }
-        jdbc.update("UPDATE SimCoreAccount SET availBal = availBal + ?, ledgerBal = ledgerBal + ? WHERE acctNo = ? AND memberNo = ?",
-                amount, amount, to.acctNo(), memberNo);
+        int credited = jdbc.update("UPDATE SimCoreAccount SET availBal = availBal + ?, ledgerBal = ledgerBal + ? "
+                + "WHERE acctNo = ? AND memberNo = ? AND acctStatus = 'ACTIVE'", amount, amount, to.acctNo(), memberNo);
+        if (credited != 1) { // frozen or closed since the check: the exception rolls back the debit
+            throw invalid("This account can't receive transfers right now.");
+        }
 
         String id = "INT-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase(Locale.ROOT);
         String note = memo.isEmpty() ? "" : " - " + memo;

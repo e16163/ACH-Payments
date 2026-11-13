@@ -64,7 +64,7 @@ class MemoPostingEngineIntegrationTest {
     }
 
     private Status post(Source source, boolean credit, String amount, Screening screening) {
-        return engine.post(new Request(source, "T1", ACCT, credit, new BigDecimal(amount), screening)).status();
+        return engine.post(new Request(source, "T1", ACCT, credit, new BigDecimal(amount), screening, "Test entry")).status();
     }
 
     @Test
